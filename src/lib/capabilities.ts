@@ -2,7 +2,7 @@
  * 浏览器能力探测。
  *
  * 这个站有一批"测不准"的情况是平台限制造成的,不是 bug:
- * - 未开启跨域隔离时计时器被钳到 100µs,8000Hz(间隔 125µs)根本分辨不出来
+ * - 未开启跨域隔离时时间戳被钳到 100µs,逐条间隔失去意义(见下面 `COARSE_RESOLUTION_MS`)
  * - Firefox 把合并事件的 timestamp 设为 0,拿不到间隔分布
  * - 触屏没有左右键和滚轮
  *
@@ -33,18 +33,29 @@ export interface Capabilities {
   crossOriginIsolated: boolean;
   /** 计时精度的人类可读描述 */
   timerResolution: string;
-  /**
-   * 计时精度是否足以分辨 8000Hz。
-   * 8000Hz 的间隔是 125µs,100µs 的量化精度下只会被测成 100 或 200,分辨不了。
-   */
-  canMeasureHighRates: boolean;
   /** 是否有精细指针设备(真鼠标)。触屏为 false */
   finePointer: boolean;
   /** 面向用户的告警,按严重程度排列 */
   warnings: string[];
 }
 
-/** 理论上,未隔离的上下文计时器被钳到 100µs。 */
+/**
+ * 未隔离的上下文里,`DOMHighResTimeStamp` 被钳到 100µs(隔离后放开到 5µs)。
+ *
+ * 这是 Chrome 官方的口径(Chrome 64 起为缓解 Spectre 而降精度,Chrome 91 起
+ * 统一到 100µs,并明确"开启跨域隔离可放宽到 5µs")。**实测吻合**:本地
+ * `astro dev`(配了 `server.headers`)是 5µs;把 service worker 摘掉模拟
+ * GitHub Pages 的原始状态时,`performance.now()` 与 `event.timeStamp`
+ * 都落在 100µs 网格上。
+ *
+ * 线上 `dist/` 的隔离由 `public/coi-serviceworker.js` 提供,所以这里**多数时候
+ * 不该走到这条告警**;真走到了就说明 service worker 没注册上(隐私模式之类),
+ * 那是诚实的降级,不是故障。
+ *
+ * 受损的**只有逐条间隔**。回报率页的主口径是"报文数 ÷ 时长",量化只作用在
+ * 首尾两个时间戳上,不受这一点限制——所以这里**不再**给"能测到几千 Hz"这种
+ * 门槛,那是拍出来的数,不是量出来的。
+ */
 const COARSE_RESOLUTION_MS = 0.1;
 
 /**
@@ -96,8 +107,12 @@ export function detectCapabilities(): Capabilities {
 
   if (!crossOriginIsolated) {
     warnings.push(
-      `页面未开启跨域隔离,计时精度被限制在 ${COARSE_RESOLUTION_MS * 1000}µs。` +
-        '回报率在 1000Hz 以内仍然可靠,但 2000Hz 及以上无法准确分辨。',
+      // 这条经 showNotice 的 textContent 输出,所以**不能**带 markdown 标记
+      // (和 FAQ 那条同一个坑:星号会原样显示)。
+      `页面未开启跨域隔离,时间戳精度被钳在 ${COARSE_RESOLUTION_MS * 1000}µs(隔离后 5µs)。` +
+        '8000Hz 的报文间隔只有 125µs,和量化台阶同一量级,逐条间隔因此不可用——' +
+        '本页不报抖动和丢包率就是这个原因。回报率用的是「报文数 ÷ 时长」,不受这一条限制;' +
+        '但 4000Hz 以上浏览器派发事件会打折,请把这个数当下限看。',
     );
   }
 
@@ -120,7 +135,6 @@ export function detectCapabilities(): Capabilities {
     secureContext,
     crossOriginIsolated,
     timerResolution: crossOriginIsolated ? '5µs 或更好' : '100µs 或更粗',
-    canMeasureHighRates: crossOriginIsolated,
     finePointer,
     warnings,
   };

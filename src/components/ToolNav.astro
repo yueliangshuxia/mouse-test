@@ -8,17 +8,49 @@ interface Props {
 }
 
 const { current } = Astro.props;
+
+/*
+ * 报头那一条横向菜单。
+ *
+ * **两层结构,不是一个 flex 行** —— 这不是为了好看,是为了让"放不下"这件事
+ * 在 JS 跑起来之前也有一个体面的样子:
+ *
+ * - `__track` 是真正排菜单的地方,`overflow: hidden`。窗口太窄而脚本还没跑时,
+ *   放不下的项被**裁掉**,而不是溢出到报头外面把整页撑宽。
+ * - `__more` 是它的兄弟,带 `hidden`。它是绝对定位的下拉,必须待在 `__track`
+ *   的裁剪范围**之外**,否则面板一展开就被切掉。
+ *
+ * 两者之间的搬运由 `nav-overflow.ts` 负责:量 `__track` 的 `scrollWidth`
+ * 和 `clientWidth`,超了就把尾部的项搬进 `__panel`,并把 `__more` 显出来。
+ */
 ---
 
-<nav class="site-nav" aria-label="工具导航">
-  {
-    READY_TOOLS.map((tool) => (
-      <a
-        href={href(`${tool.slug}/`)}
-        aria-current={current === tool.slug ? 'page' : undefined}
-      >
-        {tool.name}
-      </a>
-    ))
-  }
+<nav class="site-nav" aria-label="工具导航" data-nav>
+  <div class="site-nav__track" data-nav-track>
+    {
+      READY_TOOLS.map((tool) => (
+        <a
+          class="site-nav__item"
+          href={href(`${tool.slug}/`)}
+          title={tool.name}
+          aria-current={current === tool.slug ? 'page' : undefined}
+        >
+          {tool.navLabel}
+        </a>
+      ))
+    }
+  </div>
+
+  <div class="site-nav__more" data-nav-more hidden>
+    <button
+      type="button"
+      class="site-nav__trigger"
+      data-nav-trigger
+      aria-expanded="false"
+      aria-haspopup="true"
+    >
+      更多<span class="site-nav__caret" aria-hidden="true"></span>
+    </button>
+    <div class="site-nav__panel" data-nav-panel></div>
+  </div>
 </nav>

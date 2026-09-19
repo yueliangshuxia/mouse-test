@@ -9,14 +9,13 @@
 
 import { detectCapabilities, type Capabilities } from './capabilities';
 import {
-  isThemePref,
-  resolveTheme,
+  isTheme,
+  systemTheme,
   THEME_COLORS,
-  THEME_DEFAULT,
   THEME_KEY,
   THEME_LABELS,
-  THEME_PREFS,
-  type ThemePref,
+  THEME_ORDER,
+  type Theme,
 } from './theme';
 
 /** `document.getElementById` 的简写。脚本里到处在用,单列一个省得每处都断言。 */
@@ -131,14 +130,20 @@ export function mountCapabilityNotices(host: Element | null): Capabilities {
  * 而在 `pagehide` 里摘掉它是**错的**——页面进 bfcache 时 `pagehide` 照样触发,
  * 用户按返回键把页面恢复回来之后就再没人拦这些默认行为了。
  */
-export function suppressWorkbenchDefaults(): void {
-  function isControl(target: EventTarget | null): boolean {
-    return (
-      target instanceof Element &&
-      target.closest('a, button, select, input, textarea') !== null
-    );
-  }
+function isControl(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element && target.closest('a, button, select, input, textarea') !== null
+  );
+}
 
+/**
+ * `suppressWorkbenchDefaults` 和 `suppressDefaultsWithin` 共用的那一套判据。
+ *
+ * `scope` 给 `null` 表示**全页生效**(工具页要的就是这个);给一个元素表示
+ * **只在"按下点落在这个元素里"时才拦**。除了这一条,两半放行规则、`pressOrigin`
+ * 的赋值时机、只管中键这三件事完全一致 —— 所以只写一份。
+ */
+function installDefaultSuppression(scope: Element | null): void {
   /**
    * 最近一次 `pointerdown` 落在哪个元素上。**只在按下时赋值,不在松开时清**
    * (理由见上面那段事件顺序)。
@@ -154,7 +159,14 @@ export function suppressWorkbenchDefaults(): void {
     true,
   );
 
+  function inScope(): boolean {
+    return scope === null || (pressOrigin !== null && scope.contains(pressOrigin));
+  }
+
   function block(event: Event): void {
+    // 按下那一下不在作用域里 → 这一页的其余部分照常,别越界去管
+    if (!inScope()) return;
+
     // 从控件上按下、且没离开过它 → 放行,那是"在链接/按钮上点右键"的正常操作
     const stayedOnOrigin =
       pressOrigin !== null &&
@@ -182,56 +194,84 @@ export function suppressWorkbenchDefaults(): void {
   window.addEventListener('mousedown', blockMiddle);
 }
 
+export function suppressWorkbenchDefaults(): void {
+  installDefaultSuppression(null);
+}
+
+/**
+ * 同上,但**只在"按下点落在这个元素里"时才拦**。
+ *
+ * 首页要的是这一版,而且**只能用这一版**。首页是一篇正文:十张卡片只是它中间
+ * 的一节,其余全是文字。那里调一次全页版,右键菜单会在整篇文章上被吃掉 ——
+ * 连"复制"都没了。那不是"把工作台摘干净",那是对读者耍横。
+ *
+ * 作用域给到**装置面**而不是整张卡:卡里还有标题链接和读数文字,那些地方右键、
+ * 选中、复制都该照常。按下点落在装置面上才算这次手势是"在测",才拦。
+ *
+ * 越界的半边由两半放行规则自己兜住:从卡片的标题链接上按下、又还在那个链接里
+ * 松开 → `pressOrigin` 是控件且没离开,放行,菜单照弹。
+ */
+export function suppressDefaultsWithin(scope: Element): void {
+  installDefaultSuppression(scope);
+}
+
 // ---------- 外观主题 ----------
 
 /**
- * 读出**存起来的偏好**(`auto` / `light` / `dark`)。
+ * 读出当前该用哪一档主题。
  *
- * 读不到、读成了别的值、或者 localStorage 直接抛异常(隐私模式),
- * 一律当 `auto`。偏好坏掉和偏好不存在是同一件事,不该区别对待。
+ * **没存过就按系统偏好定一次**,从这一刻起它就是这个用户的选择。读不到、
+ * 读成了别的值、或者 localStorage 直接抛异常(隐私模式),走的都是同一条路 ——
+ * 偏好坏掉和偏好不存在是同一件事,不该区别对待。
+ *
+ * 注意这里**不写回 localStorage**:只读不写,免得"打开一次页面"就等于
+ * 替用户做了选择,之后他改了系统的深色设置也不生效。写回只发生在点按钮时。
  */
-export function readThemePref(): ThemePref {
+export function readTheme(): Theme {
   try {
     const raw = localStorage.getItem(THEME_KEY);
-    return isThemePref(raw) ? raw : THEME_DEFAULT;
+    if (isTheme(raw)) return raw;
   } catch {
-    return THEME_DEFAULT;
+    /* 隐私模式:读不到就走系统偏好,不影响本次显示 */
   }
+  return systemTheme();
 }
 
-function writeThemePref(pref: ThemePref): void {
+function writeTheme(theme: Theme): void {
   try {
-    localStorage.setItem(THEME_KEY, pref);
+    localStorage.setItem(THEME_KEY, theme);
   } catch {
     /* 记不住偏好不是错误,本次切换照常生效 */
   }
 }
 
 /**
- * 把偏好解析成具体主题,写到 `<html data-theme>` 上,并同步状态栏颜色。
+ * 把主题写到 `<html data-theme>` 上,并同步状态栏颜色和按钮状态。
  *
- * **`auto` 在这里被解析掉**,所以 DOM 上永远只有 `light` / `dark` 两态,
- * CSS 那边也只需要一个深色选择器。理由见 `theme.ts` 的文件头。
+ * **存的和写的永远是同一个值**,没有需要解析的中间态。理由见 `theme.ts` 的文件头。
  */
-export function applyTheme(pref: ThemePref): void {
-  const resolved = resolveTheme(pref);
-  document.documentElement.dataset.theme = resolved;
+export function applyTheme(theme: Theme): void {
+  document.documentElement.dataset.theme = theme;
 
   // 手机状态栏。不跟着走的话,选了深色之后状态栏还是浅色,和页面对不上
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', THEME_COLORS[resolved]);
+  if (meta) meta.setAttribute('content', THEME_COLORS[theme]);
 
-  for (const button of document.querySelectorAll<HTMLElement>('[data-theme-pref]')) {
-    const selected = button.dataset.themePref === pref;
+  for (const button of document.querySelectorAll<HTMLElement>('[data-theme-value]')) {
+    const selected = button.dataset.themeValue === theme;
     button.setAttribute('aria-pressed', selected ? 'true' : 'false');
   }
 }
 
 /**
- * 建出外观开关(跟随系统 / 浅色 / 深色)并接线。
+ * 建出外观开关(浅色 / 深色)并接线。
  *
  * 首帧用的是 `<head>` 里那个内联脚本定下的值,这里只是把按钮刷成一致的
  * 状态并接上点击——**不重新决定主题**,否则会和控制脚本打架。
+ *
+ * **刻意没有系统主题的监听。** 开关上只有两个按钮,没有「跟随系统」这一档,
+ * 所以页面在用户眼皮底下自己换色这件事不该发生:点了深色就是深色,系统
+ * 入夜切成深色也不动它。系统偏好只在 `readTheme()` 里、且只在从没选过时读一次。
  *
  * 和 `suppressWorkbenchDefaults()` 一样**不返回还原函数**:监听挂在宿主持有的
  * 元素上,随文档一起销毁;而在 `pagehide` 里摘是错的(进 bfcache 时它照样触发)。
@@ -240,37 +280,28 @@ export function mountThemeToggle(host: Element | null): void {
   if (!host) return;
 
   const fragment = document.createDocumentFragment();
-  for (const pref of THEME_PREFS) {
+  for (const theme of THEME_ORDER) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.dataset.themePref = pref;
-    button.textContent = THEME_LABELS[pref];
+    button.dataset.themeValue = theme;
+    button.textContent = THEME_LABELS[theme];
     fragment.appendChild(button);
   }
   host.replaceChildren(fragment);
 
-  applyTheme(readThemePref());
+  applyTheme(readTheme());
 
   // 事件委托:按钮是刚建出来的,而且以后可能改文案/顺序
   host.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
 
-    const button = target.closest('[data-theme-pref]');
-    const pref = button instanceof HTMLElement ? button.dataset.themePref : undefined;
-    if (!isThemePref(pref)) return;
+    const button = target.closest('[data-theme-value]');
+    const theme = button instanceof HTMLElement ? button.dataset.themeValue : undefined;
+    if (!isTheme(theme)) return;
 
-    writeThemePref(pref);
-    applyTheme(pref);
-  });
-
-  /*
-   * 系统主题在页面开着的时候被改了。**只有仍处于「跟随系统」时才跟着动**——
-   * 用户点过「浅色」之后,系统再变也不能把页面改回去,那是他明确表达过的选择。
-   */
-  const media = window.matchMedia('(prefers-color-scheme: dark)');
-  media.addEventListener('change', () => {
-    if (readThemePref() === 'auto') applyTheme('auto');
+    writeTheme(theme);
+    applyTheme(theme);
   });
 }
 

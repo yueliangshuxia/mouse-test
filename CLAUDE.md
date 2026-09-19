@@ -59,7 +59,8 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 | `src/lib/analysis.ts` | 全部统计与判据,**纯函数** | `tests/analysis.test.ts` |
 | `src/lib/renderer.ts` | Canvas 轨迹,rAF 循环读缓冲区 | 真机手测 |
 | `src/lib/capabilities.ts` | 启动时能力探测,产出面向用户的告警 | 真机手测 |
-| `src/lib/side-buttons.ts` | 拦截侧键触发的前进/后退 | 真机手测 |
+| `src/lib/side-buttons.ts` | 拦截侧键触发的前进/后退。收一个可选的 `scope`:给了就只在"按下点落在它里面"时拦(首页),不给就是整页(工具页) | 真机手测 |
+| `src/lib/mouse-buttons.ts` | 按键编号 ↔ 位掩码的翻译表(`BUTTONS` / `BIT_FOR_CODE` / `maskFromButtons`),`button-test` 与 `hold-drag-test` 共用 | `tests/mouse-buttons.test.ts` |
 | `src/lib/ruler.ts` | **"沿尺子推一段固定距离"的手势流程**,DPI 测试与加速度测试共用 | 真机手测 |
 | `src/lib/keyboard-layout.ts` | 键位布局数据,键盘页的 frontmatter(画键帽)和 `<script>`(`code` → 标签)共用 | — |
 | `src/lib/theme.ts` | 主题常量。同上,**被两个世界同时消费**:`<head>` 里那个阻塞脚本(不能 `import`)和 `ui.ts` 的开关 | — |
@@ -67,7 +68,11 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 | `src/lib/url.ts` | `href()` —— 站内链接唯一该走的拼接口。**写根路径构建不报错、上线才 404**,见「部署」 | — |
 | `src/lib/faq.ts` | FAQ 答案里 `**强调**` 的两个出口:渲染用 `faqHtml`、JSON-LD 用 `faqText`。见「页面约定」 | — |
 | `src/components/*.astro` | `ToolNav`(全站导航)、`StatPanel`(`data-stat` 契约的产出方,配 `ui.ts` 的 `setStat`) | — |
-| `src/lib/tools.ts` | 工具注册表 —— 导航、首页索引、结构化数据的唯一事实来源。`slug` **同时是页面文件名** | — |
+| `src/lib/tools.ts` | 工具注册表 —— 导航、首页索引、结构化数据的唯一事实来源。`slug` **同时是页面文件名**,`navLabel` 是报头里那个短名 | — |
+| `src/lib/nav-overflow.ts` | 报头菜单的**溢出折叠**:量轨道宽度,把放不下的项搬进下拉面板。见「首页与报头」 | 真机手测 |
+| `src/lib/mini-cards.ts` | 首页卡片的**说明书**(纯数据):每张卡放哪种装置、给哪几个读数、卡底那句限制写什么 | `tests/mini-cards.test.ts` |
+| `src/lib/mini-devices.ts` | 首页卡片的**装置运行时**:惰性挂载 + `idle→running→done` 状态机 + 七个工厂 | 真机手测 |
+| `public/coi-serviceworker.js` | 给 `dist/` 补 COOP/COEP,拿跨域隔离换 5µs 时间戳。**只碰同源**,不缓存。见「部署 → 跨域隔离」 | 真机手测 |
 | `src/styles/global.css` | **全站样式与两寄存器设计系统**。改界面之前必须先读懂它的机制,见下面「样式」两节 | 真机手测 |
 
 `ruler.ts` 和 `sampler.ts` 一样是**薄的**:它只界定一次手势的起止,不做任何换算。像素换算成 DPI 是 `estimateDpi` 的活,那边有单测。
@@ -93,13 +98,58 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 
 ### 样式:主题
 
-三档(**跟随系统 / 浅色 / 深色**),默认跟随系统。机制在 `theme.ts` 的文件头,一句话概括:**`localStorage` 存的是偏好(`auto|light|dark`),写到 `<html data-theme>` 上的永远是解析后的结果(`light|dark`)**。
+**两档(浅色 / 深色)**,开关上就这两个按钮。`localStorage` 里存的和写到 `<html data-theme>` 上的**永远是同一个值** —— 没有需要解析的中间态。机制在 `theme.ts` 的文件头。
 
-所以 CSS 里只有**一个**深色选择器 `:root[data-theme='dark']`(0,2,0,直接压过 `:root`,不依赖源码顺序),**刻意没有** `@media (prefers-color-scheme: dark)` 的令牌块——写两份迟早漂移,而且会让 `auto` 变成 CSS 里一个**不存在的状态**,以后加令牌必然漏一份。系统偏好只在**一个地方**被读取:那个阻塞脚本。
+- **没存过就跟系统**,而不是首次访问把系统值写死存起来。用户在页面上按过开关才算表了态,存的就是那一次的选择;此后系统再变也不跟随,页面不会在用户眼皮底下自己换色。另一条路(首次就写死)的代价写在 `theme.ts` 的文件头,要改先读那段。
+- 系统偏好只在**一个地方**被读取:`BaseLayout.astro` 的 `<head>` 里那个阻塞脚本。`ui.ts` 的 `readTheme()` 读不到存储时也走一次 `systemTheme()`,两处判据一致。
+- **「跟随系统」曾经是第三档,现在没有了。** 要加回来注意:它是一个**持续的第三状态**,不是加个按钮就完事 —— 得让存储回到三值、补一个 `matchMedia` 的 change 监听(现在刻意没有,就是为了不让页面自己变色)、并且再想清楚 CSS 那边要不要写第二份 `@media` 令牌块。
+
+所以 CSS 里只有**一个**深色选择器 `:root[data-theme='dark']`(0,2,0,直接压过 `:root`,不依赖源码顺序),**刻意没有** `@media (prefers-color-scheme: dark)` 的令牌块——写两份迟早漂移,而且会让系统偏好变成 CSS 里一个**不存在于 DOM 的状态**,以后加令牌必然漏一份。
 
 - 首帧不能闪白,所以定主题的脚本是 `is:inline` 的**阻塞**脚本(`BaseLayout.astro` 的 `<head>`)。Astro 默认的 `<script>` 是延迟执行的 module,等它跑起来首帧已经画完了。
 - `<meta name="theme-color">` 由同一个脚本一并改(手机状态栏)。它的色值在 `theme.ts` 里,**必须和 `global.css` 的 `--bg` 保持一致**。
 - `theme.ts` 是「页面约定」里那条"frontmatter 变量在 `<script>` 里不存在"的**第二个实例**:一个值要在"能 import 的世界"和"不能 import 的世界"两边一致,就抽模块,别手抄。
+
+### 首页与报头
+
+首页是一格一格的卡片,每张卡里嵌一个能直接开测的小装置;报头是一条**单行**的导航。
+
+**卡片顺序 = `READY_TOOLS` 的顺序 = 菜单顺序,只有这一份。** `tests/mini-cards.test.ts` 钉着这条,所以**"卡片调个位置"就是改 `tools.ts`** —— 连菜单一起动。想只动卡片不动菜单,得先给卡片单开一份顺序,那就有两份顺序要同步,不值得。
+
+`<h1>` 下面**有一行小字**(`.home-sub`),只干一件事:说清卡片和工具页的分工 —— 卡片是即时读数,完整模式、逐项读数、判定依据都在对应页面里。它同时把 h1 那个为卡片留的 1.75rem 下边距接了过去(h1 收到 0.5rem),不然标题和它之间会空出一大块。**再多过一行就又变回"要翻过说明才够得着卡片"**,这一节开头那句就白改了。
+
+**卡片:7 张能放装置,3 张放不进。** 判据只有一句:**卡片里那个数,和那一页的数是不是同一件事?**
+
+- 放得进:按键 / 长按拖拽 / 双击 / 滚轮 / CPS / 轨迹 / 回报率。
+- 放不进:**DPI、加速度**(要沿尺子推固定物理距离,卡片里没有那把尺子)、**键盘**(首页的按键会滚动页面、撞浏览器快捷键)。这三张卡的装置槽里放的是一段**说明**,不是空框 —— 说清楚为什么放不进来,再指向那一页。
+- 回报率那张的读数**只能当下限**:每秒报文数 = 每秒移动的英寸数 × DPI,小框里推不开。卡片说明和正文都照实写了。
+- **卡底那行小注是折进来的「关于测量精度」**,是**真实可见的正文**,不是 tooltip、不是折叠面板。收起来等于把全站的主张从首页删掉。它的骨架按 `confidence` 四档出(`CONFIDENCE_NOTE`),再叠加每张卡自己的 `note`。
+
+三条与"能测"直接相关的机制:
+
+- **`mini-cards.ts` 是"两个世界共用值"的又一个实例**(同 `keyboard-layout.ts` / `theme.ts`):frontmatter 画卡片、`<script>` 接线,而 frontmatter 变量在 `<script>` 里不存在,两边靠 `slug` 挂钩。`tests/mini-cards.test.ts` 钉住它与 `READY_TOOLS` 一一对应,并钉住"装置写入的 key 必须真的有读数槽" —— 写错一个字母是**静默失败**(`setText(null)` 是空操作,那一格永远是破折号)。
+- **装置是惰性的**:装载时一个采样器都不建。`DEVICES[kind].wake` 声明"哪种事件算开始用",用户碰到装置面才调工厂。**不能一律三种事件都收** —— 一律收 `pointermove` 的话,鼠标从页面上扫过就挂起一串采样器和画布。采样时 `capacity` 要传 `20000`(默认 120000 ≈ 2MB 一份),`capture` 保持 `true`。
+- **`.well` 只出现在 `running`。** `idle` / `done` 都留在纸面:测量结束了还亮着就是在说"这里还在出数",而那句话一旦不成立,「扫一眼就知道哪里是活的」整套就失效了。
+
+**接线时踩过的一个坑,写得明明白白:装置是在"第一次交互"那个事件的派发过程中挂载的,而工厂的监听也只能在那期间才装上。** DOM 规范说派发期间新增的监听收不到这一次事件,**实测 Chrome 会收到**。信规范就丢第一次点击,信 Chrome 就把第一次点击数两遍(实测:两次双击报 3 次、四次连点报 5 次、三个滚轮事件报 4 格)。解法是两边都不靠 —— 驱动把 seed **显式**交给工厂,同时保证工厂的监听**永远看不到这个事件对象**(`mountMiniCard` 里那个 `seeding` 比对)。改这段之前先读 `mini-devices.ts` 里 `MiniFactory` 那段注释。
+
+**默认行为的拦截:两个函数、一次、装在整片网格上。**
+
+`index.astro` 对每个 `.mini-grid` 调一次 `suppressDefaultsWithin(grid)` 和 `suppressSideButtonNavigation(grid)`,`mini-devices.ts` 里**不装**。三条理由:
+
+- **不是 `suppressWorkbenchDefaults()`。** 首页是一篇正文,十张卡只是它中间的一节;在那上面拦截**整页**右键,连"复制"都没了,那不是把工作台摘干净,是对读者耍横。两个函数都收一个"作用域"参数,判据和工具页共用同一份实现。
+- **一次装在整个网格上,不是每张卡各装一份。** 判据本来就是"按下点落在哪儿",装七份只是让七份各自记一遍同一个事实。
+- **作用域是网格,不是装置面(曾经是,改掉了)。** 用户报的是"在首页做按键测试,右键和侧键都用不了" —— 指针停在卡上、但没落进那个 120px 的虚线框时,两种默认行为都照常发生。一张卡整个就是测试台,虚线框只是个提示。代价是卡里那段描述文字右键不出菜单了,但**卡片的标题链接照旧** —— 放行规则那一半("从控件上按下、又还在同一个控件里松开")把「在新标签页中打开」原样留着。网格之外(h1、FAQ、页脚)一律不碰。
+
+侧键那一条要单独说,因为它是**破坏性**的:浏览器把 X1/X2 硬绑成前进/后退,不拦的话按一下就被弹回上一页,计数清零、测试中断,用户还会以为是鼠标坏了 —— 和按键测试页遇到的是同一件事。右键菜单按 Esc 就没了,导航没有撤销键,所以这两个默认行为**值得用同一个作用域**,而"要不要管到整页"的答案都是"不"。
+
+作用域版侧键的判据是 `event.target`,**不记"上一次按在哪儿"**(工具页那套两半判据需要它,是因为拖拽时指针会离开起始元素)。侧键的导航是**这一次按下**的默认行为,不涉及拖动 —— 按下那一刻指针在哪儿,`target` 就是哪儿。实测(`probe-suppress.mjs`,五种按钮逐一合成按下):装置面 / 卡片描述 / 卡片标题链接上侧键的 `mousedown` 全部被拦,网格外的 `<h1>` 不拦;右键菜单在前两处被拦、在标题链接上放行;左键/右键/侧键连按两下都各自计到 2。
+
+**报头:一条单行的菜单。**
+
+- 菜单文字用 `Tool.navLabel`(短名:按键 / 长按拖拽 / 双击 / 滚轮 / CPS / 轨迹 / 回报率 / DPI / 加速度 / 键盘),`title` 才是全名。**十个短名实测 693px**(`column-gap: 16px` 时),而导航列在 1000px 视口下约 724px —— 余量只有 30px。间距从 20px 收到 16px 就是为了这个:20px 时十项要 729px,**已经超过那 724px 了**。换一个中文字体宽度就会翻成折叠态,所以这一条要按量出来的数看。**加工具、改文案之后必须重新量**,不要按字数估算 —— 中文字宽估不准,这里估错过一次。
+- 折叠由 `nav-overflow.ts` 做,不在 CSS 里:收哪几个取决于每项的实际像素宽度和容器当前的实际宽度,两者都是渲染之后才有的事实。结构分两层 —— `__track`(`overflow: hidden`,排菜单)和它**兄弟** `__more`(绝对定位的下拉面板)。面板必须待在轨道的裁剪范围**之外**,否则一展开就被切掉。轨道那层同时保证了**脚本还没跑起来**的一两帧里,放不下的项是被裁掉而不是把整页撑宽。
+- `.site-nav__item` 上的 `flex: none` **不是可选项**:允许收缩的话窗口一窄每项就各被压扁一点,而"量出来的宽度"正是折叠判据的输入。网格列上的 `minmax(0, 1fr)` 同理 —— 没有它导航列不会收缩到内容宽度以下,折叠永远不会触发。
 
 ## 回报率测量的硬约束
 
@@ -130,6 +180,8 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - **组合按键(chorded buttons)。** `pointerdown` 只在指针从"无键按下"进入"有键按下"时派发一次,`pointerup` 只在**最后一个键**松开时派发。中间的每次按下/松开都走 `pointermove`。所以按键状态只能从 `event.buttons` 位掩码逐位 diff 得出,**用 `event.button` 会漏掉组合键的第二次按下和第一次松开**。实现见 `src/pages/button-test.astro`。
 - `MouseEvent.button` 的编号与 `MouseEvent.buttons` 的位序**不一样**:中键和右键是反的。翻译表和按键清单(`BUTTONS` / `BIT_FOR_CODE` / `maskFromButtons`)在 **`src/lib/mouse-buttons.ts`**,`button-test.astro` 和 `hold-drag-test.astro` 共用同一份。抽成模块不只是省重复:`BUTTONS` 写在 frontmatter 里,而 frontmatter 变量在 `<script>` 里**不存在**(见「页面约定」),各写一份的话那个按键数迟早对不上。
 - **侧键能不能测,取决于鼠标固件和浏览器策略,页面说了不算。** 有些鼠标的侧键**根本不是以鼠标按键的形式上报**的——厂商驱动把它发成键盘事件或一段宏,浏览器收不到任何鼠标事件;另一些浏览器**不允许网页取消**侧键的前进/后退,一按整页就跳走、成绩全丢。`side-buttons.ts` 的 `suppressSideButtonNavigation()` 只能挡住后者,挡不住前者。所以侧键那一行显示破折号时,**只说明"页面没收到",不等于"按了 0 次"**——两者混成一个数字正是这类测试最容易骗人的地方,页面和 FAQ 都照实写了。另外:CDP 合成的 `Input.dispatchMouseEvent` **绕过**了操作系统和驱动层,所以"CDP 里侧键能测"**不能**证明一只装了厂商驱动的实体鼠标也能测,这条只能上手验。
+  同一条限制还有两个后果,都吃过亏:**(a)** 合成的**右键**压下去时**根本不派发 `pointerdown`**(只发 `pointerrawupdate` + `mousedown`)。所以凡是**靠 `pointerdown` 记状态**的判据(比如 `suppressWorkbenchDefaults()` 里那个"按下时落在哪个元素上")在 CDP 里对右键**测不出来**,会看到"链接上右键也被拦掉了"这种假故障——**别照着它改代码**,只能真机点一下。**(b)** 合成的输入起不了 Edge 的鼠标手势,所以"手势拦没拦住"也测不了。
+  (顺带:在 `hold-drag-test` 里合成的**左键**只有 `pointerdown` / `pointerup`、没有 `mousedown` / `mouseup`。那不是 CDP 的怪癖,是**页面自己**在 `pointerdown` 里 `preventDefault()`(为的是挡掉拖拽带起的原生拖放),按规范这会把兼容的鼠标事件一并压掉。)
 - **Edge 自带的「鼠标手势」网页端拦不掉,不要再试。** 中文区的 Edge 默认开着它(`edge://settings/mouseGesture`),按住右键拖动时会在屏幕上画一条蓝线,凑够形状还会**直接执行前进/后退**——`hold-drag-test`(五个键都要测,含右键)和 `button-test`(右键那张卡)两页因此受影响。它属于浏览器进程那一侧的功能,**没有任何网页 API 能关掉**;微软官方的 WebView2 议题(MicrosoftEdge/WebView2Feedback#3737)里,开发者把 `--disable-features=msEdgeMouseGestureSupported,msEdgeMouseGestureDefaultEnabled` 和 `--enable-features=kEdgeMouseGestureDisabledInCN` 试遍了**全部无效**,最后确认唯一有效的是那个设置项加**按站点的「阻止列表」**。
   网页这一侧能试的只有一条:`mousedown` 里 `preventDefault()`。**实测无效**(中键自动滚动就是靠这套机制被挡住的,所以它看起来很像——但手势是在浏览器进程读完事件之后才轮到渲染进程回话,够不着)。`ui.ts` 的 `blockMiddle` 因此**只管中键**,别再改成连右键一起拦。
   能探测到"手势开着"吗?**不能**——只能靠 UA 认出 Edge,而那会把所有关着手势的 Edge 用户一起吓一遍。所以两页都只在正文/FAQ 里如实交代 + 告诉用户怎么关,不做能力告警。
@@ -150,6 +202,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - Astro 的 `<script>` 默认就是 TypeScript,不需要 `lang="ts"`,会被打包成外链 module。
 - `<style>` 默认作用域化。要选 `html` / `body` 得用 `:global(...)`(见 `polling-rate-test.astro` 的 `html.is-testing`)。
 - Canvas 配色从 CSS 变量读(`--trail-color`),不要在 TS 里硬编码颜色,否则主题切换后画布和界面会脱节。`renderer.ts` 里那个兜底常量是唯一的例外(`--trail-color` 读不到时用),它**必须和 `global.css` 的 `--trail-color` 同值**——两处都是绿色,改了一处忘了另一处,只有画布会错,界面上看不出来。同理 `theme.ts` 的 `THEME_COLORS.dark` 必须等于深色的 `--bg`。
+- **`renderer.ts` 的 `drawFrame()` 里有一条 `if (n - drawnUpTo < 2) { drawnUpTo = n; return; }`:一帧里新到的采样少于 2 个就整帧不画。** 于是"每个采样各自占一帧"时**画布上一个像素都不会有**。用 CDP 验轨迹时必踩:`Input.dispatchMouseEvent` 每条移动事件占一帧(真实硬件是几个原始报文合并进一帧),所以合成输入下画布永远是空的——**那是测试装置的限制,不是站点坏了,也不是布局改动引起的**。要么把多条 `mouseMoved` 不 await 地一起发(能让采样挤进同一帧),要么直接读 `[data-stat="samples"]` 和缓冲区,别拿画布有没有墨当判据。
 - 回报率页的轨迹画布是 `position: fixed; z-index: -1`,铺满视口压在正文下面。**这依赖 body 的底色被传播到根元素去画**(`html` 自己没有 background)。给 `html` 加背景会让轨迹被整片盖住。
 - 频繁刷新的 DOM 文本写入前先比较再赋值。每轮无条件写 `textContent` 会触发样式重算,而**这份开销本身会被如实测成丢帧**。这条约定由 `src/lib/ui.ts` 的 `setText` / `setStat` / `setBadge` 统一提供,**页面脚本一律用它们,不要各写一份**——散成十份副本的话,迟早有一份被"优化"掉。
 - **算不出来就显示破折号,不显示 0,也不显示 NaN。** 统一走 `src/lib/ui.ts` 的 `format()`。"0 CPS"和"没测出 CPS"是两件完全不同的事,而在小数格式化里它们长得一模一样——这是「测不准就明说」落到格式化层的样子,别为了省一次调用在页面里自己写 `toFixed()`。
@@ -174,11 +227,30 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 
 - **push 到 `main` 即自动构建并发布**(也可在 Actions 页面手动触发),走 `.github/workflows/deploy.yml`,**不经过 Jekyll**。不能改用「从分支发布」:`dist/_astro/` 以**下划线开头**,Jekyll 默认忽略这类目录,结果是 CSS/JS 全部 404、页面裸奔。(`public/.nojekyll` 是兜底。)
 - `dist/` 不入库,由 CI 现构建。CI 里**顺带跑了 typecheck 和单测**。
-- `astro.config.mjs` 的 `server.headers` **只作用于 `astro dev` / `astro preview`,对 `dist/` 完全无效**。它的存在只是为了让本地开发就能拿到跨域隔离,好验证高精度那条路径。
+- `astro.config.mjs` 的 `server.headers` **只作用于 `astro dev` / `astro preview`,对 `dist/` 完全无效**。它的存在只是为了让本地开发就能拿到跨域隔离,好验证高精度那条路径。`dist/` 那一侧的隔离由 service worker 负责,见下。
+
+### 跨域隔离:两条路,一张网
+
+计时精度这件事上,`performance.now()` 和 `event.timeStamp` 都被浏览器钳过:**未隔离 100µs,隔离后 5µs**(Chrome 官方口径,Chrome 64 起因 Spectre 降精度,Chrome 91 起统一到 100µs)。**实测吻合**:线上 Pages 的未隔离状态落在 100µs 网格上,本地 `astro dev` 配了 `server.headers` 是 5µs。
+
+隔离只有两个来源,按环境各管一摊:
+
+| 环境 | 谁来发 COOP/COEP | 谁在管 |
+| --- | --- | --- |
+| `astro dev` / `astro preview` | `astro.config.mjs` 的 `server.headers` | 配置 |
+| `dist/`(GitHub Pages 等) | `public/coi-serviceworker.js` 重新发一遍响应头 | `BaseLayout.astro` 里那段 `is:inline` 脚本 |
+
+几条必须记住的:
+
+- **GitHub Pages 发不了自定义响应头**,所以 `dist/` 上唯一的办法就是这个 service worker。它**不缓存任何东西**,只把同源响应的头改掉再交回去——**只碰同源**,跨域的第三方资源一律原样放行(否则 COEP 的 `require-corp` 会把别人的 CDN 全拦掉)。
+- **隔离是"文档的属性",在导航那一刻定死**,所以拿隔离**必须重载一次页面**。脚本因此写死成:注册 → 等 ready → 如果这一页确实需要隔离且还没隔离,**只重载一次**(`sessionStorage` 的 `coi-reloaded` 兜住,避免重载循环)。
+- **注册放在每一页,重载只在需要的那页。** 理由:用户先落在首页、之后才点进回报率页时,SW 已经接管了,那一页就不必再重载;而首页这种长页面不该为了一件它用不上的事闪一下。
+- `BaseLayout.astro` 的 **`isolation` prop**(默认 `false`)就是"这一页要不要为隔离付一次重载"的开关。**目前只有 `polling-rate-test` 传了,而且只该有它一个**——判断标准是"这一页的结论吃不吃**两个事件之间**的差"。`trail-test` 看着该要,**实际不用**:`detectTrailJumps` 只读 x/y(几何量,整段代码里没有时间戳),`measureDrift` 只有计数和跨度,那个"分析时长"是几百毫秒级的墙钟量。**别因为"它也和丢帧有关"就顺手加上**——那会让每个直接落在该页的用户白吃一次重载。
+- **降级是静默的、也是可接受的**:隐私模式、禁了存储、老浏览器上注册会失败,`.catch()` 咽下去,页面照常用 100µs 的时间戳跑,顶部告警如实说明。**不要为了"让它一定能用"再叠别的机制。**
 
 ### 这个托管方的已知短板(别当成正式站)
 
-- **发不了 COOP/COEP。** GitHub Pages 不支持自定义响应头,所以 `crossOriginIsolated` 恒为 false,`performance.now()` 精度被卡在 100µs,回报率页的 8000Hz 高精度路径会**降级**。能力探测会如实告警,不会骗人,但那条路就是没了。要它正常,**必须换能发响应头的托管方**:Nginx `add_header ... always;`(必须带 `always`,否则 404 等响应不带)或平台自己的后台配置。国内平台不认 `public/_headers`(Cloudflare/Netlify 格式,会被当普通文件发布)。
+- **发不了 COOP/COEP —— 这一条已经用 service worker 补掉了,见上面「跨域隔离」那节。** 原样留着这句是因为它仍然是**降级路径**的行为:service worker 注册失败(隐私模式、禁用存储、老浏览器)时 `crossOriginIsolated` 恒为 false,`performance.now()` 精度退回 100µs,回报率页的高精度路径**降级**。能力探测会如实告警,不会骗人。要它从根上正常,**换能发响应头的托管方**仍然是最干净的解法:Nginx `add_header ... always;`(必须带 `always`,否则 404 等响应不带)或平台自己的后台配置。国内平台不认 `public/_headers`(Cloudflare/Netlify 格式,会被当普通文件发布)。
 - **`github.io` 在国内访问不稳定,且不能备案。** 本站的目标是「面向中国大陆用户做流量」,所以 Pages 只适合当**预览/演示环境**;正式上线仍要备案域名 + 国内托管。
 
 ### 这台机器上的推送前提

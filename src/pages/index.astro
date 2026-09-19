@@ -1,6 +1,8 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { CONFIDENCE_LABEL, PLANNED_TOOLS, READY_TOOLS } from '../lib/tools';
+import type { Confidence } from '../lib/tools';
+import { CONFIDENCE_NOTE, findMiniCard } from '../lib/mini-cards';
 import { href } from '../lib/url';
 
 const title = '鼠标测试 - 在线检测鼠标按键、回报率与传感器性能';
@@ -21,88 +23,197 @@ const jsonLd = {
   description,
   url: siteUrl,
 };
+
+/*
+ * 四档可信度的名册,按"敢说的程度"从高到低排。
+ *
+ * 每一档的含义**只说一次**,写在网格下面那一节里。原先这是「关于测量精度」那一整节
+ * (首页 512px),按测量项逐条讲;现在改成按可信度分档讲,每一项自己那一句
+ * 挪进卡片底下(`MiniCard.note`)。
+ *
+ * **事实一条没少,只是换了切法** —— 折进卡片不等于把那节删掉。所以这段是真实
+ * 可见的正文,不是 tooltip、不是折叠面板;收起来就等于把全站的主张从首页删掉。
+ */
+const CONFIDENCE_ORDER: Confidence[] = ['exact', 'estimate', 'shape', 'direction'];
+
+const cards = READY_TOOLS.map((tool) => ({ tool, spec: findMiniCard(tool.slug)! }));
 ---
 
 <BaseLayout title={title} description={description} current="index" jsonLd={jsonLd}>
-  <h1>在线鼠标测试</h1>
+  {/*
+    标题下面**一行小字**,然后就是卡片。
+
+    原来这里是「导语 → 可用工具 → 名册 → 网格」四段文字,读者要翻过一整屏说明
+    才够得着第一个能点的东西。改成点进来就看见十张卡:想测什么直接上手,
+    「这是什么站、那些标记什么意思」挪到网格下面当说明读。
+
+    那行小字只干一件事:**说清卡片和工具页的分工**。少了它,读者会以为卡片
+    就是全部——而卡片上的数只是即时读数,完整模式、逐项读数、判定依据都在
+    对应的页面里。多过一行就又变回"要翻过说明才够得着"了。
+
+    **正文一句没删,只是换了谁先出场。** 首页的正文量、以及给搜索引擎看的内容
+    都不变 —— 这一条改完要重新数一遍 `<main>` 的字数对一遍。
+  */}
+  <h1 class="home-title">在线鼠标测试</h1>
+
+  <p class="home-sub">
+    卡片里就能直接测。要看完整模式、逐项读数和判定依据,点卡片标题进对应的页面。
+  </p>
+
+  <ul class="mini-grid">
+    {
+      cards.map(({ tool, spec }) => (
+        <li class="mini-card">
+          <div class="mini-card__head">
+            <a class="mini-card__name" href={href(`${tool.slug}/`)}>{tool.name}</a>
+            <span class={`confidence confidence--${tool.confidence}`}>
+              {CONFIDENCE_LABEL[tool.confidence]}
+            </span>
+          </div>
+
+          <p class="mini-card__desc">{tool.description}</p>
+
+          <div class={`mini-device${spec.kind === null ? ' mini-device--static' : ''}`} data-mini={tool.slug}>
+            {spec.kind === null
+              ? <p class="mini-device__why">{spec.fallback}</p>
+              : <p class="mini-device__prompt">{spec.prompt}</p>}
+          </div>
+
+          {spec.readouts.length > 0 && (
+            <div class="mini-read">
+              {spec.readouts.map((readout) => (
+                <div class="mini-read__item">
+                  <span class="mini-read__label">{readout.label}</span>
+                  <span class="mini-read__num">
+                    <span class="mini-read__value" data-mini-out={`${tool.slug}:${readout.key}`}>—</span>
+                    {readout.unit && <span class="mini-read__unit">{readout.unit}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p class="mini-card__note">{spec.note}</p>
+        </li>
+      ))
+    }
+  </ul>
+
+  <h2>关于这些测试</h2>
 
   <p class="prose">
     打开网页即可检测鼠标的按键、回报率、传感器与滚轮状态,不需要下载任何驱动或客户端。
     所有测量都在你的浏览器里完成,数据不会离开本机。
   </p>
 
-  <h2>可用工具</h2>
   <p class="prose">
-    每个工具右边标着<strong>这个测量有多可信</strong>。想知道按键坏没坏,就用「直接测得」的;
-    标着「只能看形状」的那几个,结论要自己对着说明读——它们能给你的线索是真的,
-    但线索不是证据。
+    每张卡右上角标着<strong>这个测量有多可信</strong>。想知道按键坏没坏,就用「直接测得」的;
+    标着「只能看形状」的那几个,结论要自己对着卡底那行说明读——它们能给你的线索是真的,
+    但线索不是证据。四档的分别是:
   </p>
 
-  <ul class="tool-list">
+  <dl class="confidence-key">
     {
-      READY_TOOLS.map((tool) => (
-        <li class="tool-item">
-          <a class="tool-item__link" href={href(`${tool.slug}/`)}>
-            <span class="tool-item__name">{tool.name}</span>
-            <p class="tool-item__desc">{tool.description}</p>
-            <span class={`confidence confidence--${tool.confidence}`}>
-              {CONFIDENCE_LABEL[tool.confidence]}
-            </span>
-          </a>
-        </li>
+      CONFIDENCE_ORDER.map((level) => (
+        <div class="confidence-key__row">
+          <dt class={`confidence confidence--${level}`}>{CONFIDENCE_LABEL[level]}</dt>
+          <dd class="confidence-key__mean">{CONFIDENCE_NOTE[level]}</dd>
+        </div>
       ))
     }
-  </ul>
+  </dl>
 
   {
     PLANNED_TOOLS.length > 0 && (
       <>
         <h2>即将上线</h2>
-        <ul class="tool-list">
+        <ul class="mini-grid">
           {PLANNED_TOOLS.map((tool) => (
-            <li class="tool-item">
-              <div class="tool-item__link">
-                <span class="tool-item__name">{tool.name}</span>
-                <p class="tool-item__desc">{tool.description}</p>
+            <li class="mini-card mini-card--planned">
+              <div class="mini-card__head">
+                <span class="mini-card__name">{tool.name}</span>
                 <span class="confidence confidence--direction">开发中</span>
               </div>
+              <p class="mini-card__desc">{tool.description}</p>
             </li>
           ))}
         </ul>
       </>
     )
   }
-
-  <section class="prose">
-    <h2>关于测量精度</h2>
-    <p>
-      浏览器能读到的鼠标数据是有上限的,这里如实说明,避免你把平台限制误判成硬件故障:
-    </p>
-    <ul>
-      <li>
-        <strong>按键、双击、键盘、CPS</strong>——测得很准,浏览器直接提供原始事件流。
-      </li>
-      <li>
-        <strong>回报率</strong>——需要浏览器支持 <code>getCoalescedEvents()</code>。不支持时,
-        读数会被屏幕刷新率限住,1000Hz 和 125Hz 的鼠标会测出同样的数字。页面会检测这一点并提示。
-      </li>
-      <li>
-        <strong>2000Hz 以上</strong>——需要页面处于跨域隔离状态才能拿到足够的计时精度。
-        未隔离时计时器被限制在 100µs,而 8000Hz 的间隔只有 125µs,无法分辨。
-      </li>
-      <li>
-        <strong>滚轮</strong>——<code>deltaMode</code> 只说单位是像素、行还是页,
-        <strong>从不说"一格是多少"</strong>,所以格数只能估算;方向不需要任何换算,是可靠的。
-      </li>
-      <li>
-        <strong>轨迹与拖拽</strong>——浏览器拿不到报文的序列号,
-        "传感器漏点"和"你手甩快了"在数据上是同一个样子。页面只能给<strong>形状</strong>,
-        给不了"丢帧了几次"这种结论。
-      </li>
-      <li>
-        <strong>DPI 与加速度</strong>——浏览器读不到硬件 DPI,只能靠你移动固定物理距离间接反推。
-        手推的距离、指针速度滑块、系统缩放都会进到结果里。
-      </li>
-    </ul>
-  </section>
 </BaseLayout>
+
+<script>
+  import { mountMiniCard } from '../lib/mini-devices';
+  import { findMiniCard } from '../lib/mini-cards';
+  import { suppressSideButtonNavigation } from '../lib/side-buttons';
+  import { suppressDefaultsWithin } from '../lib/ui';
+
+  /*
+   * 默认行为的拦截:右键菜单、中键自动滚动、侧键的**后退/前进**。
+   *
+   * 侧键那一条不是锦上添花:浏览器把 X1/X2 硬绑成前进后退,而导航是 `mousedown`
+   * 的默认行为。不拦的话用户按一下侧键就被弹回上一页,计数清零、测试中断,
+   * 而且他会以为是鼠标坏了 —— 和按键测试页遇到的是同一件事(见 `side-buttons.ts`)。
+   *
+   * **一次装在整个网格上,不是每张卡各装一份。** 判据本来就是"按下点落在哪儿",
+   * 装七份只是让七份各自记一遍同一个事实。网格是这些测试面共同的外框,
+   * 落在卡与卡的缝里也还算在测。
+   *
+   * 为什么不是整页(工具页那样):首页是一篇正文,十张卡只是它中间的一节。
+   * 整页拦会把整篇文章的右键菜单和"按侧键回上一页"一起吃掉,那是耍横不是清理。
+   * 两个函数都收一个"作用域"参数,判据和工具页共用同一份实现。
+   */
+  for (const grid of document.querySelectorAll('.mini-grid')) {
+    suppressDefaultsWithin(grid);
+    suppressSideButtonNavigation(grid);
+  }
+
+  /*
+   * 把十张卡里的装置接上。
+   *
+   * **走一遍 DOM 而不是把 `cards` 从 frontmatter 传进来** —— frontmatter 变量在
+   * `<script>` 里不存在(脚本被单独打包成外链 module),所以两边是靠 `slug` 挂钩的,
+   * 而 `data-mini` 上正好写着它。这也是 `mini-cards.ts` 存在的理由。
+   *
+   * 装置是**惰性**的:`mountMiniCard` 只挂一组探针,用户碰到哪张卡才建哪张卡的
+   * 采样器 / 画布。理由写在 `mini-devices.ts` 的文件头。
+   */
+  for (const surface of document.querySelectorAll<HTMLElement>('[data-mini]')) {
+    const slug = surface.dataset.mini;
+    if (!slug) continue;
+    const spec = findMiniCard(slug);
+    const card = surface.closest('.mini-card');
+    if (spec && card instanceof HTMLElement) mountMiniCard(card, spec);
+  }
+</script>
+
+<style>
+  /*
+   * 标题下面一行小字,然后才是卡片。
+   *
+   * 全站 h1 的下边距是 0.8rem,那是留给紧跟其后的段落的;48px 的中文标题下面
+   * 只隔 13px 就是一片卡片,挤得慌。所以首页单独放宽 —— 但**放宽的那一段现在
+   * 归副标题**,h1 自己收回到 0.5rem,否则标题和它之间会空出一大块,
+   * 读起来像两段不相干的东西。
+   */
+  .home-title {
+    margin-bottom: 0.5rem;
+  }
+
+  /*
+   * 副标题:一句话说清"卡片"和"那一页"的分工。
+   *
+   * 用 `--text-dim` 而不是正文色 —— 它是导引不是内容,压在卡片上面不该抢视线;
+   * 也不该用 `--text-faint`,那个在深色下已经接近辅助文字的下限。
+   *
+   * `max-width` 按字数给:中文一个字就是一个 em,44 个字一行太长,
+   * 42em 让它折成两行,读起来正好。
+   */
+  .home-sub {
+    margin: 0 0 1.75rem;
+    max-width: 42em;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+</style>

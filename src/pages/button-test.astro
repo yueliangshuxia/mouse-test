@@ -261,7 +261,12 @@ const jsonLd = {
 
     // 侧键的后退/前进是浏览器级的默认行为,拦不住就会把用户弹回上一页,
     // 计数全部清零。必须整页拦,和指针停在哪个元素上无关。
-    const restoreSideButtons = suppressSideButtonNavigation();
+    //
+    // **刻意不接它返回的还原函数。** 曾经在 `pagehide` 里摘过一次:页面进
+    // bfcache 时 `pagehide` 照样触发,用户按返回键回来之后就再也没人拦侧键了,
+    // 而这一页的全部意义就是让用户逐个按过去 —— 和 `suppressWorkbenchDefaults()`
+    // 是同一条规矩,见 CLAUDE.md。
+    suppressSideButtonNavigation();
 
     // 右键菜单、中键自动滚动、中键 auxclick。判据是"落点是不是控件",
     // 实现和理由都在 ui.ts —— 和其余几个有手势的页面共用同一份。
@@ -317,10 +322,9 @@ const jsonLd = {
       if (hint) hint.hidden = false;
     });
 
-    // 页面离开前停止动画循环、恢复侧键
+    // 页面离开前停止动画循环。侧键拦截**不在这里还原**,理由见上面。
     window.addEventListener('pagehide', () => {
       cancelAnimationFrame(rafId);
-      restoreSideButtons();
     });
   </script>
 </BaseLayout>

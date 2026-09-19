@@ -62,11 +62,12 @@
   --bg-inset: #dfe5e9;
 
   /*
-   * 这两条横线是**全站唯一的结构手段** —— 没有卡片、没有阴影,区块之间的
-   * 边界全靠一道 1px。所以它们的对比度就是这个页面有没有"骨架"。
+   * 这两条横线是**全站唯一的结构手段**。面板(`.mouse-button` / `.run` /
+   * `.mini-card`)是有的,但它们只有一层平涂底色加一道 1px,没有阴影、没有渐变,
+   * 层次全靠这条线说出来。所以它的对比度就是这个页面有没有"骨架"。
    *
    * 原来 `--border` 是 #d3dade,压在本页底色上只有 1.29:1,等于没画:
-   * 于是 `.stat` / `.tool-item` / `.faq__item` / `.ref-table` 的分隔线全部
+   * 于是 `.stat` / `.mini-card` / `.faq__item` / `.ref-table` 的边框全部
    * 消失,一个 3000px 的长页面会读成一整片灰。现在 1.55:1 —— 看得见,但仍是
    * "纸上一道细线",不是"表格边框"。`--border-strong` 拉开到 2.33:1,它管的是
    * 按钮和下拉框的外沿,那是**控件的边**,必须比背景线更硬。
@@ -442,13 +443,18 @@ p {
 
 /*
  * 报头。**sticky** —— 页面普遍 3000px 长,而工具索引是主要导航,
- * 滚到一半就够不着了,只能一路滚回顶部。
+ * 滚到一半就够不着了,只能一路滚回顶部。窄屏同样吸附:这里原先有一条
+ * `@media (max-width: 760px) { position: static }`,理由是当时索引在手机上
+ * 会折成四行、整条报头超过 200px,吸附等于永久吃掉四分之一屏。现在索引
+ * 不再折行(放不下的收进「更多」下拉),报头在 420px 上也只是一行约 52px,
+ * 那条理由不成立了,override 就跟着去掉 —— 全站只剩这一条规则。
  *
  * 底色本来就是不透明的 `--bg-elevated`,所以**不需要 `backdrop-filter`** ——
  * 那是一层额外的合成开销,换来的半透明毛玻璃在这里没有用武之地。
  *
  * z-index 取 20:高过正文和底部悬浮条(z-index: 5),低过任何弹层。
  * 回报率页那条全屏轨迹画布是 `z-index: -1`,本来就在所有内容下面,不受影响。
+ * (`nav-overflow.ts` 的下拉面板取 30,要压过报头自己。)
  */
 .site-header {
   position: sticky;
@@ -459,30 +465,30 @@ p {
 }
 
 /*
- * 报头。**两行,位置固定**,不随视口宽度变。
+ * 报头。**一行,三个位置固定**:品牌 / 工具索引 / 外观开关。
  *
- * 原来是 `display: flex; flex-wrap: wrap`:品牌、10 个导航项、外观开关挤在一个
- * 可折行的 flex 行里,于是宽度一不够就各自找地方落脚 —— 1440px 上导航自己占
- * 两行、开关被甩到第三行最右边;窄一点又是另一个排布。头部高度跟着视口宽度跳,
- * 而"翻一份记录"这件事本身就要求版面是稳的。
+ * 这里原来是两行(第一行品牌 + 开关,第二行整条留给索引)。当时排不下是因为
+ * 十个工具名全写出来要 1142px,而这一栏只有 1060px。现在索引改用短名
+ * (见 `tools.ts` 的 `navLabel`),十项合计 509px —— 一行放得下,报头也回到一行,
+ * 高度从约 122px 收到约 60px。
  *
- * 现在是一张确定的网格:第一行左品牌、右外观开关,第二行整条留给工具索引。
- * **一个字的标记都没动** —— 三个子元素在 DOM 里的顺序本来就是对的,只是用
- * 显式定位把"谁在哪"写死,不再交给 flex 去猜。
+ * **排不下时不再折行,而是折叠**:尾部几项进「更多」下拉,收哪几个由
+ * `nav-overflow.ts` 量出来。
+ *
+ * 第一列取 `auto` 而不是 `1fr`:品牌要按自己的字宽收口,不然它的可点区域会
+ * 横跨半个报头。中间那列是 `minmax(0, 1fr)` —— **下界那个 `0` 不能省**,
+ * grid 项默认不会收缩到内容宽度以下,少了它导航宁可把报头撑破也不肯交给折叠。
  */
 .site-header .wrap {
   display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   column-gap: 20px;
   padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 .brand {
-  grid-column: 1;
-  grid-row: 1;
-  align-self: center;
-
   /* 负外边距抵掉下面的左内边距,字形仍然落在容器的对齐线上 */
   margin-inline: -8px;
   padding: 4px 8px;
@@ -508,46 +514,52 @@ p {
 }
 
 /*
- * 工具索引占满第二行,放不下就折行。
+ * 工具索引。**轨道 + 折叠**两件东西并排,中间留一个列间距。
  *
- * **试过横向滚动条,不行。** 10 个工具名加起来约 1160px,而这一栏是 1000px
- * (--max-width 1040 减两侧 20px),收不进去。横向滚动能保住"永远一行",
- * 但代价是**最后一个工具被裁在视野外**:从搜索直接落进来的人只会看到九个,
- * 第十个要靠一个看不见的手势才找得到。少一个入口比多一行贵得多。
- *
- * 也试过缩字号硬塞 —— 要缩到 12px 以下还不一定够,而且 10 个名字每个都以
- * "鼠标"开头,那两个字是重复的,把重复的部分压小是错的解法。
- *
- * 折行在桌面宽度上是**稳定的**:--max-width 封顶,所以视口从 1080px 往上,
- * 这一栏恒为 1000px,索引就恒为两行,高度不会随窗口宽度跳。
+ * 折叠不在这里做,也不该在 CSS 里做 —— 收哪几个取决于每项的实际像素宽度和
+ * 容器当前的实际宽度,两者都是渲染之后才有的事实。见 `nav-overflow.ts`。
  */
 .site-nav {
-  grid-column: 1 / -1;
-  grid-row: 2;
-
   display: flex;
-  flex-wrap: wrap;
-  /*
-   * 用列间距分开各项,**不给每项加左右内边距**:折行之后第二行的第一项
-   * 会跟着内边距缩进一格,两行对不齐。间距是各行共享的,内边距不是。
-   */
-  column-gap: 20px;
-
-  margin-top: 7px;
-  padding: 3px 0 5px;
-  border-top: 1px solid var(--border);
+  align-items: center;
+  min-width: 0;
+  column-gap: 16px;
 }
 
-.site-nav a {
+/*
+ * 排菜单的那条轨道。**`overflow: hidden` 是这里的关键** ——
+ * 窗口窄而脚本还没跑起来的那一两帧,放不下的项会被裁掉,而不是溢出到报头
+ * 外面把整页撑宽。裁掉只是难看一瞬,撑宽会留下一条横向滚动条。
+ *
+ * 负外边距抵掉首项的左内边距:flex 按**外边距盒**排布,所以这样首项的字形
+ * 才落在容器的对齐线上,和左边的品牌对齐。
+ * **抵在轨道上,不是抵在每一项上** —— 每一项都挂负外边距的话,首项会被自己
+ * 的 `overflow: hidden` 从左边裁掉。
+ */
+.site-nav__track {
+  display: flex;
+  align-items: center;
   /*
-   * 负外边距抵掉自己的左内边距:flex 按**外边距盒**排布,所以这样既能
-   * 让文字回到对齐线上(第一个工具名和左边的品牌对齐,第二行第一项也
-   * 和第一行对齐),又给悬停底色留出了可以铺开的宽度。
-   *
-   * 内边距是 11px,所以列间距要 30px 才够 —— 负外边距是从**两边**各拉
-   * 11px 进来的,实际间距是 `column-gap - 22`,不是 `column-gap`。
+   * 16px 是**量出来的下限,不是审美选择**。十个短名加起来约 700px,
+   * 而 1000px 视口下导航列只有约 724px —— 20px 间距时余量不到 10px,
+   * 换一个中文字体(各平台字宽不同)就会翻成折叠态。
+   * 缩到 16px 把余量拉到 40px 上下,1024 及以上的机器才稳。
    */
-  margin-inline: -11px;
+  column-gap: 16px;
+
+  margin-left: -11px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.site-nav__item {
+  /*
+   * **`flex: none` 不是可选项。** 允许收缩的话,窗口一窄每项就各被压扁一点,
+   * 而"量出来的宽度"正是折叠判据的输入 —— 一个被压扁的量不出真实占用,
+   * 折叠数会跟着错。宁可溢出,由折叠去处理。
+   */
+  flex: none;
   padding: 4px 11px;
   border-radius: var(--radius-pill);
   color: var(--text-dim);
@@ -556,7 +568,7 @@ p {
   white-space: nowrap;
 }
 
-.site-nav a:hover {
+.site-nav__item:hover {
   background: var(--bg-inset);
   color: var(--text);
   text-decoration: none;
@@ -570,26 +582,110 @@ p {
  * 两种状态用同一种画法,会让"十个里我在这个"和"三个里我选了这个"看起来
  * 是同一件事。
  */
-.site-nav a[aria-current='page'] {
+.site-nav__item[aria-current='page'] {
   background: var(--accent-dim);
   color: var(--accent);
 }
 
+/* ---------- 折叠出来的「更多」 ---------- */
+
+.site-nav__more {
+  position: relative;
+  flex: none;
+}
+
 /*
- * 外观开关(跟随系统 / 浅色 / 深色)。按钮由 ui.ts 的 mountThemeToggle 建出来,
- * 这里只管长相。
+ * `hidden` 必须显式管住。默认样式表里的 `[hidden] { display: none }` 会被
+ * 任何一条 `display` 声明压过,这里虽然没写,但下一个人加一条 flex 就会
+ * 静默失守 —— 全站已经在 `.test-area__hint[hidden]` 上踩过一次。
+ */
+.site-nav__more[hidden] {
+  display: none;
+}
+
+.site-nav__trigger {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+
+  padding: 4px 11px;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+
+.site-nav__trigger:hover,
+.site-nav__more[data-open] .site-nav__trigger {
+  background: var(--bg-inset);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.site-nav__caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid currentColor;
+}
+
+.site-nav__panel {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+
+  min-width: 8rem;
+  padding: 6px;
+
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+
+  /*
+   * **按钮和面板之间不能留空隙。** 鼠标从「更多」往下走的那几个像素里,
+   * `:hover` 会断掉,面板当场收起 —— 永远点不中里面任何一项。
+   * 这条透明上边框就是那段过桥:透明,但**参与命中测试**;
+   * `background-clip` 保证底色不铺到它下面去。
+   */
+  border-top: 6px solid transparent;
+  background-clip: padding-box;
+}
+
+.site-nav__more:hover .site-nav__panel,
+.site-nav__more:focus-within .site-nav__panel,
+.site-nav__more[data-open] .site-nav__panel {
+  display: block;
+}
+
+/* 搬进面板的项铺满一行:那里是竖排的清单,不是横排的药丸 */
+.site-nav__panel .site-nav__item {
+  display: block;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+}
+
+/*
+ * 外观开关(浅色 / 深色)。按钮由 ui.ts 的 mountThemeToggle 建出来,
+ * 这里只管长相。位置由网格给(第一行最后一列)。
  *
- * 位置由网格给(第一行第二列),不再用 `margin-left: auto` —— 那是在 flex 里
- * 把元素推到行尾的写法,进了网格就只剩一个多余的偏移。它和品牌同处第一行、
- * 分列两端,这才是"身份"和"外观"该待的地方:它们都跟当前这一页是什么无关。
+ * **未选中只有文字,选中靠一圈描边。** 这一条和下面那条全站的
+ * `button[aria-pressed='true']`(实心药丸)**故意不一样**,不是漏了。
+ *
+ * 实心药丸是给"同屏三五个选项里我挑了哪个"用的(双击页的左右中、CPS 页的
+ * 5/10/30 秒)—— 那些按钮在一堆同类里必须一眼认出来。而外观开关**只有两个**,
+ * 两个按钮里哪一个是当前状态本来就一目了然;再给它一块实心底,报头里就会
+ * 出现全页最亮的一小块,而它管的只是一件跟内容无关的事。
  */
 .theme-switch {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: center;
-
   display: flex;
   gap: 2px;
+  flex: none;
 }
 
 .theme-switch button {
@@ -601,9 +697,16 @@ p {
   color: var(--text-dim);
 }
 
+.theme-switch button:hover {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 .theme-switch button[aria-pressed='true'] {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 /*
@@ -1158,49 +1261,328 @@ select {
 /* ---------- 工具索引 ---------- */
 
 /*
- * 首页的目录。不是十张一模一样的卡片——是一份带细线分隔的清单,
- * 每项右边标出**这个测量有多可信**。
+ * 首页的四档可信度名册。
+ *
+ * 每一档的含义**只说一次**,不让十张卡各抄一遍同一句话
+ * ——六个「直接测得」抄六份,迟早有一份漂掉。
+ *
+ * 这一块就是原先「关于测量精度」那一节的**通用半边**;每一项自己那半句
+ * 在卡底的 `.mini-card__note` 里。两半合起来,原来那些事实一条没少。
+ *
+ * **`margin: 0`**:名册从"网格上面"搬到了"网格下面",上面贴着的是
+ * `<p class="prose">`(自带 1rem 下边距),下面贴的是 `<h2>`(自带 3.5rem 上边距),
+ * 两边都不需要它再补 —— 原先那个 `margin-bottom: 22px` 是冲着网格去的,
+ * 现在会被 h2 的外边距整个吃掉,留着就是一条**读不出效果的死规则**。
  */
-.tool-list {
+.confidence-key {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.confidence-key__row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+/*
+ * `min-width` + `text-align: center` 是**截图看出来的**:四档的标签字数不一样
+ * (`估算` 两字,`只能看形状` 五字),药丸宽度跟着字数走,于是右边四句解释
+ * **各自从不同的 x 起步**,读起来像四段不相干的文字,而不是一张名册。
+ *
+ * 拉成等宽之后药丸成了名册该有的样子:左列对齐、右列也对齐,一眼能横着比。
+ * 5.4rem 是按最长那档("只能看形状",五字 × 0.75rem + 左右 padding)量的。
+ */
+.confidence-key__row dt {
+  flex: none;
+  min-width: 5.4rem;
+  text-align: center;
+}
+
+.confidence-key__mean {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+/*
+ * 首页的卡片网格。
+ *
+ * 换行交给 `auto-fit`,**不写媒体查询** —— 全站的处理方式,和
+ * `.mouse-diagram` / `.runs` / `.stat-grid` 一致。1060px 内容宽下排成三列
+ * (343px 一张),窄到装不下两列时自己堆成一列。
+ */
+.mini-grid {
   list-style: none;
   padding: 0;
   margin: 0;
-  border-top: 1px solid var(--border);
-}
-
-.tool-item {
-  border-bottom: 1px solid var(--border);
-}
-
-.tool-item__link {
   display: grid;
-  grid-template-columns: 15rem 1fr auto;
-  gap: 6px 22px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+
+  /*
+   * **`start`,不是默认的 `stretch`。** 这一条是截图看出来的:默认拉伸会把同一行
+   * 的卡片全部拉到最高那张的高度,而 DPI / 加速度 / 键盘这三张没有装置(内容比
+   * 别人矮一截),拉齐之后卡里就空出 ~150px 一片白 —— 空槽从框里搬到了卡片里,
+   * 还是同一个毛病:读者会以为那儿本该有东西、只是没加载出来。
+   *
+   * 让每张卡按自己的内容收口,行底参差是正常的,而页面上没有一处"假的空白"。
+   */
+  align-items: start;
+}
+
+/*
+ * 卡片本体。参数照抄 `.mouse-button` / `.run` —— 系统里既有的那种"纸面上的面板":
+ * `--bg-elevated` 底 + 1px 细线 + `--radius-lg`,**没有阴影**(全站零阴影,别开这个头)。
+ */
+.mini-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.mini-card__head {
+  display: flex;
   align-items: baseline;
-  padding: 15px 0;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mini-card__name {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: inherit;
 }
 
-.tool-item__link:hover {
-  text-decoration: none;
+.mini-card__name:hover {
   color: var(--accent);
 }
 
-.tool-item__name {
-  font-size: 1.0625rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.tool-item__desc {
-  color: var(--text-dim);
-  font-size: 0.9rem;
-  line-height: 1.65;
+.mini-card__desc {
   margin: 0;
+  color: var(--text-dim);
+  font-size: 0.84rem;
+  line-height: 1.55;
 }
 
-.tool-item__link:hover .tool-item__desc {
+/*
+ * 装置槽 —— 卡片里"那台仪器"占的位置。
+ *
+ * **空态留在纸面,一开测才落到仪器窗寄存器。** 这不是为了好看,是设计系统
+ * 自己那句话的直接兑现:**有颜色的地方就是在出数**。所以不运行的卡不亮,
+ * 十张并排也不会变成一片深色。运行态由 `mini-devices.ts` 加上 `.well`
+ * 和 `.mini-device--running`,令牌整套重映射,这里不用再写第二套配色。
+ *
+ * 空态里**必须留着那句"怎么开始"**。全站既成规矩:没数据时不画空槽 ——
+ * 一个空的灰框会被读成"组件没加载出来",而不是"还没测"(见 `.rate-chart:empty`)。
+ */
+.mini-device {
+  height: 120px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+
+  /*
+   * 轨迹画布的定位基准。画布是 `position: absolute; inset: 0`,
+   * 会盖满**内边距盒** —— 连同这 12px 一起,画面比文字区大一圈,不浪费。
+   */
+  position: relative;
+
+  /* 它同时是采样面:触屏不许滚动手势插进来,拖动时不许选中文字 */
+  touch-action: none;
+  user-select: none;
+}
+
+.mini-device__prompt {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.84rem;
+}
+
+/*
+ * 跑起来:虚线换成实线,并且**显式取井的边框色**。
+ *
+ * 不能偷懒只写 `border-style: solid` 让 `.well` 那条简写去管颜色:
+ * `.mini-device` 也自带一条 `border` 简写,而它在源码里排在 `.well` **后面** ——
+ * 同优先级下后写的赢,于是边框色会落到 `--border-strong`,那可是重映射后的
+ * `--well-border-strong`(#454b52),比井自己的线重一档。
+ *
+ * 井的边界只能靠边框说出来(深色下井和纸面靠填充只有 1.03:1,分不开),
+ * 所以这条线用哪个值是有讲究的,照 `.test-area` 那份来。
+ */
+.mini-device--running {
+  border: 1px solid var(--well-border);
+}
+
+/*
+ * 装置自建的实时画面。驱动每次开测换一个新的,所以里面的东西归工厂所有。
+ * `height: 100%` 是必要的:装置面是靠 flex 居中的,不定高的话内容会只占一行、
+ * 大数字浮在顶上,而不是落在正中。
+ */
+.mini-live {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mini-live__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+/*
+ * 正中那个大数字。颜色走 `var(--text)` —— 在仪器窗里它被重映射成磷光绿,
+ * 这里**不能**写死颜色,否则一进井就不跟着变了。
+ */
+.mini-live__big {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.9rem;
+  line-height: 1.05;
+}
+
+/* 间隔快得人做不到。朱砂是全站三个有颜色的地方之一,专门给"故障" */
+.mini-live__big--alert {
+  color: var(--danger);
+}
+
+.mini-live__caption {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+/* 键帽。按下去的那一个用 `--accent`,在井里自动变成磷光绿 */
+.mini-chip {
+  padding: 2px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: nowrap;
   color: var(--text-dim);
+}
+
+.mini-chip--down {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/*
+ * 轨迹画布。`inset: 0` 相对的是装置面的内边距盒,所以它比文字区大一圈。
+ * `display: block` 不能省:行内元素底下会多出几像素的基线空隙,
+ * 而那几像素会让画布和坐标系对不上。
+ */
+.mini-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/*
+ * 放不进卡片的那三项(DPI、加速度、键盘)。
+ *
+ * **实线、左对齐、按文字长短自己长。**
+ *
+ * 虚线边框说的是"点这里开始",而这三张卡里根本没有可点的东西,用虚线就是撒谎。
+ * 而 `height: auto` 这条是**截图看出来的**:原先给了 `min-height: 120px` 想跟
+ * 有装置的卡对齐,渲染出来框里只有顶上两行字、底下空着一大片 —— 那正是全站
+ * 那条规矩要挡的东西(一个空槽会被读成"组件没加载出来")。卡片本身由 grid 拉齐,
+ * 卡底的说明靠 `margin-top: auto` 钉在底边,不需要靠撑高这个框来对齐。
+ */
+.mini-device--static {
+  border-style: solid;
+  border-color: var(--border);
+  align-items: flex-start;
+  text-align: left;
+  height: auto;
+}
+
+.mini-device__why {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+/*
+ * 读数槽。空值是**破折号**不是 0 —— 走 `ui.ts` 的 `format()`,
+ * 页面里不许自己 `toFixed()`。"0 CPS"和"没测出 CPS"是两件事。
+ */
+.mini-read {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.mini-read__item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.mini-read__label {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.mini-read__num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+
+.mini-read__unit {
+  margin-left: 2px;
+  color: var(--text-faint);
+  font-size: 0.72rem;
+}
+
+/*
+ * 卡底那行说明 —— 折进来的「关于测量精度」。
+ *
+ * 它是**真实可见的正文**,不是 tooltip、不是折叠面板:收起来就等于把全站的
+ * 主张从首页删掉。
+ *
+ * 它**不再**用 `margin-top: auto` 压到卡底 —— 那套写法只在卡片被 grid 拉齐时
+ * 才有意义,而 `.mini-grid` 现在收口到内容(`align-items: start`),卡片按自己的
+ * 长短结束,`auto` 也就没有可分配的空间了。留着是一条**读不出效果的死规则**,
+ * 比没有更糟:下一个人会以为它在起作用。
+ */
+.mini-card__note {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+/* 规划中的工具:卡片形状对得上,但不给装置也不给链接 */
+.mini-card--planned {
+  opacity: 0.75;
 }
 
 /* 可信度标记:直接测得 / 估算 / 只能给方向 */
@@ -1587,18 +1969,6 @@ code {
 
 @media (max-width: 760px) {
   /*
-   * 报头在窄屏上**不吸附**。
-   *
-   * 桌面上它实测 121.8px(品牌行 + 两行工具索引);到了手机上工具索引会折成
-   * 四行,整条报头超过 200px —— 吸附的话会永久吃掉四分之一屏,而且吃掉的正是
-   * 最该留给内容的那一块。桌面保留吸附是因为那里它只占约 14%,
-   * 而工具索引是本站唯一的导航,滚到长页中段就够不着了。
-   */
-  .site-header {
-    position: static;
-  }
-
-  /*
    * 阶梯在窄屏上整体降一档,但**比例不变** —— 如果只缩 h1 不缩 h2,
    * 手机上标题和小节就一样大了,桌面端刚建立起来的那点层次会当场消失。
    */
@@ -1613,17 +1983,22 @@ code {
   }
 
   /*
-   * 工具索引在手机上回到**紧凑排布**:药丸的内边距和列间距都收掉。
-   * 10 个工具名在 380px 宽里按桌面的尺寸排会散成五六行,而且每一行
-   * 只有一个孤零零的药丸 —— 那时候药丸形状本身也没意义了。
+   * 工具索引在手机上收一档:药丸的内边距和列间距都收掉。
+   *
+   * 收不下也不要紧 —— 收不下的会进「更多」下拉(`nav-overflow.ts`),
+   * 所以这里调的是"一行能平铺几项",不是"会不会溢出"。
+   * 负外边距跟着内边距一起改,否则首项的字形就和品牌对不齐了。
    */
   .site-nav {
-    column-gap: 20px;
-    margin-top: 5px;
+    column-gap: 12px;
   }
 
-  .site-nav a {
-    margin-inline: -8px;
+  .site-nav__track {
+    column-gap: 12px;
+    margin-left: -8px;
+  }
+
+  .site-nav__item {
     padding: 4px 8px;
   }
 
@@ -1645,14 +2020,31 @@ code {
     font-size: 2.8rem;
   }
 
-  /* 目录在窄屏上改成上下堆叠 */
-  .tool-item__link {
-    grid-template-columns: 1fr;
-    gap: 4px;
+  /*
+   * 首页卡片的装置槽在窄屏上**收成一行**。
+   *
+   * 这不是"顺手调小"。卡片网格在窄屏上是**竖着摞十张**:桌面端靠"把精度那一节
+   * 折进卡片"正好把网格多花的钱付平(1440 实测基本持平),窄屏却付不平 ——
+   * 那一节在这里本来就只有 779px,而网格要 ~3100px。
+   *
+   * 空态从 120px 收到行高(约 42px),十张就是 780px;而**一开测又长回去**,
+   * 所以收掉的只是"还没测"时那块空着的面积,不是测量面板本身。
+   * 窄屏上本来也测不了鼠标(触屏没有左右键和滚轮),这个交换是划算的。
+   * **不新增断点**,760px 这个本来就是全站唯一的那个。
+   */
+  .mini-device {
+    height: auto;
+    min-height: 0;
+    padding: 10px;
   }
 
-  .confidence {
-    justify-self: start;
+  /* 跑起来的面要放得下读数和轨迹,所以这里给回一个下限 */
+  .mini-device--running {
+    height: 88px;
+  }
+
+  .mini-card__note {
+    font-size: 0.75rem;
   }
 
   .ref-table {

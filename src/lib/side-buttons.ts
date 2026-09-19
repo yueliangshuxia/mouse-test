@@ -13,8 +13,9 @@
  *
  * 监听挂在 `window` 上并用**捕获阶段**,有两个理由:
  *
- * - 覆盖整页,而不只是某一块区域。用户盯着按键卡片看的时候,指针多半停在
- *   卡片上而不是下面的测试区,挂在区域上的监听会整片漏掉。
+ * - 要拦的范围由 `scope` 参数决定,而**判据得自己算**。挂在区域元素上做不到
+ *   这件事:用户盯着按键卡片看的时候,指针多半停在卡片上而不是下面的测试区,
+ *   挂在测试区上的监听会整片漏掉。
  * - 赶在页面上任何 `stopPropagation()` 之前执行。默认行为虽然是在整个派发
  *   结束后才结算的,但捕获阶段先跑能让这条规则不受下游代码影响。
  *
@@ -28,13 +29,24 @@ export const SIDE_BUTTON_FORWARD = 4;
 /**
  * 让本页的鼠标侧键不再触发浏览器前进/后退。
  *
+ * **不给 `scope` 就是整页拦** —— 工具页要的是这一版:那一页整个就是测试面,
+ * 指针停在哪儿按下去都是在测,和位置无关。
+ *
+ * **给一个 `scope` 就只在"按下点落在它里面"时拦** —— 首页要的是这一版。
+ * 那边是一篇正文,十张卡只是它中间的一节;整页拦会让读者习惯性的
+ * "按侧键回上一页"在整篇文章上变成没反应,和右键菜单被吃掉是同一类耍横。
+ *
+ * 判据直接用 `event.target`,不记"上一次按在哪儿"(工具页那套边界判据需要它,
+ * 是因为拖拽时指针会离开起始元素)。侧键的导航是**这一次按下**的默认行为,
+ * 不涉及拖动 —— 按下那一刻指针在哪儿,`target` 就是哪儿。
+ *
  * 返回一个卸载函数,便于调用方只想在一段时间内(比如测试进行中)拦截。
  */
-export function suppressSideButtonNavigation(): () => void {
+export function suppressSideButtonNavigation(scope?: Element): () => void {
   const block = (event: MouseEvent): void => {
-    if (event.button === SIDE_BUTTON_BACK || event.button === SIDE_BUTTON_FORWARD) {
-      event.preventDefault();
-    }
+    if (event.button !== SIDE_BUTTON_BACK && event.button !== SIDE_BUTTON_FORWARD) return;
+    if (scope && !(event.target instanceof Node && scope.contains(event.target))) return;
+    event.preventDefault();
   };
 
   const options: AddEventListenerOptions = { capture: true };

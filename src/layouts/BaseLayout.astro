@@ -13,9 +13,17 @@ interface Props {
   current?: string;
   /** 可选的 JSON-LD 结构化数据 */
   jsonLd?: Record<string, unknown>;
+  /**
+   * 本页是否需要「跨域隔离」(即 5µs 时间戳而不是 100µs)。
+   *
+   * 开着的页面在**首次访问时会多加载一次** —— 隔离是文档在导航时定下的属性,
+   * 不重载拿不到。所以只有真的用得上的页面(回报率页)才开,别全站无差别重载。
+   * 机制见 `public/coi-serviceworker.js`。
+   */
+  isolation?: boolean;
 }
 
-const { title, description, current, jsonLd } = Astro.props;
+const { title, description, current, jsonLd, isolation = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 ---
 
@@ -31,22 +39,21 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <meta name="theme-color" content={THEME_COLORS.light} />
 
     <!--
-      主题必须在**首次绘制之前**定下来,否则选了深色的人每次加载都会先闪一帧
-      浅色。所以这个脚本是内联的:Astro 默认的 <script> 会被打包成延迟执行的
-      module,等它跑起来首帧已经画完了。
+      主题必须在**首次绘制之前**定下来,否则深色的人每次加载都会先闪一帧浅色。
+      所以这个脚本是内联的:Astro 默认的 <script> 会被打包成延迟执行的 module,
+      等它跑起来首帧已经画完了。
 
-      它读的是**存起来的偏好**(auto / light / dark),在系统偏好那里解析成
-      具体值,然后把结果写到 <html data-theme> 上。CSS 那边因此只需要一个
-      深色选择器,不必为「跟随系统」再写一遍整套令牌——理由见 src/lib/theme.ts。
+      开关上只有「浅色 / 深色」两个按钮,**系统偏好只在这里、且只在从没选过时
+      读一次**。这一层的取舍写在 src/lib/theme.ts 的文件头。
 
       常量走 define:vars 注入:内联脚本不能 import,但键名和色值也不该在
       这里再手抄一份。
     -->
     <script is:inline define:vars={{ themeKey: THEME_KEY, themeColors: THEME_COLORS }}>
       (function () {
-        var pref = 'auto';
+        var stored = null;
         try {
-          pref = localStorage.getItem(themeKey) || 'auto';
+          stored = localStorage.getItem(themeKey);
         } catch {
           /*
            * 隐私模式下 localStorage 一碰就抛。**不能因此退回浅色**——
@@ -55,9 +62,14 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
            */
         }
 
+        /*
+         * 只认 'light' / 'dark' 两个字面量,其余(没存过、存坏了、读抛了)
+         * 一律落到系统偏好。顺序不能反:先判 dark 再判 light,
+         * 中间那一段留给"什么都不是"。
+         */
         var dark =
-          pref === 'dark' ||
-          (pref !== 'light' &&
+          stored === 'dark' ||
+          (stored !== 'light' &&
             window.matchMedia('(prefers-color-scheme: dark)').matches);
 
         document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -117,8 +129,58 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
 
     <script>
       import { el, mountThemeToggle } from '../lib/ui';
+      import { mountNavOverflow } from '../lib/nav-overflow';
 
       mountThemeToggle(el('theme-switch'));
+
+      /*
+       * 报头导航的溢出折叠。**每个页面都要挂** —— 它在报头里,而报头是
+       * BaseLayout 的一部分。见 `nav-overflow.ts`。
+       */
+      const nav = document.querySelector('[data-nav]');
+      if (nav) mountNavOverflow(nav);
+    </script>
+
+    <!--
+      跨域隔离。GitHub Pages 发不了 COOP/COEP,所以由 service worker 在本站自己
+      的响应到达页面之前补上这两个头 —— 详尽的代价与边界写在
+      public/coi-serviceworker.js 的文件头,改这条之前先读它。
+
+      这里做两件事,**分开**:注册在每一页都做(这样从首页走到回报率页时已经
+      被 worker 接管了,不需要重载);重载只在本页声明了 isolation 时做。
+    -->
+    <script is:inline define:vars={{ swUrl: href('coi-serviceworker.js'), needsIsolation: isolation }}>
+      (function () {
+        // 已经隔离就什么都不用做(本地 dev 由 astro.config 的 server.headers 提供)。
+        // 不认这个属性的浏览器上它是 undefined,`!== false` 同样提前返回。
+        if (window.crossOriginIsolated !== false) return;
+        if (!window.isSecureContext || !navigator.serviceWorker) return;
+
+        navigator.serviceWorker
+          .register(swUrl)
+          .then(function () {
+            return navigator.serviceWorker.ready;
+          })
+          .then(function () {
+            if (!needsIsolation || window.crossOriginIsolated) return;
+            /*
+             * 「只重载一次」的保险。没有它,万一隔离因为任何原因没生效
+             * (响应头被中间层剥掉、浏览器拒绝认),页面就会无限重载。
+             * sessionStorage 写不进去时宁可**不重载**:一次没隔离可以接受,
+             * 死循环不行。
+             */
+            try {
+              if (sessionStorage.getItem('coi-reloaded')) return;
+              sessionStorage.setItem('coi-reloaded', '1');
+            } catch (err) {
+              return;
+            }
+            window.location.reload();
+          })
+          .catch(function () {
+            /* 注册不上就照旧用 100µs 的时间戳,页面顶部会如实告警 */
+          });
+      })();
     </script>
   </body>
 </html>
