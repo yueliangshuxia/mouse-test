@@ -47,7 +47,7 @@ npx vitest run tests/analysis.test.ts
 
 `astro.config.mjs` 里的 `devToolbar: { enabled: false }` 关掉了 Astro 自带的开发工具栏:它和站点自己的底部悬浮条(`.site-dock`)会叠在视口底部正中央的同一个位置,开着的话开发时分不清哪个是哪个。**只影响 `astro dev`,对 `dist/` 无影响。** 改这条要**重启**才生效,它不热重载。
 
-npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。
+npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本要求写在 `package.json` 的 `engines`(≥22.12),CI 也钉在 22。
 
 ## 架构
 
@@ -64,12 +64,17 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。
 | `src/lib/keyboard-layout.ts` | 键位布局数据,键盘页的 frontmatter(画键帽)和 `<script>`(`code` → 标签)共用 | — |
 | `src/lib/theme.ts` | 主题常量。同上,**被两个世界同时消费**:`<head>` 里那个阻塞脚本(不能 `import`)和 `ui.ts` 的开关 | — |
 | `src/lib/ui.ts` | 页面脚本共用的 DOM 工具。`setText` 那条"写入前比较"的约定就靠它统一 | — |
-| `src/lib/tools.ts` | 工具注册表 —— 导航、首页索引、结构化数据的唯一事实来源 | — |
+| `src/lib/url.ts` | `href()` —— 站内链接唯一该走的拼接口。**写根路径构建不报错、上线才 404**,见「部署」 | — |
+| `src/lib/faq.ts` | FAQ 答案里 `**强调**` 的两个出口:渲染用 `faqHtml`、JSON-LD 用 `faqText`。见「页面约定」 | — |
+| `src/components/*.astro` | `ToolNav`(全站导航)、`StatPanel`(`data-stat` 契约的产出方,配 `ui.ts` 的 `setStat`) | — |
+| `src/lib/tools.ts` | 工具注册表 —— 导航、首页索引、结构化数据的唯一事实来源。`slug` **同时是页面文件名** | — |
 | `src/styles/global.css` | **全站样式与两寄存器设计系统**。改界面之前必须先读懂它的机制,见下面「样式」两节 | 真机手测 |
 
 `ruler.ts` 和 `sampler.ts` 一样是**薄的**:它只界定一次手势的起止,不做任何换算。像素换算成 DPI 是 `estimateDpi` 的活,那边有单测。
 
 采样层必须这么薄的原因:1000Hz 下回调每秒跑 1000 次,里面放任何 DOM 操作都会直接拖垮测量精度——**我们要测的东西会被自己的代码污染**。缓冲区用 TypedArray 而非对象数组同理:后者产生的短命对象会引发 GC 停顿,而那几毫秒会被如实记录成"丢帧"。
+
+上表里 `ui.ts` 那一行**说窄了**:它不止是 `setText`。工作台默认行为的拦截、主题开关、刷新循环(`createTicker`)、最好成绩的读写、以及全站共用的 `format()` 都在它里面。页面脚本要用什么零碎的 DOM 工具,**先去这里找一遍**,别在页面里另起一份。
 
 **贯穿全站的原则:测不准就明说,不要给一个看起来精确的假数字。** 这是这类工具站的信誉所在。
 
@@ -127,6 +132,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。
 - **两次输入事件之间的间隔必须取 `event.timeStamp`,不能取处理函数里的 `performance.now()`。** 浏览器会把攒在一起的事件放进**同一个任务**里派发,那一刻两个处理函数几乎是同时跑的,`performance.now()` 的差会塌到 0。对本站这直接等于造假:一次正常的人手双击会被算成 0 毫秒报成"连击",一次正常的松手再按会落进 30ms 窗口报成"瞬断"。`event.timeStamp` 是事件自己带的时刻,不吃这份派发延迟(剩下的批处理涂抹在 0.6ms 量级,对本站几十毫秒起的门槛可以忽略)。
   反过来,**"一段按住/经过了多久"用 `performance.now()`**——按住不动不产生任何事件,只有墙钟知道过了多久(`hold-drag-test.astro` 的实时秒数、`keyboard-test.astro` 的按住时长)。两者同源,可以直接相减。
   判断标准就一句:**量的是"两个事件之间"还是"一段墙钟时间"**。
+- **工作台的默认行为要按"落点"拦,不能按"区域"拦。** `ui.ts` 的 `suppressWorkbenchDefaults()` 一次挡掉右键菜单、中键自动滚动、中键 `auxclick`。中键那条**是真的污染读数**:页面跟着指针滚,采样面从指针底下溜走,量到的坐标全是错的。判据是 `event.target` 落不落在控件上(`a, button, select, input, textarea`)——**拖拽时指针一定会离开测试区**,按区域挂等于没挂(双击页原来就挂在测试区上,推鼠标推到一半菜单照弹)。它**刻意不返回还原函数**,而且**不能**改成在 `pagehide` 里摘:页面进 bfcache 时 `pagehide` 照样触发,用户按返回键回来之后就再也没人拦这些默认行为了。
 - **指针捕获会把 `click` 一并重定向到捕获元素。** 所以当采样面是整个文档时,`capture` 必须关掉,否则页面上的按钮会全部失效。
 - `pointerrawupdate` 与 `getCoalescedEvents()` 需要安全上下文(Chrome 142+ 强制)。非 HTTPS 页面上回报率测试直接失效,能力探测会告警。
 - 部分 Firefox 把合并事件的 timestamp 设为 0(采样层的 `aggregate` 模式)。此时只能给平均回报率,分窗口的峰值和波动都做不了,页面必须如实降级而不是硬算。
@@ -138,6 +144,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。
 - Canvas 配色从 CSS 变量读(`--trail-color`),不要在 TS 里硬编码颜色,否则主题切换后画布和界面会脱节。`renderer.ts` 里那个兜底常量是唯一的例外(`--trail-color` 读不到时用),它**必须和 `global.css` 的 `--trail-color` 同值**——两处都是绿色,改了一处忘了另一处,只有画布会错,界面上看不出来。同理 `theme.ts` 的 `THEME_COLORS.dark` 必须等于深色的 `--bg`。
 - 回报率页的轨迹画布是 `position: fixed; z-index: -1`,铺满视口压在正文下面。**这依赖 body 的底色被传播到根元素去画**(`html` 自己没有 background)。给 `html` 加背景会让轨迹被整片盖住。
 - 频繁刷新的 DOM 文本写入前先比较再赋值。每轮无条件写 `textContent` 会触发样式重算,而**这份开销本身会被如实测成丢帧**。这条约定由 `src/lib/ui.ts` 的 `setText` / `setStat` / `setBadge` 统一提供,**页面脚本一律用它们,不要各写一份**——散成十份副本的话,迟早有一份被"优化"掉。
+- **算不出来就显示破折号,不显示 0,也不显示 NaN。** 统一走 `src/lib/ui.ts` 的 `format()`。"0 CPS"和"没测出 CPS"是两件完全不同的事,而在小数格式化里它们长得一模一样——这是「测不准就明说」落到格式化层的样子,别为了省一次调用在页面里自己写 `toFixed()`。
 - `.ref-table` 的**第一列**是各表共同的"短等宽值"位(档位、区间、指标名),全局按等宽 + `white-space: nowrap` 排版。**第二列默认是普通文字**;只有第二列确实是数值的那两张表(DPI、回报率)自己在 `<table>` 上加 `.ref-table--kv` 才是等宽。早先的写法是全局把第二列当等宽值,逼得另外四张中文表在页面里各写一份 `<style>` 覆盖——**已经改掉了,别再退回去**。
 - Astro 的 frontmatter 变量在 `<script>` 里**不存在**(脚本被单独打包成外链模块)。两边都要用的常量要么从一个模块导入(`keyboard-layout.ts`、`theme.ts` 就是这么来的),要么在脚本里重算一遍并写明原因。
 - **FAQ 答案里的 `**强调**` 必须走 `faq.ts` 的两个函数**,不能直接 `{item.a}`。答案在 frontmatter 里是普通字符串,而 `{...}` 是**转义输出**、不是 markdown——直接插值的话 `**` 会原样显示成星号(六个页面都中过招,装了才发现)。渲染用 `faqHtml`(配 `set:html`),JSON-LD 用 `faqText`(去掉标记),两处都从同一份原文出发,不会漂。
@@ -150,7 +157,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。
 
 站点因此**落在子路径上**,不是域名根。这就是 `astro.config.mjs` 里 `base: '/mouse-test'` 的由来,也是 `src/lib/url.ts` 存在的理由——站内链接**必须**走 `href()`,写根路径(`/cps-test/`)会 404 且**构建不报错**。以后换备案域名(落在域名根)时,把 `base` 去掉即可,页面代码一行都不用动。
 
-- 部署走 `.github/workflows/deploy.yml`(Actions),**不经过 Jekyll**。不能改用「从分支发布」:`dist/_astro/` 以**下划线开头**,Jekyll 默认忽略这类目录,结果是 CSS/JS 全部 404、页面裸奔。(`public/.nojekyll` 是兜底。)
+- **push 到 `main` 即自动构建并发布**(也可在 Actions 页面手动触发),走 `.github/workflows/deploy.yml`,**不经过 Jekyll**。不能改用「从分支发布」:`dist/_astro/` 以**下划线开头**,Jekyll 默认忽略这类目录,结果是 CSS/JS 全部 404、页面裸奔。(`public/.nojekyll` 是兜底。)
 - `dist/` 不入库,由 CI 现构建。CI 里**顺带跑了 typecheck 和单测**。
 - `astro.config.mjs` 的 `server.headers` **只作用于 `astro dev` / `astro preview`,对 `dist/` 完全无效**。它的存在只是为了让本地开发就能拿到跨域隔离,好验证高精度那条路径。
 

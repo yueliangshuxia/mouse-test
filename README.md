@@ -1,43 +1,85 @@
-# Astro Starter Kit: Minimal
+# 鼠标测试
 
-```sh
-npm create astro@latest -- --template minimal
+在线鼠标测试工具站。打开网页就能检测鼠标的按键、回报率、滚轮与传感器状态,
+不需要安装任何驱动或客户端 —— 所有测量都在你的浏览器里完成,数据不会离开本机。
+
+**站点**:<https://yueliangshuxia.github.io/mouse-test/>
+
+## 工具
+
+| 工具 | 测什么 | 可信度 |
+| --- | --- | --- |
+| 鼠标按键测试 | 左右中键与侧键的响应、按下次数、按住时长 | 直接测得 |
+| 鼠标回报率测试 | 125Hz – 8000Hz 的实测回报率、峰值与窗口波动 | 直接测得 |
+| 鼠标双击测试 | 连击与抖动,自动标记 50ms 以内的异常触发 | 直接测得 |
+| 鼠标滚轮测试 | 滚动方向、每个滚轮的格数与累积位移 | 只能看方向 |
+| 鼠标 CPS 测试 | 每秒点击次数,5 / 10 / 30 秒三种模式 | 直接测得 |
+| 鼠标轨迹测试 | 平滑度、抖动与丢帧的**形状** | 只能看形状 |
+| 鼠标长按拖拽测试 | 按住期间是否出现意外释放 | 只能看形状 |
+| 鼠标 DPI 测试 | 按固定物理距离反推灵敏度 | 估算 |
+| 鼠标加速度测试 | 不同速度下位移是否一致 | 估算 |
+| 键盘按键测试 | 失灵按键与同时按键冲突(鬼键) | 直接测得 |
+
+「可信度」这一列是全站的选页依据:想知道按键坏没坏,用标着**直接测得**的;
+标着**只能看形状**的那几个,线索是真的,但线索不是证据。
+
+## 开发
+
+```bash
+npm install
+npm run dev        # 开发服务器 http://localhost:4321
+npm run typecheck  # astro check,保持 0 error / 0 warning / 0 hint
+npm test           # Vitest 单次运行
+npm run build      # 构建静态产物到 dist/
 ```
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+跑单个用例:
 
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
-├── src/
-│   └── pages/
-│       └── index.astro
-└── package.json
+```bash
+npx vitest run -t "1000Hz"            # 按用例名匹配
+npx vitest run tests/analysis.test.ts # 按文件
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+Node ≥ 22.12(见 `package.json` 的 `engines`)。
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+改动之后的验证顺序是 **typecheck → 单测 → 构建 → 真浏览器截图**。最后一步不是可选项:
+构建通过不说明看起来对,而对比度、折行、空状态都是**渲染之后才有的事实**,读 CSS 推理不出来。
 
-Any static assets, like images, can be placed in the `public/` directory.
+## 技术栈
 
-## 🧞 Commands
+Astro(静态输出)+ 原生 TypeScript。**热点路径不引入任何框架** ——
+鼠标事件采样、统计计算、Canvas 绘制全部是原生 TS。原因是 1000Hz 下采样回调每秒要跑
+1000 次,里面放任何 DOM 操作都会直接污染测量结果 —— 我们要测的东西会被自己的代码测坏。
 
-All commands are run from the root of the project, from a terminal:
+## 关于测量精度
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
+浏览器能读到的鼠标数据是有上限的。本站的做法是**把上限如实说出来**,
+而不是给一个看起来精确的假数字:
 
-## 👀 Want to learn more?
+- **只用计数类结论。** 浏览器会拖延事件的派发,但不会丢报文,所以「样本数 ÷ 时长」是无偏的;
+  而间隔被打上了 0.3–0.6ms 的批处理涂抹 —— 1000Hz 的周期只有 1ms。
+  因此抖动、掉包比例、长尾、核心离散度这几类指标是被**刻意删掉**的,不是没来得及做。
+- **中途停顿必须切段。** 换方向时的松手不产生任何事件,一个 500ms 的空档混进 2000 个 1ms 的
+  间隔里,就能把 1000Hz 拖到 800Hz —— 这正是「每次测都不一样」的成因。
+- **轨迹跳变不等于丢帧。** 传感器漏点和你手甩快了在数据上是同一个样子,浏览器拿不到报文序列号。
+  所以只给**形状**(均匀小间距里冒出的孤立尖峰),不给「丢帧了几次」这种结论。
+- **算不出来就显示破折号,不显示 0。** 「0 CPS」和「没测出 CPS」是两件完全不同的事。
+- **回报率峰值取互不重叠窗口的最大值**,不用滑窗 —— 滑窗会让相邻窗口高度相关,系统性抬高峰值。
 
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+## 部署
+
+推送到 `main` 即自动构建并发布到 GitHub Pages,见 [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)。
+CI 里顺带跑了类型检查和单测。
+
+站点落在**子路径** `/mouse-test/` 上(不是域名根),所以站内链接必须走 `src/lib/url.ts` 的
+`href()`。写根路径(`/cps-test/`)**构建不报错**,只会在上线后 404。
+
+GitHub Pages **发不了 COOP/COEP 响应头**,页面拿不到跨域隔离,`performance.now()` 精度被卡在
+100µs,回报率页的 8000Hz 高精度路径会降级(页面会如实告警,不会骗人)。要那条路正常工作,
+需要换一个能自定义响应头的托管方。另外 `github.io` 在国内访问不稳定且不能备案,
+所以 Pages 只适合当预览环境。
+
+## 文档
+
+设计系统(纸面 / 仪器窗两寄存器)、各测量项的硬约束与开发约定都写在
+[`CLAUDE.md`](./CLAUDE.md) —— 改界面或改判据之前先读它。
