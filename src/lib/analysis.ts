@@ -1242,6 +1242,23 @@ export interface DragEvent {
    * `event.button`——后者在组合键下会漏掉中间的状态变化(见 CLAUDE.md)。
    */
   kind: 'down' | 'up' | 'move';
+  /**
+   * 本事件发生时指针上按着哪些键 —— 本站编号(0 左 / 1 中 / 2 右 / 3 侧键4 /
+   * 4 侧键5)的**位掩码**,即第 `code` 位表示编号为 `code` 的键。
+   * 直接来自 `maskFromButtons(event.buttons)`。
+   *
+   * 为什么是掩码而不是"这一次是哪个键的":"一次事件"和"一个键"根本不是一对一
+   * 的。同时按住左键和右键拖动时,**那一次移动对两个键都算数**;用单个编号的话
+   * 同一个事件就得在流里存好几份,`events[]` 也就不再是"实际发生了什么"的忠实
+   * 记录 —— 而本站的整个立场是如实报告。掩码让一条真实事件 = 一条记录。
+   *
+   * 注意这是**状态,不是边沿**:`pointerup` 的 `event.buttons` 是 0,所以它的
+   * 掩码也是 0 —— 它只说"所有键都松开了",**不说松开的是哪个**;而
+   * `pointerdown` 只在从"无键"到"有键"那一次派发,第二个键的按下压根没有对应的
+   * `pointerdown`(见 CLAUDE.md「组合按键」)。所以每个键自己的 down / up 只能靠
+   * 前后两次事件的掩码比对推出来,这件事由 `analyzeDragEpisodesByButton` 负责。
+   */
+  buttonMask: number;
 }
 
 export interface DragEpisode {
@@ -1330,6 +1347,19 @@ export function analyzeDragEpisodes(
     let drops = 0;
     const last = press.up;
 
+    /*
+     * 合并之后这一段到底算不算结束,**要看链条最末端那一次**的 up,
+     * 不能看锚点那一次的。
+     *
+     * 锚点(`last`)只负责判据:每一次候选都拿它比对时间窗和半径(这是刻意的,
+     * 见下面的注释)。但"还按着吗"是另一回事——"按住 → 断一下 → 接着按住
+     * 不松"的时候锚点是有 up 的,而链条末端没有,那一段明明还在进行中。
+     * 用锚点判断会把它报成已结束:统计面板会把它算进"拖拽次数",
+     * 而实时秒数的显示条件正是 `current.open`,于是**恰好在用户等故障的那一刻
+     * 停住不动**。
+     */
+    let chainOpen = press.up === null;
+
     // 往后看:紧接着的重按是不是"疑似瞬断"?是就并进来,当作同一次按住。
     if (last !== null) {
       let next = i + 1;
@@ -1344,6 +1374,7 @@ export function analyzeDragEpisodes(
 
         drops++;
         points.push(...candidate.points);
+        chainOpen = candidate.up === null;
         i = next;
         next++;
       }
@@ -1366,11 +1397,101 @@ export function analyzeDragEpisodes(
       drops,
       distancePx,
       samples: points.length,
-      open: last === null,
+      open: chainOpen,
     });
   }
 
   return episodes;
+}
+
+/**
+ * 把原始事件流按按键拆开,各自跑一遍 `analyzeDragEpisodes`。
+ *
+ * **判据一个字都没变**:每个按键拿到的是一条独立的事件流,时间窗还是 30ms、
+ * 半径还是 4px。变的是"先拆开再判",不是"判得更松或更严"。
+ *
+ * 为什么必须拆:**混合的流直接喂给 `analyzeDragEpisodes` 会产出垃圾。**
+ * 按住左键、再按右键、再松开左键,原始序列是
+ * `down(左) move(左+右) move(右) up(无)`。那一遍只认 down/up 的先后、
+ * 不认是谁的,于是第三条(其实只是**左键**松开)会被当成整段结束,切出两段
+ * 毫无意义的段落。**所以全局合计只能把各按键的结果汇总**,不能从一条混合流算。
+ *
+ * **边沿是在这里推出来的,不是调用方给的。** 见 `DragEvent.buttonMask` 那段:
+ * 原始 `pointerup` 的掩码是 0(不说是哪个键),而第二个键的按下根本没有
+ * `pointerdown`。所以每个键自己的 down / up 只能靠**前后两次事件的掩码比对**
+ * 得到。放在这个纯函数里而不是页面里,是因为页面测不到 —— 本模块有单测。
+ *
+ * 返回的 Map **只含这次输入里真正出现过事件的按键**。没有这个键 ≠ 这个键 0 次,
+ * 而是"这个键一个事件都没收到"—— 可能压根没测它,也可能是鼠标或驱动根本没把它
+ * 作为鼠标键上报(有些鼠标的侧键被驱动发成键盘事件)。页面遇到这种情况必须显示
+ * "未测",**不能显示 0**:这两件事在数据上一样、结论相反,正是本站要防的那种错。
+ */
+export function analyzeDragEpisodesByButton(
+  events: readonly DragEvent[],
+  options: DragOptions = {},
+): Map<number, DragEpisode[]> {
+  const streams = new Map<number, DragEvent[]>();
+
+  /** 取某个编号的事件流,没有就建一条空的 */
+  function streamFor(code: number): DragEvent[] {
+    let list = streams.get(code);
+    if (!list) {
+      list = [];
+      streams.set(code, list);
+    }
+    return list;
+  }
+
+  let prevMask = 0;
+
+  for (const event of events) {
+    if (!Number.isFinite(event.t)) continue;
+
+    const { t, x, y, kind } = event;
+    const nextMask = event.buttonMask;
+
+    /*
+     * 只看**前后不同**的那些位 —— 没变的位没有边沿可推。
+     * 逐位取出置位编号:刻意**不** import 按键表,本模块至今没有任何 import,
+     * 是自包含的纯模块,引进来会平白多一条依赖。`rest & -rest` 取出最低的
+     * 那个置位,`31 - clz32(...)` 就是它的位号,`rest &= rest - 1` 把它抹掉 ——
+     * 循环次数等于**变化的键数**(≤5),而不是按键总数。
+     * 认不出的位(比如滚轮左右倾)在原样比对下也能自洽,过滤交给上游的
+     * `maskFromButtons` —— 那边才是知道"本站有哪几个键"的地方。
+     */
+    for (let rest = prevMask ^ nextMask; rest !== 0; rest &= rest - 1) {
+      const bit = rest & -rest;
+      const code = 31 - Math.clz32(bit);
+      // 位置取本事件的位置:变的是键,指针没动
+      const edge: DragEvent['kind'] = (nextMask & bit) !== 0 ? 'down' : 'up';
+      streamFor(code).push({ t, x, y, kind: edge, buttonMask: bit });
+    }
+
+    /*
+     * 状态没变的位:一次移动要记进**它当时按着的每一个键**里。
+     * 这是有意的重复计量 —— 同时按住两个键拖动时,两边都会算上这段路程,
+     * 因为每个键那一行问的都是"按住这个键期间走了多远"。页面必须说明这一点,
+     * 不能让"累计路程"看起来能直接相加。
+     *
+     * 刚变成按下的那一位**不**补一条 move:它的 down 就落在本事件的位置上。
+     */
+    if (kind === 'move') {
+      for (let rest = nextMask & prevMask; rest !== 0; rest &= rest - 1) {
+        const bit = rest & -rest;
+        streamFor(31 - Math.clz32(bit)).push({ t, x, y, kind: 'move', buttonMask: bit });
+      }
+    }
+
+    prevMask = nextMask;
+  }
+
+  const result = new Map<number, DragEpisode[]>();
+  for (const [code, list] of streams) {
+    result.set(code, analyzeDragEpisodes(list, options));
+  }
+
+  // 按键升序,输出稳定 —— 页面按编号对齐表格,单测也好断言
+  return new Map([...result].sort((a, b) => a[0] - b[0]));
 }
 
 // ---------------------------------------------------------------------------

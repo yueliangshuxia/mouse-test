@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyzeDragEpisodes,
+  analyzeDragEpisodesByButton,
   analyzeSegments,
   assessQuality,
   buildHistogram,
@@ -853,9 +854,10 @@ describe('measureDrift', () => {
 });
 
 describe('analyzeDragEpisodes', () => {
-  const down = (t: number, x = 0, y = 0) => ({ t, x, y, kind: 'down' as const });
-  const up = (t: number, x = 0, y = 0) => ({ t, x, y, kind: 'up' as const });
-  const move = (t: number, x = 0, y = 0) => ({ t, x, y, kind: 'move' as const });
+  // buttonMask 默认第 0 位(左键):这些用例都不关心是哪个键
+  const down = (t: number, x = 0, y = 0, buttonMask = 1) => ({ t, x, y, kind: 'down' as const, buttonMask });
+  const up = (t: number, x = 0, y = 0, buttonMask = 1) => ({ t, x, y, kind: 'up' as const, buttonMask });
+  const move = (t: number, x = 0, y = 0, buttonMask = 1) => ({ t, x, y, kind: 'move' as const, buttonMask });
 
   it('一次干净的按住:一段,零瞬断', () => {
     const episodes = analyzeDragEpisodes([down(0, 0, 0), move(10, 5, 0), up(20, 10, 0)]);
@@ -945,6 +947,150 @@ describe('analyzeDragEpisodes', () => {
 
     expect(episodes).toHaveLength(1);
     expect(episodes[0].startMs).toBe(10);
+  });
+
+  it('瞬断之后还按着不松:那一段仍然是 open,不能算成已结束', () => {
+    // 这是本页最主要的用法:按住不动等故障。合并之后链条末端没有 up,
+    // 说明用户还按着。按锚点判断会报成 false,于是统计面板把它算进
+    // "拖拽次数",而实时秒数的显示条件正是 open —— 恰好在用户等故障的
+    // 那一刻停住不动。
+    const episodes = analyzeDragEpisodes([down(0), up(10), down(20), move(30)]);
+
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].drops).toBe(1);
+    expect(episodes[0].open).toBe(true);
+    expect(episodes[0].durationMs).toBe(30);
+  });
+
+  it('瞬断之后最后松开了:这一段才算真的结束', () => {
+    const episodes = analyzeDragEpisodes([down(0), up(10), down(20), move(25), up(30)]);
+
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].drops).toBe(1);
+    expect(episodes[0].open).toBe(false);
+    expect(episodes[0].durationMs).toBe(30);
+  });
+
+  it('连着瞬断好几次:每一跳都算一次,末段没松开就还是 open', () => {
+    // 顺带钉住锚点语义:每一次候选都跟**锚点那次**的 up 比,不是跟上一次合并的比。
+    // 这是刻意的(drops 数的是"这一次按住里断了几下"),别改成链式比较。
+    const episodes = analyzeDragEpisodes([down(0), up(5), down(10), up(15), down(20), move(30)]);
+
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].drops).toBe(2);
+    expect(episodes[0].open).toBe(true);
+  });
+});
+
+describe('analyzeDragEpisodesByButton', () => {
+  const LEFT = 0b00001;
+  const RIGHT = 0b00100;
+
+  /*
+   * 掩码是**状态**不是边沿,所以 `up` 那一刻手上什么键都不剩 —— 默认给 0。
+   * (上面那个 describe 里三个助手默认给 1,那是因为 `analyzeDragEpisodes`
+   * 根本不看掩码;这里必须写对,否则状态比对什么都推不出来。)
+   */
+  const down = (t: number, x = 0, y = 0, buttonMask = LEFT) => ({ t, x, y, kind: 'down' as const, buttonMask });
+  const up = (t: number, x = 0, y = 0, buttonMask = 0) => ({ t, x, y, kind: 'up' as const, buttonMask });
+  const move = (t: number, x = 0, y = 0, buttonMask = LEFT) => ({ t, x, y, kind: 'move' as const, buttonMask });
+
+  it('两个按键各自成段,互不干扰', () => {
+    const byButton = analyzeDragEpisodesByButton([
+      down(0, 0, 0, LEFT),
+      up(10, 0, 0, 0),
+      down(100, 0, 0, RIGHT),
+      up(110, 0, 0, 0),
+    ]);
+
+    expect([...byButton.keys()]).toEqual([0, 2]);
+    expect(byButton.get(0)).toHaveLength(1);
+    expect(byButton.get(2)).toHaveLength(1);
+    expect(byButton.get(2)?.[0].durationMs).toBe(10);
+  });
+
+  it('按住左键再按右键:第二次按下从位掩码里补出来,右键也算一段', () => {
+    // 组合键的真实序列:按下左键之后**不会**再来一个 pointerdown,
+    // 右键的按下是从某次 pointermove 的 buttons 掩码里比对出来的。
+    const byButton = analyzeDragEpisodesByButton([
+      down(0, 0, 0, LEFT),
+      move(50, 10, 0, LEFT | RIGHT),
+      move(80, 20, 0, RIGHT),
+      up(120, 20, 0, 0),
+    ]);
+
+    expect([...byButton.keys()]).toEqual([0, 2]);
+    // 左键:按下之后一直在掩码里,到 80ms 那次移动才消失
+    expect(byButton.get(0)).toHaveLength(1);
+    expect(byButton.get(0)?.[0].samples).toBe(3);
+    expect(byButton.get(0)?.[0].durationMs).toBe(80);
+    // 右键:50ms 那次移动把它带出来,120ms 松开
+    expect(byButton.get(2)).toHaveLength(1);
+    expect(byButton.get(2)?.[0].samples).toBe(3);
+    expect(byButton.get(2)?.[0].durationMs).toBe(70);
+  });
+
+  it('松开左键时右键还按着:左键那段收尾,右键那段照旧开着', () => {
+    // 这一条钉的是"没有 pointerup 也要能收尾"。松开左键时右键还按着,
+    // 浏览器**不会**派发 pointerup —— 左键的松开只体现在掩码少了一位。
+    // 若把取键方式退回 event.button,这一段会永远挂着不结束。
+    const byButton = analyzeDragEpisodesByButton([
+      down(0, 0, 0, LEFT),
+      move(50, 10, 0, LEFT | RIGHT),
+      move(80, 20, 0, RIGHT),
+    ]);
+
+    expect(byButton.get(0)?.[0].open).toBe(false);
+    expect(byButton.get(0)?.[0].durationMs).toBe(80);
+    expect(byButton.get(2)?.[0].open).toBe(true);
+    expect(byButton.get(2)?.[0].durationMs).toBe(30);
+  });
+
+  it('同时按住两个键拖动:路程各自记一份', () => {
+    // 这是**有意**的重复计量:每一个键的那一行问的都是"按住这个键期间走了多远"。
+    // 指针实际只走了 100px,两个键加起来是 150px —— 所以页面上"累计路程"
+    // 那一格必须说明它不能这样相加,否则就是个看着精确的假数字。
+    const byButton = analyzeDragEpisodesByButton([
+      down(0, 0, 0, LEFT),
+      move(50, 30, 40, LEFT | RIGHT),
+      move(100, 60, 80, LEFT | RIGHT),
+      up(150, 60, 80, 0),
+    ]);
+
+    // 左键从头按住,两段路都算
+    expect(byButton.get(0)?.[0].distancePx).toBeCloseTo(100, 6);
+    // 右键是中途(30,40)才按下的,只算后面那一段
+    expect(byButton.get(2)?.[0].distancePx).toBeCloseTo(50, 6);
+  });
+
+  it('第一条就是移动、没见到按下:补一条按下,并如实标成没结束', () => {
+    // 页面漏掉了那次 pointerdown 时会出现这种流(比如按下发生在监听挂上之前)。
+    // 键确实还按着,所以不能丢;但这一段跟踪得不完整,open 会如实说出来。
+    const byButton = analyzeDragEpisodesByButton([move(0, 5, 5, LEFT)]);
+
+    expect([...byButton.keys()]).toEqual([0]);
+    expect(byButton.get(0)).toHaveLength(1);
+    expect(byButton.get(0)?.[0].open).toBe(true);
+    expect(byButton.get(0)?.[0].samples).toBe(1);
+  });
+
+  it('没收到任何事件:一个按键都不出现', () => {
+    // 不是"五个键各 0 次",而是"什么都没测到"。页面据此显示"未测"。
+    expect(analyzeDragEpisodesByButton([]).size).toBe(0);
+  });
+
+  it('只见到移动、没有按键按下:那个键不会出现', () => {
+    // 指针在空手移动。它不属于任何一个键。
+    expect(analyzeDragEpisodesByButton([move(0, 5, 5, 0)]).size).toBe(0);
+  });
+
+  it('阈值选项透传得下去', () => {
+    // 漏传 options 是最容易犯的错,而它不会让任何别的用例变红
+    const events = [down(0), up(10, 0, 0, 0), down(20), move(30)];
+    expect(analyzeDragEpisodesByButton(events).get(0)?.[0].drops).toBe(1);
+    expect(
+      analyzeDragEpisodesByButton(events, { repressWindowMs: 0 }).get(0)?.[0].drops,
+    ).toBe(0);
   });
 });
 

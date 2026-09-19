@@ -104,10 +104,28 @@ export function mountCapabilityNotices(host: Element | null): Capabilities {
  *   量到的坐标全是错的。这一条**是真的污染读数**,不只是烦人。
  * - **中键 auxclick**:和上面同源,顺带拦掉。
  *
+ * 这里**拦不到**的东西也记一笔:**Edge 的「鼠标手势」**(中文区默认开着,按住右键
+ * 拖动时在屏幕上画一条蓝线,凑够形状还会直接执行前进/后退)是浏览器进程那一侧的
+ * 功能,网页够不着。右键 `mousedown` 的 `preventDefault()` 试过了,无效;两页的
+ * FAQ / 注意事项里照实写了这件事,不在这条函数里假装能挡。
+ *
  * 例外是**真正的控件**:链接上右键「在新标签页中打开」、按钮上右键都是正常操作,
  * 夺走只会让人恼火。所以判据是"**落点**是不是控件",而**不是**"点在哪个区域"
  * ——拖拽时指针一定会离开测试区,按区域挂等于没挂(双击页原来就挂在测试区上,
  * 推鼠标推到一半菜单照弹)。
+ *
+ * 但**只看落点还不够**,这一点是实测出来的:上面那句"拖拽时指针一定会离开测试区"
+ * 反过来说也成立——一次拖动**结束**在控件上同样会发生。右键从测试区按下去、沿尺子
+ * 推、松手时指针正停在某个链接或按钮上,落点就是控件,菜单于是在**手势中途**弹出,
+ * 恰好毁掉这次测量。所以放行的条件收成**两半都要满足**:从控件上按下,**并且**
+ * 还在同一个控件里松开。链接的「在新标签页中打开」照常能用(那本来就是按下和松开
+ * 都在同一个链接上),而拖拽引出的菜单一律挡掉。
+ *
+ * 因此这里要记住"按下时落在哪儿",而记法是**只在 `pointerdown` 里赋值,永不清零**。
+ * 这是被事件顺序逼出来的:实测 Chrome/Windows 右键是
+ * `pointerdown → mousedown → pointerup → mouseup → auxclick → contextmenu`,
+ * **菜单在松手之后才派发**——在 `pointerup` 里把标志清掉的话,轮到 `contextmenu`
+ * 时判据已经失效了,等于没写。它只需要在下一次按下时被覆盖。
  *
  * **刻意不返回还原函数。** 监听挂在 window 上,随文档一起销毁,没有可泄漏的东西;
  * 而在 `pagehide` 里摘掉它是**错的**——页面进 bfcache 时 `pagehide` 照样触发,
@@ -121,12 +139,39 @@ export function suppressWorkbenchDefaults(): void {
     );
   }
 
+  /**
+   * 最近一次 `pointerdown` 落在哪个元素上。**只在按下时赋值,不在松开时清**
+   * (理由见上面那段事件顺序)。
+   */
+  let pressOrigin: Element | null = null;
+
+  // 用捕获:页面自己的手势代码挂在 window 的冒泡阶段上,这一条必须比它们先跑
+  window.addEventListener(
+    'pointerdown',
+    (event) => {
+      pressOrigin = event.target instanceof Element ? event.target : null;
+    },
+    true,
+  );
+
   function block(event: Event): void {
-    if (isControl(event.target)) return;
+    // 从控件上按下、且没离开过它 → 放行,那是"在链接/按钮上点右键"的正常操作
+    const stayedOnOrigin =
+      pressOrigin !== null &&
+      isControl(pressOrigin) &&
+      event.target instanceof Node &&
+      pressOrigin.contains(event.target);
+    if (stayedOnOrigin) return;
     event.preventDefault();
   }
 
-  /** 只有中键会启动自动滚动,左右键的 mousedown 一概不碰 */
+  /**
+   * **只有中键**,左右键的 `mousedown` 一概不碰。
+   *
+   * 右键这里曾经也拦过一下(冲着 Edge 的手势去,想法见上面那段):中键自动滚动
+   * 是靠"渲染进程 `preventDefault()` 掉 `mousedown`,浏览器进程就不启动那个功能"
+   * 这套机制挡住的,手势看着像同一条路。**实测无效**,蓝线照画。**别再加回来。**
+   */
   function blockMiddle(event: MouseEvent): void {
     if (event.button !== 1) return;
     block(event);
