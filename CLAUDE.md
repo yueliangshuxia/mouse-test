@@ -120,7 +120,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - **CPS 页"点一下就开局"必须配一道结算冷却**(`RESTART_LOCK_MS`)。测试面不再需要先按开始,代价是结算那一刻手还在惯性连点——实测一台 20 CPS 的机器从结算起不停按,会在 **872ms** 后把刚出的成绩直接抹掉、原地开第二轮。而人自己收手只多出 1–3 下(约 50–150ms),所以 900ms 锁对人是六倍余量。改小这个数之前先想清楚:它保护的不是"好看",是**成绩还读不读得到**。`重置` 会清掉锁,按了就得立刻能开局。
 - **滚轮只有方向可靠。** `deltaMode` 只说"像素/行/页",从不说"一格是多少"。`normalizeWheelDelta` 的换算是**启发式**,页面上给的格数是估算值;`typicalDelta`(原始 deltaY 的众数)比任何换算后的数都诚实。
 - **轨迹跳变 ≠ 丢帧。** 传感器漏点和你手甩快了在数据上是同一个样子,浏览器拿不到报文序列号,区分不了。判读看**形态**:一串均匀小间距里冒出的**孤立尖峰**才是丢帧,连续一串变大是手快。所以 `detectTrailJumps` 同时给两个数——`jumps`(超线间隔总数,含连着出现的)和 `isolated`(自己超线、左右**两个**邻居都没超,首尾不参与)。**标题栏必须是 `isolated`**:`jumps` 里混着"手甩快了"的连续隆起,把它当结论端出去,就等于一边讲"跳变不等于丢帧"一边给一个分不清两者的数。
-- **拖拽瞬断只能叫"疑似"。** 中途断一下就是一次 `pointerup` 加一次 `pointerdown`,和真的松开再按完全一样。只能用行为特征反推(见 `REPRESS_WINDOW_MS` / `REPRESS_RADIUS_PX`),而行为特征不是铁证。
+- **拖拽瞬断只能叫"疑似"。** 中途断一下就是一次 `pointerup` 加一次 `pointerdown`,和真的松开再按完全一样。只能用行为特征反推(见 `REPRESS_WINDOW_MS` / `REPRESS_RADIUS_PX`),而行为特征不是铁证。这一页现在**五个键都能测**(按住哪个键就记在哪个键名下),但判据一个字没放宽——分组逻辑在 `analyzeDragEpisodesByButton`,它把**按键是状态而非边沿**这件事推到了极致:事件只带 `buttonMask`(那一刻按着哪些键),每个键自己的 down / up 靠**前后两条事件的掩码比对**推出来。这么绕是因为组合键下浏览器**根本不会**为第二个键的按下派发 `pointerdown`(见下面「组合按键」),松开一个键时另一个还按着也**不会**有 `pointerup`。推导放在这个纯模块里而不是页面里,就是为了能被单测覆盖。**没有收到过事件的键不进结果表**——"未测"和"0 次"是两件事,页面必须显示破折号。
 - **键盘一律用 `KeyboardEvent.code`** 定位,不用 `key`——后者随修饰键和输入法变。另外失焦时要**补发合成的松开事件**(`keyboard-test.astro` 的 `clearHeld()`),只清 DOM 高亮的话统计量会一直挂着一个不存在的故障。
 - **静止漂移测试里"采样数为 0"是最好的结果,不是"没有数据"。** `measureDrift` 对空区间返回 `null`(表示样本不足),照搬会把结论说反,所以 `trail-test.astro` 对 `n === 0` 单独处理。
 - **但"0 个采样"必须先被证明是有意义的。** 指针不在窗口里、鼠标没接上,页面同样一个事件都收不到——和"鼠标很安静"在数据上完全一样,结论却相反。所以漂移测试分三段(`DriftPhase`):`arming` 先等**第一个**采样到来,证明这个装置是活的;`settling` 等采样数不再增长,确认用户停手;`measuring` 才 `reset()` 开真正的 5 秒窗口。`arming` 超时(`ARM_TIMEOUT_MS`)就如实报"没收到信号",**不能**悄悄判成静止。同理,漂移的采样面必须是**整个文档**而不是测试区:用户把手从鼠标上拿开时,指针正停在"开始"按钮上,而那个按钮在测试区外面——采样面只取测试区的话,缓冲区永远是空的,一只坏鼠标也会拿满分。
@@ -128,11 +128,19 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 ## 浏览器 API 的坑
 
 - **组合按键(chorded buttons)。** `pointerdown` 只在指针从"无键按下"进入"有键按下"时派发一次,`pointerup` 只在**最后一个键**松开时派发。中间的每次按下/松开都走 `pointermove`。所以按键状态只能从 `event.buttons` 位掩码逐位 diff 得出,**用 `event.button` 会漏掉组合键的第二次按下和第一次松开**。实现见 `src/pages/button-test.astro`。
-- `MouseEvent.button` 的编号与 `MouseEvent.buttons` 的位序**不一样**:中键和右键是反的。翻译表见 `button-test.astro` 的 `BIT_FOR_CODE`。
+- `MouseEvent.button` 的编号与 `MouseEvent.buttons` 的位序**不一样**:中键和右键是反的。翻译表和按键清单(`BUTTONS` / `BIT_FOR_CODE` / `maskFromButtons`)在 **`src/lib/mouse-buttons.ts`**,`button-test.astro` 和 `hold-drag-test.astro` 共用同一份。抽成模块不只是省重复:`BUTTONS` 写在 frontmatter 里,而 frontmatter 变量在 `<script>` 里**不存在**(见「页面约定」),各写一份的话那个按键数迟早对不上。
+- **侧键能不能测,取决于鼠标固件和浏览器策略,页面说了不算。** 有些鼠标的侧键**根本不是以鼠标按键的形式上报**的——厂商驱动把它发成键盘事件或一段宏,浏览器收不到任何鼠标事件;另一些浏览器**不允许网页取消**侧键的前进/后退,一按整页就跳走、成绩全丢。`side-buttons.ts` 的 `suppressSideButtonNavigation()` 只能挡住后者,挡不住前者。所以侧键那一行显示破折号时,**只说明"页面没收到",不等于"按了 0 次"**——两者混成一个数字正是这类测试最容易骗人的地方,页面和 FAQ 都照实写了。另外:CDP 合成的 `Input.dispatchMouseEvent` **绕过**了操作系统和驱动层,所以"CDP 里侧键能测"**不能**证明一只装了厂商驱动的实体鼠标也能测,这条只能上手验。
+- **Edge 自带的「鼠标手势」网页端拦不掉,不要再试。** 中文区的 Edge 默认开着它(`edge://settings/mouseGesture`),按住右键拖动时会在屏幕上画一条蓝线,凑够形状还会**直接执行前进/后退**——`hold-drag-test`(五个键都要测,含右键)和 `button-test`(右键那张卡)两页因此受影响。它属于浏览器进程那一侧的功能,**没有任何网页 API 能关掉**;微软官方的 WebView2 议题(MicrosoftEdge/WebView2Feedback#3737)里,开发者把 `--disable-features=msEdgeMouseGestureSupported,msEdgeMouseGestureDefaultEnabled` 和 `--enable-features=kEdgeMouseGestureDisabledInCN` 试遍了**全部无效**,最后确认唯一有效的是那个设置项加**按站点的「阻止列表」**。
+  网页这一侧能试的只有一条:`mousedown` 里 `preventDefault()`。**实测无效**(中键自动滚动就是靠这套机制被挡住的,所以它看起来很像——但手势是在浏览器进程读完事件之后才轮到渲染进程回话,够不着)。`ui.ts` 的 `blockMiddle` 因此**只管中键**,别再改成连右键一起拦。
+  能探测到"手势开着"吗?**不能**——只能靠 UA 认出 Edge,而那会把所有关着手势的 Edge 用户一起吓一遍。所以两页都只在正文/FAQ 里如实交代 + 告诉用户怎么关,不做能力告警。
 - **两次输入事件之间的间隔必须取 `event.timeStamp`,不能取处理函数里的 `performance.now()`。** 浏览器会把攒在一起的事件放进**同一个任务**里派发,那一刻两个处理函数几乎是同时跑的,`performance.now()` 的差会塌到 0。对本站这直接等于造假:一次正常的人手双击会被算成 0 毫秒报成"连击",一次正常的松手再按会落进 30ms 窗口报成"瞬断"。`event.timeStamp` 是事件自己带的时刻,不吃这份派发延迟(剩下的批处理涂抹在 0.6ms 量级,对本站几十毫秒起的门槛可以忽略)。
   反过来,**"一段按住/经过了多久"用 `performance.now()`**——按住不动不产生任何事件,只有墙钟知道过了多久(`hold-drag-test.astro` 的实时秒数、`keyboard-test.astro` 的按住时长)。两者同源,可以直接相减。
   判断标准就一句:**量的是"两个事件之间"还是"一段墙钟时间"**。
-- **工作台的默认行为要按"落点"拦,不能按"区域"拦。** `ui.ts` 的 `suppressWorkbenchDefaults()` 一次挡掉右键菜单、中键自动滚动、中键 `auxclick`。中键那条**是真的污染读数**:页面跟着指针滚,采样面从指针底下溜走,量到的坐标全是错的。判据是 `event.target` 落不落在控件上(`a, button, select, input, textarea`)——**拖拽时指针一定会离开测试区**,按区域挂等于没挂(双击页原来就挂在测试区上,推鼠标推到一半菜单照弹)。它**刻意不返回还原函数**,而且**不能**改成在 `pagehide` 里摘:页面进 bfcache 时 `pagehide` 照样触发,用户按返回键回来之后就再也没人拦这些默认行为了。
+- **工作台的默认行为要按"落点"拦,不能按"区域"拦。** `ui.ts` 的 `suppressWorkbenchDefaults()` 一次挡掉右键菜单、中键自动滚动、中键 `auxclick`。中键那条**是真的污染读数**:页面跟着指针滚,采样面从指针底下溜走,量到的坐标全是错的。判据是 `event.target` 落不落在控件上(`a, button, select, input, textarea`)——**拖拽时指针一定会离开测试区**,按区域挂等于没挂(双击页原来就挂在测试区上,推鼠标推到一半菜单照弹)。
+- **但只看 "落点" 会漏掉拖拽的尾巴,所以判据是两半。** "拖拽时指针一定会离开测试区"反过来说也成立:一次拖动**结束**在控件上同样会发生。右键从测试区按下去、沿尺子推、松手时指针正停在某个链接上,落点就成了控件,菜单于是在**手势中途**弹出来——正是这条函数要挡的那件事。所以放行条件收成**从控件上按下、并且还在同一个控件里松开**:链接的「在新标签页中打开」照旧(那本来就是按下和松开都在同一个链接上),拖拽引出的菜单一律挡掉。**判定用的是"按下时的那个元素",不是"上一次事件的目标"。**
+  这里有个**被事件顺序逼出来的写法**:实测 Chrome/Windows 右键是 `pointerdown → mousedown → pointerup → mouseup → auxclick → contextmenu`,**菜单在松手之后才派发**。所以那个"按下落在哪儿"的记录**只在 `pointerdown` 里赋值,永不在 `pointerup` 里清零**——清了的话轮到 `contextmenu` 时判据已经失效,等于没写。它只需要在下一次按下时被覆盖。(`pointerdown` 用**捕获**阶段挂,保证比页面自己的手势代码先跑。)
+- 顺带记一笔:**`scroll-test.astro` 曾经是九个工作台页面里唯一没调 `suppressWorkbenchDefaults()` 的**,后果不只是右键弹菜单——中键自动滚动没被拦,而那一页量的正是滚动,按下去页面自己跟着指针滚,采样面从指针底下溜走。加页面时别忘了这一句。
+- 这条函数**刻意不返回还原函数**,而且**不能**改成在 `pagehide` 里摘:页面进 bfcache 时 `pagehide` 照样触发,用户按返回键回来之后就再也没人拦这些默认行为了。
 - **指针捕获会把 `click` 一并重定向到捕获元素。** 所以当采样面是整个文档时,`capture` 必须关掉,否则页面上的按钮会全部失效。
 - `pointerrawupdate` 与 `getCoalescedEvents()` 需要安全上下文(Chrome 142+ 强制)。非 HTTPS 页面上回报率测试直接失效,能力探测会告警。
 - 部分 Firefox 把合并事件的 timestamp 设为 0(采样层的 `aggregate` 模式)。此时只能给平均回报率,分窗口的峰值和波动都做不了,页面必须如实降级而不是硬算。
@@ -149,6 +157,13 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - Astro 的 frontmatter 变量在 `<script>` 里**不存在**(脚本被单独打包成外链模块)。两边都要用的常量要么从一个模块导入(`keyboard-layout.ts`、`theme.ts` 就是这么来的),要么在脚本里重算一遍并写明原因。
 - **FAQ 答案里的 `**强调**` 必须走 `faq.ts` 的两个函数**,不能直接 `{item.a}`。答案在 frontmatter 里是普通字符串,而 `{...}` 是**转义输出**、不是 markdown——直接插值的话 `**` 会原样显示成星号(六个页面都中过招,装了才发现)。渲染用 `faqHtml`(配 `set:html`),JSON-LD 用 `faqText`(去掉标记),两处都从同一份原文出发,不会漂。
 - 页面 `<style>` 的规则会被加上 `data-astro-cid-*` —— **是选择器带 cid,元素不带**。所以 `global.css` 里写 `.cps-live { … }` 照样命中那些元素,四页共用的实时读数定位才能收在一处。反过来,**没有 `<style>` 块的页面**(如 `button-test.astro`)**一条本页规则都没有**,它全部长相都只能在 `global.css` 里改;而 `ui.ts` 在运行期拼出来的节点(`.notice`)连页面 `<style>` 都够不着。
+- **工作台是并排的:测试区在左、读数在右**,由 `global.css` 的 `.workbench`(`__stage` / `__readout`)承担。比例语言沿用 `.keyboard` 那套 `flex-basis` 决定"够宽并排、不够宽自动堆叠",**不写媒体查询**;读数在下是换行顺序的自然结果,不要靠 `order` 去扳。十个页面里**只有 `polling-rate-test` 不套**——它的采样面是整个视口(`#pad` 是 `position: fixed`),左边没有盒子可放。
+  三条约束都是踩了会**静默出错**的那一类:
+  1. **读数块只能是测试区的兄弟,绝不能塞进 `.test-area` 里。** `.test-area` 不只是盒子,它**就是采样面**:`hold-drag-test` 靠 `area.contains(event.target)` 决定该不该开始记账,`trail-test` 把采样器挂在 `#area` 上,`scroll-test` 的 `wheel` 也只派发给指针所在元素。塞进去 = 鼠标划过读数区被当成在测试。
+  2. **`.test-area` 自己不能加 `padding`。** `renderer.ts` 用**外框** `getBoundingClientRect()` 定 `canvas.width/height` 和 `originX/originY`,加了 padding 原点就偏一个 padding、轨迹整体错位。要间距只能用外层容器 + `gap`。
+  3. **不要给 `#pad` 的任何祖先加 `transform` / `filter` / `will-change` / `contain` / `perspective`。** 那会让 `position: fixed` 改成相对该祖先定位,画布不再铺满视口。纯 flex/grid 容器是安全的。
+  另外 `.workbench__stage` / `__readout` 上的 `min-width: 0` **不能删**:flex item 默认不会收缩到内容宽度以下,`.ref-table` 一类长表格会把整栏撑破。
+  **刻意没有 sticky。** 量过:1440 下最高的读数栏 486px,而 900px 视口减去表头还剩 778px;420 下 537px 对 719px。**两者都装得下,钉住永远不会触发**——不为"看起来像设计"留一条不生效的 CSS。真要加,先在浏览器里量出确实够高再带实测阈值加。
 
 ## 部署
 

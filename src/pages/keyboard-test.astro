@@ -91,88 +91,94 @@ const jsonLd = {
     </ul>
   </div>
 
-  <div class="verdict">
-    <div>
-      <div class="verdict__label">当前按住</div>
-      <div><span class="verdict__value" id="held">0</span><span class="verdict__unit">个键</span></div>
-      <div class="verdict__note" id="held-note">把光标放在这个页面上,然后按键</div>
-    </div>
-    <div class="verdict__aside">
-      <span class="badge badge--idle" id="state-badge">等待按键</span>
-    </div>
-  </div>
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="keyboard well" id="keyboard">
+        <div class="keyboard__main">
+          {
+            MAIN_ROWS.map((row) => (
+              <div class="kb-row">
+                {row.map((item) =>
+                  isGap(item) ? (
+                    <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
+                  ) : (
+                    <div
+                      class="kb-key"
+                      data-code={item.code}
+                      data-held="false"
+                      data-tested="false"
+                      style={`flex:${item.width ?? 1}`}
+                    >
+                      {item.label}
+                    </div>
+                  ),
+                )}
+              </div>
+            ))
+          }
+        </div>
 
-  <div class="stat-grid">
-    <StatPanel id="presses" label="累计按下" primary hint="不含系统自动重复" />
-    <StatPanel id="unique" label="已触发的键" hint={`共 ${KEY_COUNT} 个`} />
-    <StatPanel id="max-held" label="同时按住最多" unit="键" hint="反映无冲能力" />
-    <StatPanel id="stuck" label="仍未松开" hint="失焦导致的不算" />
-  </div>
+        <div class="keyboard__side">
+          <div class="kb-grid kb-grid--nav">
+            {
+              NAV_ROWS.map((row) => (
+                <div class="kb-row">
+                  {row.map((item) =>
+                    isGap(item) ? (
+                      <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
+                    ) : (
+                      <div
+                        class="kb-key kb-key--small"
+                        data-code={item.code}
+                        data-held="false"
+                        data-tested="false"
+                        style={`flex:${item.width ?? 1}`}
+                      >
+                        {item.label}
+                      </div>
+                    ),
+                  )}
+                </div>
+              ))
+            }
+          </div>
 
-  <div class="keyboard well" id="keyboard">
-    <div class="keyboard__main">
-      {
-        MAIN_ROWS.map((row) => (
-          <div class="kb-row">
-            {row.map((item) =>
-              isGap(item) ? (
-                <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
-              ) : (
+          <div class="kb-grid kb-grid--numpad">
+            {
+              NUMPAD.map((key) => (
                 <div
-                  class="kb-key"
-                  data-code={item.code}
+                  class="kb-key kb-key--small"
+                  data-code={key.code}
                   data-held="false"
                   data-tested="false"
-                  style={`flex:${item.width ?? 1}`}
+                  style={`${key.colSpan ? `grid-column: span ${key.colSpan};` : ''}${key.rowSpan ? `grid-row: span ${key.rowSpan};` : ''}`}
                 >
-                  {item.label}
+                  {key.label}
                 </div>
-              ),
-            )}
+              ))
+            }
           </div>
-        ))
-      }
+        </div>
+      </div>
     </div>
 
-    <div class="keyboard__side">
-      <div class="kb-grid kb-grid--nav">
-        {
-          NAV_ROWS.map((row) => (
-            <div class="kb-row">
-              {row.map((item) =>
-                isGap(item) ? (
-                  <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
-                ) : (
-                  <div
-                    class="kb-key kb-key--small"
-                    data-code={item.code}
-                    data-held="false"
-                    data-tested="false"
-                    style={`flex:${item.width ?? 1}`}
-                  >
-                    {item.label}
-                  </div>
-                ),
-              )}
-            </div>
-          ))
-        }
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">当前按住</div>
+          <div><span class="verdict__value" id="held">0</span><span class="verdict__unit">个键</span></div>
+          <div class="verdict__note" id="held-note">把光标放在这个页面上,然后按键</div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="state-badge">等待按键</span>
+        </div>
       </div>
 
-      <div class="kb-grid kb-grid--numpad">
-        {
-          NUMPAD.map((key) => (
-            <div
-              class="kb-key kb-key--small"
-              data-code={key.code}
-              data-held="false"
-              data-tested="false"
-              style={`${key.colSpan ? `grid-column: span ${key.colSpan};` : ''}${key.rowSpan ? `grid-row: span ${key.rowSpan};` : ''}`}
-            >
-              {key.label}
-            </div>
-          ))
-        }
+      <div class="stat-grid">
+        <StatPanel id="presses" label="累计按下" primary hint="不含系统自动重复" />
+        <StatPanel id="unique" label="已触发的键" hint={`共 ${KEY_COUNT} 个`} />
+        <StatPanel id="max-held" label="同时按住最多" unit="键" hint="反映无冲能力" />
+        <StatPanel id="stuck" label="仍未松开" hint="失焦导致的不算" />
       </div>
     </div>
   </div>

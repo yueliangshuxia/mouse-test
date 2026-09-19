@@ -124,30 +124,36 @@ const jsonLd = {
     <button type="button" id="toggle">重置</button>
   </div>
 
-  <div class="test-area well cps-pad" id="pad" data-running="false">
-    <div class="test-area__hint" id="hint">
-      <span class="cps-start">
-        <span class="cps-start__call">点击开始</span>
-        <span class="cps-start__meta" id="hint-meta">5 秒 · 在这里快速连点左键</span>
-      </span>
-    </div>
-    <div class="cps-live" id="live" hidden>
-      <div class="cps-live__count" id="live-count">0</div>
-      <div class="cps-live__meta">
-        次点击 · 剩余 <span id="live-left">—</span> 秒 · <span id="live-cps">—</span> CPS
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well cps-pad" id="pad" data-running="false">
+        <div class="test-area__hint" id="hint">
+          <span class="cps-start">
+            <span class="cps-start__call">点击开始</span>
+            <span class="cps-start__meta" id="hint-meta">5 秒 · 在这里快速连点左键</span>
+          </span>
+        </div>
+        <div class="cps-live" id="live" hidden>
+          <div class="cps-live__count" id="live-count">0</div>
+          <div class="cps-live__meta">
+            次点击 · 剩余 <span id="live-left">—</span> 秒 · <span id="live-cps">—</span> CPS
+          </div>
+        </div>
+        <div class="cps-over" id="over" hidden>
+          <div class="cps-live__count" id="over-count">0</div>
+          <div class="cps-live__meta">时间到 · 再点一下重来</div>
+        </div>
       </div>
     </div>
-    <div class="cps-over" id="over" hidden>
-      <div class="cps-live__count" id="over-count">0</div>
-      <div class="cps-live__meta">时间到 · 再点一下重来</div>
-    </div>
-  </div>
 
-  <div class="stat-grid">
-    <StatPanel id="average" label="平均 CPS" primary hint="总次数 ÷ 测试时长" />
-    <StatPanel id="peak" label="峰值 CPS" hint="任意 1 秒内最多几下" />
-    <StatPanel id="clicks" label="点击次数" />
-    <StatPanel id="best" label="历史最佳" hint="峰值,存在本机" />
+    <div class="workbench__readout">
+      <div class="stat-grid">
+        <StatPanel id="average" label="平均 CPS" primary hint="总次数 ÷ 测试时长" />
+        <StatPanel id="peak" label="峰值 CPS" hint="任意 1 秒内最多几下" />
+        <StatPanel id="clicks" label="点击次数" />
+        <StatPanel id="best" label="历史最佳" hint="峰值,存在本机" />
+      </div>
+    </div>
   </div>
 
   <h2>每秒点击次数</h2>

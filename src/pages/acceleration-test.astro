@@ -117,46 +117,52 @@ const jsonLd = {
     <span class="test-hint" id="hint">两次必须推同样长的距离,否则不可比</span>
   </div>
 
-  <div class="runs">
-    <div class="run" id="run-slow" data-state="idle">
-      <div class="run__head">
-        <span class="run__index">第一次</span>
-        <span class="run__title">慢慢推</span>
-      </div>
-      <div class="run__value"><span id="slow-px">—</span><span class="run__unit">px</span></div>
-      <div class="run__meta" id="slow-meta">还没有测</div>
-      <div class="run__foot">
-        <button type="button" id="start-slow">开始测量</button>
-        <span class="run__speed" id="slow-speed">—</span>
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="runs">
+        <div class="run" id="run-slow" data-state="idle">
+          <div class="run__head">
+            <span class="run__index">第一次</span>
+            <span class="run__title">慢慢推</span>
+          </div>
+          <div class="run__value"><span id="slow-px">—</span><span class="run__unit">px</span></div>
+          <div class="run__meta" id="slow-meta">还没有测</div>
+          <div class="run__foot">
+            <button type="button" id="start-slow">开始测量</button>
+            <span class="run__speed" id="slow-speed">—</span>
+          </div>
+        </div>
+
+        <div class="run" id="run-fast" data-state="idle">
+          <div class="run__head">
+            <span class="run__index">第二次</span>
+            <span class="run__title">快速推</span>
+          </div>
+          <div class="run__value"><span id="fast-px">—</span><span class="run__unit">px</span></div>
+          <div class="run__meta" id="fast-meta">先做完第一次</div>
+          <div class="run__foot">
+            <button type="button" id="start-fast" disabled>开始测量</button>
+            <span class="run__speed" id="fast-speed">—</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="run" id="run-fast" data-state="idle">
-      <div class="run__head">
-        <span class="run__index">第二次</span>
-        <span class="run__title">快速推</span>
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">指针加速度</div>
+          <div>
+            <span class="verdict__value" id="ratio">—</span><span class="verdict__unit" id="ratio-unit"
+              >倍</span
+            >
+          </div>
+          <div class="verdict__note" id="verdict-note">两次都测完之后,这里会给出结论</div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="level-badge">等待测量</span>
+        </div>
       </div>
-      <div class="run__value"><span id="fast-px">—</span><span class="run__unit">px</span></div>
-      <div class="run__meta" id="fast-meta">先做完第一次</div>
-      <div class="run__foot">
-        <button type="button" id="start-fast" disabled>开始测量</button>
-        <span class="run__speed" id="fast-speed">—</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="verdict">
-    <div>
-      <div class="verdict__label">指针加速度</div>
-      <div>
-        <span class="verdict__value" id="ratio">—</span><span class="verdict__unit" id="ratio-unit"
-          >倍</span
-        >
-      </div>
-      <div class="verdict__note" id="verdict-note">两次都测完之后,这里会给出结论</div>
-    </div>
-    <div class="verdict__aside">
-      <span class="badge badge--idle" id="level-badge">等待测量</span>
     </div>
   </div>
 

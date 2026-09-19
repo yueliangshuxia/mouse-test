@@ -2,16 +2,9 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import StatPanel from '../components/StatPanel.astro';
 import { findTool } from '../lib/tools';
+import { BUTTONS } from '../lib/mouse-buttons';
 
 const tool = findTool('button-test')!;
-
-const BUTTONS = [
-  { code: 0, name: '左键', note: '主键' },
-  { code: 1, name: '中键', note: '滚轮按下' },
-  { code: 2, name: '右键', note: '副键' },
-  { code: 3, name: '侧键 4', note: '后退' },
-  { code: 4, name: '侧键 5', note: '前进' },
-];
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -40,30 +33,36 @@ const jsonLd = {
 
   <div id="cap-notice"></div>
 
-  <div class="mouse-diagram well" id="diagram">
-    {
-      BUTTONS.map((button) => (
-        <div class="mouse-button" data-button={button.code} data-active="false">
-          <div class="mouse-button__name">{button.name}</div>
-          <div class="mouse-button__code">{button.note}</div>
-          <div class="mouse-button__count" data-count={button.code}>
-            0
-          </div>
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="mouse-diagram well" id="diagram">
+        {
+          BUTTONS.map((button) => (
+            <div class="mouse-button" data-button={button.code} data-active="false">
+              <div class="mouse-button__name">{button.name}</div>
+              <div class="mouse-button__code">{button.note}</div>
+              <div class="mouse-button__count" data-count={button.code}>
+                0
+              </div>
+            </div>
+          ))
+        }
+      </div>
+
+      <div class="test-area well" id="area">
+        <div class="test-area__hint" id="hint">
+          在这个区域内按下鼠标的任意按键
         </div>
-      ))
-    }
-  </div>
+      </div>
+    </div>
 
-  <div class="stat-grid">
-    <StatPanel id="total" label="累计点击次数" primary />
-    <StatPanel id="holding" label="当前按住" unit="ms" hint="松开后归零" />
-    <StatPanel id="last-hold" label="上次按住时长" unit="ms" />
-    <StatPanel id="unique" label="已触发的按键" hint="共 5 个" />
-  </div>
-
-  <div class="test-area well" id="area">
-    <div class="test-area__hint" id="hint">
-      在这个区域内按下鼠标的任意按键
+    <div class="workbench__readout">
+      <div class="stat-grid">
+        <StatPanel id="total" label="累计点击次数" primary />
+        <StatPanel id="holding" label="当前按住" unit="ms" hint="松开后归零" />
+        <StatPanel id="last-hold" label="上次按住时长" unit="ms" />
+        <StatPanel id="unique" label="已触发的按键" hint="共 5 个" />
+      </div>
     </div>
   </div>
 
@@ -113,13 +112,19 @@ const jsonLd = {
       (页面上的链接和按钮除外,那里右键「在新标签页中打开」是正常操作),所以可以放心逐个按过去。
       触屏设备没有这些物理按键,请在电脑上使用。
     </p>
+    <p>
+      有一条<strong>本页拦不住</strong>:Edge 自带的“鼠标手势”会把<strong>按住右键拖动</strong>
+      解释成在画手势——屏幕上跟着画出一条蓝线,凑够形状后浏览器还会直接执行动作(后退、关标签页),
+      整页跳走。这不是网页能关掉的东西,微软官方也确认过没有网页端的开关。它在
+      <strong>中文区的 Edge 里默认开着</strong>,要用右键那一项的话,先在地址栏进
+      edge://settings/mouseGesture 关掉它,或把本站加进“配置鼠标手势”的阻止列表。
+    </p>
   </section>
 
   <script>
     import { el, mountCapabilityNotices, setStat, suppressWorkbenchDefaults } from '../lib/ui';
+    import { BUTTON_COUNT, eachButtonEdge, maskFromButtons } from '../lib/mouse-buttons';
     import { suppressSideButtonNavigation } from '../lib/side-buttons';
-
-    const BUTTON_COUNT = 5;
 
     const area = el('area');
     const diagram = el('diagram');
@@ -158,13 +163,12 @@ const jsonLd = {
     // ---- 交互 ----
 
     /**
+     * 当前认为按下的键(本站的 0–4 编号,不是 DOM 的位序)。
+     *
      * 按键状态**只能**从 `buttons` 位掩码推,不能用 `event.button`。
-     *
-     * 指针事件规范里的"组合按键"(chorded button)模型规定:`pointerdown` 只在指针
+     * 指针事件规范里的"组合按键"模型规定:`pointerdown` 只在指针
      * **从"没有任何键按下"进入"有键按下"**时派发一次,`pointerup` 只在**最后一个键**
-     * 松开时派发一次。中间的每一次按下和松开都走 `pointermove`。
-     *
-     * 也就是说"按住左键再按右键"这条最常见的操作,在事件流里长这样:
+     * 松开时派发一次。中间的每一次按下和松开都走 `pointermove`:
      *
      *     pointerdown  (左键, buttons=1)
      *     pointermove  (右键按下, buttons=3)   ← 没有第二个 pointerdown
@@ -174,23 +178,15 @@ const jsonLd = {
      * 早先的实现读 `event.button`,于是组合键的第二次按下和第一次松开全是隐形的——
      * 左右键一起按,一个都点不亮。`mousedown` / `mouseup` 倒是每个键都派发,
      * 但它们捕捉不到"在窗口外按下"这类情况,位掩码才是权威来源。
+     *
+     * 掩码的翻译表(`BIT_FOR_CODE`,中键和右键的位是反的)搬去了
+     * `src/lib/mouse-buttons.ts` —— 拖拽页也要用同一张表,而它原先在这里
+     * 跟 frontmatter 靠人肉同步。
      */
-    const BIT_FOR_CODE = [0, 2, 1, 3, 4];
-
-    /** 当前认为按下的键(本站的 0–4 编号,不是 DOM 的位序)。 */
     let downMask = 0;
 
     /** 正在跟踪的指针。只有从工作台上按下的那一次才开始记账。 */
     let armedPointerId: number | null = null;
-
-    /** 把 `MouseEvent.buttons` 位掩码翻译成本站的按键编号掩码。 */
-    function maskFromButtons(buttons: number): number {
-      let mask = 0;
-      for (let code = 0; code < BUTTON_COUNT; code++) {
-        if (buttons & (1 << BIT_FOR_CODE[code])) mask |= 1 << code;
-      }
-      return mask;
-    }
 
     /**
      * 对齐一次真实状态,把中间发生的按下/松开都补记上。
@@ -199,18 +195,19 @@ const jsonLd = {
      * 实时刷新走的是 rAF,那边只有 `performance.now()`。两者虽然同源,但混用
      * 一旦遇上时间原点不同源的实现,时长会算成天文数字——这里不值得为亚毫秒的
      * 精度差去冒这个险。
+     * (拖拽页反过来,那边一律用 `event.timeStamp` —— 它量的是"两个事件之间",
+     * 见 CLAUDE.md。判断标准就这一句:量的是间隔还是墙钟。)
+     *
+     * `eachButtonEdge` 自己也会在掩码没变时早退,但**外面这一层早退是必需的**:
+     * 它会挂在 `pointermove` 上,1000Hz 的鼠标每秒要调上千次,而下面还有
+     * `performance.now()` 和三次 `setStat`。
      */
     function syncButtons(buttons: number): void {
       const next = maskFromButtons(buttons);
       if (next === downMask) return;
       const now = performance.now();
 
-      for (let code = 0; code < BUTTON_COUNT; code++) {
-        const bit = 1 << code;
-        const wasDown = (downMask & bit) !== 0;
-        const isDown = (next & bit) !== 0;
-        if (wasDown === isDown) continue;
-
+      eachButtonEdge(downMask, next, (code, isDown) => {
         if (isDown) {
           counts[code]++;
           total++;
@@ -225,7 +222,7 @@ const jsonLd = {
           }
           renderActive(code, false);
         }
-      }
+      });
 
       downMask = next;
       renderSummary();

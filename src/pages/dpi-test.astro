@@ -133,36 +133,42 @@ const jsonLd = {
     <span class="test-hint" id="scale-note">检测中…</span>
   </div>
 
-  <div class="verdict">
-    <div>
-      <div class="verdict__label">估算 DPI</div>
-      <div>
-        <span class="verdict__value" id="dpi-main">—</span><span class="verdict__unit">DPI</span>
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well dpi-pad" id="pad" data-measuring="false">
+        <div class="test-area__hint" id="hint">
+          点“开始测量”后,把指针放在这里,然后沿尺子推
+        </div>
+        <div class="dpi-live" id="live" hidden>
+          <div class="dpi-live__value" id="live-px">0</div>
+          <div class="dpi-live__label">已移动像素 · 推完停住即可</div>
+        </div>
       </div>
-      <div class="verdict__note" id="dpi-note">
-        按上面的步骤准备好,点“开始测量”,然后沿尺子推出选定的距离
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">估算 DPI</div>
+          <div>
+            <span class="verdict__value" id="dpi-main">—</span><span class="verdict__unit">DPI</span>
+          </div>
+          <div class="verdict__note" id="dpi-note">
+            按上面的步骤准备好,点“开始测量”,然后沿尺子推出选定的距离
+          </div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="tier-badge">等待测量</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="pixels" label="屏幕位移" unit="px" hint="沿主轴量到的净位移" />
+        <StatPanel id="duration" label="用时" unit="ms" />
+        <StatPanel id="speed" label="平均速度" unit="px/s" />
+        <StatPanel id="drift" label="推歪了" unit="px" hint="垂直于主轴的偏移" />
       </div>
     </div>
-    <div class="verdict__aside">
-      <span class="badge badge--idle" id="tier-badge">等待测量</span>
-    </div>
-  </div>
-
-  <div class="test-area well dpi-pad" id="pad" data-measuring="false">
-    <div class="test-area__hint" id="hint">
-      点“开始测量”后,把指针放在这里,然后沿尺子推
-    </div>
-    <div class="dpi-live" id="live" hidden>
-      <div class="dpi-live__value" id="live-px">0</div>
-      <div class="dpi-live__label">已移动像素 · 推完停住即可</div>
-    </div>
-  </div>
-
-  <div class="stat-grid">
-    <StatPanel id="pixels" label="屏幕位移" unit="px" hint="沿主轴量到的净位移" />
-    <StatPanel id="duration" label="用时" unit="ms" />
-    <StatPanel id="speed" label="平均速度" unit="px/s" />
-    <StatPanel id="drift" label="推歪了" unit="px" hint="垂直于主轴的偏移" />
   </div>
 
   <section class="prose">

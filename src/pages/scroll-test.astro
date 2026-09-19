@@ -83,32 +83,38 @@ const jsonLd = {
 
   <div id="cap-notice"></div>
 
-  <div class="verdict">
-    <div>
-      <div class="verdict__label">累计滚动</div>
-      <div>
-        <span class="verdict__value" id="net">0</span><span class="verdict__unit">格</span>
-      </div>
-      <div class="verdict__note" id="net-note">正数向下,负数向上</div>
-    </div>
-    <div class="verdict__aside">
-      <div><span class="badge badge--idle" id="dir-badge">等待滚动</span></div>
-      <div>
-        <span class="badge badge--idle" id="glitch-badge">—</span>
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well scroll-pad" id="area">
+        <div class="test-area__hint" id="hint">把指针放在这里,然后滚动滚轮</div>
+        <div class="scroll-dir" id="dir" hidden>↓</div>
       </div>
     </div>
-  </div>
 
-  <div class="test-area well scroll-pad" id="area">
-    <div class="test-area__hint" id="hint">把指针放在这里,然后滚动滚轮</div>
-    <div class="scroll-dir" id="dir" hidden>↓</div>
-  </div>
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">累计滚动</div>
+          <div>
+            <span class="verdict__value" id="net">0</span><span class="verdict__unit">格</span>
+          </div>
+          <div class="verdict__note" id="net-note">正数向下,负数向上</div>
+        </div>
+        <div class="verdict__aside">
+          <div><span class="badge badge--idle" id="dir-badge">等待滚动</span></div>
+          <div>
+            <span class="badge badge--idle" id="glitch-badge">—</span>
+          </div>
+        </div>
+      </div>
 
-  <div class="stat-grid">
-    <StatPanel id="down" label="向下" unit="格" />
-    <StatPanel id="up" label="向上" unit="格" />
-    <StatPanel id="glitches" label="疑似跳格" hint="持续同向时出现的反向" />
-    <StatPanel id="typical" label="一格原始值" hint="你系统里的 deltaY" />
+      <div class="stat-grid">
+        <StatPanel id="down" label="向下" unit="格" />
+        <StatPanel id="up" label="向上" unit="格" />
+        <StatPanel id="glitches" label="疑似跳格" hint="持续同向时出现的反向" />
+        <StatPanel id="typical" label="一格原始值" hint="你系统里的 deltaY" />
+      </div>
+    </div>
   </div>
 
   <h2>最近 80 格的方向</h2>
@@ -213,9 +219,24 @@ const jsonLd = {
       summarizeScroll,
       type ScrollNotch,
     } from '../lib/analysis';
-    import { createTicker, el, mountCapabilityNotices, setBadge, setStat, setText } from '../lib/ui';
+    import {
+      createTicker,
+      el,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
 
     mountCapabilityNotices(el('cap-notice'));
+
+    /*
+     * 这一页原先漏了这一句(九个工作台页面里唯一漏的),后果不只是右键弹菜单:
+     * 中键自动滚动没被拦,按下去页面就自己跟着指针滚,而这一页量的正是滚动 ——
+     * 采样面从指针底下溜走,读到的全是错的。见 ui.ts 的 `suppressWorkbenchDefaults`。
+     */
+    suppressWorkbenchDefaults();
 
     /** 条带上显示多少格 */
     const STRIP_SIZE = 80;

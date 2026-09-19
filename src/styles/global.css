@@ -710,6 +710,57 @@ html:has(.site-dock:not([hidden])) .site-footer {
   margin-bottom: 0;
 }
 
+/* ---------- 工作台(测试区与读数并排) ---------- */
+
+/*
+ * 工作台页面把两个寄存器**并排**:左边是"正在出数的那个面",右边是它的读数
+ * (判定横幅 + 统计面板)。原先这两块和测试区竖着摞下来,数据要往下滚才看得见,
+ * 而"边测边看数"恰恰是这类工具唯一的用法。
+ *
+ * 比例语言直接沿用键盘页那套 `flex-basis`(见 keyboard-test.astro 的 `.keyboard`):
+ * **不写媒体查询**,宽度不够时自己换行堆叠,测试区在上、读数在下。
+ *
+ * 两条不能碰的:
+ *
+ * 1. **读数块只能是测试区的兄弟,绝不能塞进 `.test-area` 里。** 那个盒子不只是
+ *    个盒子 —— 它就是**采样面**:拖拽页靠 `area.contains(event.target)` 决定该不该
+ *    开始记账,轨迹页把采样器挂在它上面,滚轮页的 wheel 也只派发给指针所在元素。
+ *    塞进去的话,鼠标划过读数区就会被当成"在测试"。
+ * 2. **`.test-area` 自己不能加 padding。** renderer.ts 拿**外框**
+ *    `getBoundingClientRect()` 定画布尺寸和原点;加一层 padding 原点就偏一个
+ *    padding,轨迹整体错位。要留白只能靠外层容器 + gap,也就是这里。
+ *
+ * 也**不要**给这个容器加 `transform` / `filter` / `will-change` / `contain` ——
+ * 回报率页那条铺满视口的画布是 `position: fixed`,一旦有祖先成了包含块,
+ * 它就只铺满那个祖先了。(该页本次没用这套类名,写在这里是防后来者。)
+ */
+.workbench {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+/*
+ * 舞台里可能不止一块(按键页是"五个按键的示意 + 采样区"两块),所以自己也是一列。
+ * 单块的页面(多数)看起来和不加一样 —— 之所以用 flex 而不是靠外边距,
+ * 是因为那些块(如 `.mouse-diagram`)的外边距本来就是 0,靠它们之间的塌陷
+ * 凑不出间距。
+ */
+.workbench__stage {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1 1 560px;
+  /* 不加就不会收缩到内容宽度以下,长表格会把整栏撑破 */
+  min-width: 0;
+}
+
+.workbench__readout {
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
 /* ---------- 统计面板 ---------- */
 
 /*
@@ -876,9 +927,17 @@ html:has(.site-dock:not([hidden])) .site-footer {
  * 五张按键卡片本身就是**实时指示灯**,所以整块是仪器窗。
  * button-test.astro 没有 <style> 块,这里的每一条都只能在 global.css 里改。
  */
+/*
+ * 五个按键的示意。
+ *
+ * 列宽下限取 110px 而不是更大,是为了让**五张卡在工作台的窄栏里仍然排成一行**
+ * ——150px 时 646px 的栏只放得下 3 张,于是变成 3+2(左右不对称),右侧还空出一片。
+ * 110px 在 646px 栏里正好 5 列(5×110+4×10 = 590 ≤ 626),在 420px 的窄屏里
+ * 是 3 列,都比原来好。卡片内容只有两行小字加一个数,110px 装得下。
+ */
 .mouse-diagram {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
   padding: 10px;
   margin: 0;

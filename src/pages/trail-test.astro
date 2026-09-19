@@ -100,32 +100,38 @@ const jsonLd = {
     <span class="test-hint" id="hint">点开始之后,在这个区域里匀速画圈</span>
   </div>
 
-  <div class="test-area well trail-area" id="area" data-drawing="false">
-    <canvas id="canvas"></canvas>
-    <div class="test-area__hint" id="overlay">点“开始绘制”,然后在这里匀速画十几圈</div>
-  </div>
-
-  <div class="verdict">
-    <div>
-      <div class="verdict__label">孤立尖峰</div>
-      <div>
-        <span class="verdict__value" id="jumps">—</span><span class="verdict__unit">处</span>
-      </div>
-      <div class="verdict__note" id="verdict-note">
-        画完之后点“停止”或松开,这里会给出统计
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well trail-area" id="area" data-drawing="false">
+        <canvas id="canvas"></canvas>
+        <div class="test-area__hint" id="overlay">点“开始绘制”,然后在这里匀速画十几圈</div>
       </div>
     </div>
-    <div class="verdict__aside">
-      <span class="badge badge--idle" id="state-badge">等待绘制</span>
-    </div>
-  </div>
 
-  <div class="stat-grid">
-    <StatPanel id="samples" label="采样点数" />
-    <StatPanel id="duration" label="分析时长" unit="ms" hint="最长的一段连续运动" />
-    <StatPanel id="over-count" label="超线间隔" hint="含连着出现的,只作分母" />
-    <StatPanel id="median-step" label="中位步长" unit="px" hint="相邻两点的典型间距" />
-    <StatPanel id="max-step" label="最大步长" unit="px" />
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">孤立尖峰</div>
+          <div>
+            <span class="verdict__value" id="jumps">—</span><span class="verdict__unit">处</span>
+          </div>
+          <div class="verdict__note" id="verdict-note">
+            画完之后点“停止”或松开,这里会给出统计
+          </div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="state-badge">等待绘制</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="samples" label="采样点数" />
+        <StatPanel id="duration" label="分析时长" unit="ms" hint="最长的一段连续运动" />
+        <StatPanel id="over-count" label="超线间隔" hint="含连着出现的,只作分母" />
+        <StatPanel id="median-step" label="中位步长" unit="px" hint="相邻两点的典型间距" />
+        <StatPanel id="max-step" label="最大步长" unit="px" />
+      </div>
+    </div>
   </div>
 
   <section class="prose">

@@ -81,21 +81,6 @@ const jsonLd = {
 
   <div id="cap-notice"></div>
 
-  <div class="verdict">
-    <div>
-      <div class="verdict__label">最短间隔</div>
-      <div>
-        <span class="verdict__value" id="min-gap">—</span><span class="verdict__unit">ms</span>
-      </div>
-      <div class="verdict__note" id="verdict-note">
-        在下面的区域里点击,至少点三次才能看出间隔
-      </div>
-    </div>
-    <div class="verdict__aside">
-      <span class="badge badge--idle" id="verdict-badge">等待测试</span>
-    </div>
-  </div>
-
   <div class="controls">
     {
       TARGETS.map((target, index) => (
@@ -107,17 +92,38 @@ const jsonLd = {
     <button type="button" id="reset">重置</button>
   </div>
 
-  <div class="test-area well" id="area">
-    <div class="test-area__hint" id="hint">
-      在这里点击,建议先正常速度单击十几次,再故意快速双击几次
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well" id="area">
+        <div class="test-area__hint" id="hint">
+          在这里点击,建议先正常速度单击十几次,再故意快速双击几次
+        </div>
+      </div>
     </div>
-  </div>
 
-  <div class="stat-grid">
-    <StatPanel id="presses" label="点击次数" primary />
-    <StatPanel id="chatter" label="疑似连击" hint={`间隔小于 ${CLICK_CHATTER_MS}ms`} />
-    <StatPanel id="doubles" label="正常双击" hint={`${CLICK_CHATTER_MS}–${CLICK_DOUBLE_MAX_MS}ms`} />
-    <StatPanel id="median" label="中位间隔" unit="ms" />
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">最短间隔</div>
+          <div>
+            <span class="verdict__value" id="min-gap">—</span><span class="verdict__unit">ms</span>
+          </div>
+          <div class="verdict__note" id="verdict-note">
+            在下面的区域里点击,至少点三次才能看出间隔
+          </div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="verdict-badge">等待测试</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="presses" label="点击次数" primary />
+        <StatPanel id="chatter" label="疑似连击" hint={`间隔小于 ${CLICK_CHATTER_MS}ms`} />
+        <StatPanel id="doubles" label="正常双击" hint={`${CLICK_CHATTER_MS}–${CLICK_DOUBLE_MAX_MS}ms`} />
+        <StatPanel id="median" label="中位间隔" unit="ms" />
+      </div>
+    </div>
   </div>
 
   <h2>间隔记录</h2>

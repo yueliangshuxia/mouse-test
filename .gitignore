@@ -17,6 +17,9 @@ pnpm-debug.log*
 .env
 .env.production
 
+# issue / PRD scratch files(仓库是公开的,别误发上去)
+.scratch/
+
 # macOS-specific files
 .DS_Store
 

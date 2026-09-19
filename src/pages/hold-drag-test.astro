@@ -4,6 +4,7 @@ import StatPanel from '../components/StatPanel.astro';
 import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
 import { REPRESS_RADIUS_PX, REPRESS_WINDOW_MS } from '../lib/analysis';
+import { BUTTONS } from '../lib/mouse-buttons';
 
 const tool = findTool('hold-drag-test')!;
 
@@ -34,7 +35,30 @@ const FAQ = [
       '注意别把窗口失焦算进去:按了 Alt+Tab 的话,系统确实会认为你松手了,那不是鼠标的错。',
   },
   {
-    q: '为什么有时候这一整段会被标成“全程按着”?',
+    q: '五个键都能测吗?侧键呢?',
+    a:
+      '左键、中键、右键、两个侧键都能测,按住哪个键就记在哪个键名下,同时按住几个也分得开。' +
+      '但侧键有两个前提,不满足的话这一行会一直显示破折号(未测),而不是 0 次。' +
+      '第一,**有些鼠标的侧键根本不是以鼠标按键的形式上报的**——厂商驱动把它发成了键盘事件或者一段宏,' +
+      '浏览器收不到任何鼠标事件,页面自然无从测起。' +
+      '第二,**有些浏览器不允许网页取消侧键的前进/后退**,一按整页就跳走。' +
+      '这两种情况都只说明“页面没收到”,**不等于这个键按了 0 次**——把两者混成一个数字,' +
+      '正是这类测试最容易骗人的地方。',
+  },
+  {
+    q: '按住右键拖动时屏幕上画出一条蓝线,是你们画的吗?',
+    a:
+      '不是,而且**这一页拦不掉它**。那是 **Edge 自带的“鼠标手势”**:它把“按住右键拖动”解释成在画一个手势,' +
+      '顺手把轨迹画在屏幕上。它不是右键菜单,所以网页里那些屏蔽右键菜单的写法对它一概无效——' +
+      '微软官方也确认过,没有任何办法从网页端关掉它。' +
+      '更要紧的是它不只是画条线:**手势凑够形状之后浏览器会直接执行动作**(后退、关闭标签页之类),' +
+      '整页一跳走,刚测的成绩就没了。' +
+      '它在**中文区的 Edge 里默认是开着的**,关法是地址栏输入 edge://settings/mouseGesture,' +
+      '关掉总开关;不想全关的话,同一页里把本站加进“配置鼠标手势”的阻止列表,只对本站生效。' +
+      'Chrome 和其他浏览器没有这个功能,不受影响。',
+  },
+  {
+    q: '为什么有时候这一整段会被标成“按着没松”?',
     a:
       '如果你松开后页面没收到松开事件(比如指针在浏览器窗口外松的),那一段就会显示成还没结束。' +
       '这是如实报告而不是出错——页面只能知道自己收到了什么。',
@@ -73,42 +97,79 @@ const jsonLd = {
   <h1>鼠标长按拖拽测试</h1>
 
   <p class="prose">
-    按住左键在下面的区域里来回拖动十几秒,然后松开。页面会统计每一次按住期间
+    按住任意一个鼠标按键,在下面的区域里来回拖动十几秒,然后松开。页面会统计每一次按住期间
     <strong>有没有出现过极短的断开又重按</strong>——那正是拖拽文件时中途掉落的成因。
-    按住期间即使把指针拖出这个区域也没关系,一样会继续跟踪。
+    左键、中键、右键、两个侧键都支持,按住期间即使把指针拖出这个区域也没关系,一样会继续跟踪。
   </p>
 
   <div id="cap-notice"></div>
 
-  <div class="verdict">
-    <div>
-      <div class="verdict__label">疑似瞬断</div>
-      <div>
-        <span class="verdict__value" id="drops-total">0</span><span class="verdict__unit">次</span>
-      </div>
-      <div class="verdict__note" id="verdict-note">
-        按住左键拖动,松开后这里会给出结论
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well drag-pad" id="area" data-holding="false">
+        <div class="test-area__hint" id="hint">在这里按住任意一个键,然后来回拖动</div>
+        <div class="drag-live" id="live" hidden>
+          <div class="drag-live__value" id="live-hold">0</div>
+          <div class="drag-live__label">
+            <span id="live-button">左键</span> 按住中 · 已拖动 <span id="live-distance">0</span> px
+          </div>
+        </div>
       </div>
     </div>
-    <div class="verdict__aside">
-      <span class="badge badge--idle" id="state-badge">等待拖拽</span>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">疑似瞬断</div>
+          <div>
+            <span class="verdict__value" id="drops-total">0</span><span class="verdict__unit">次</span>
+          </div>
+          <div class="verdict__note" id="verdict-note">
+            按住任意一个键拖动,松开后这里会给出结论
+          </div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="state-badge">等待拖拽</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="sessions" label="按住次数" primary hint="各键合计" />
+        <StatPanel id="longest" label="最长一次" unit="ms" hint="各键合计" />
+        <StatPanel id="distance" label="累计路程" unit="px" hint="同时按住多个键时各记一份" />
+        <StatPanel id="open" label="没收到松开" hint="结束不了的那几次" />
+      </div>
     </div>
   </div>
 
-  <div class="test-area well drag-pad" id="area" data-holding="false">
-    <div class="test-area__hint" id="hint">在这里按住左键,然后来回拖动</div>
-    <div class="drag-live" id="live" hidden>
-      <div class="drag-live__value" id="live-hold">0</div>
-      <div class="drag-live__label">按住中 · 已拖动 <span id="live-distance">0</span> px</div>
-    </div>
-  </div>
-
-  <div class="stat-grid">
-    <StatPanel id="sessions" label="拖拽次数" primary />
-    <StatPanel id="longest" label="最长一次" unit="ms" />
-    <StatPanel id="distance" label="累计路程" unit="px" />
-    <StatPanel id="open" label="未正常结束" hint="收不到松开事件" />
-  </div>
+  <h2>按按键分开看</h2>
+  <p class="prose tight">
+    五个键都在下面列着。破折号表示<strong>这个键一个事件都没收到</strong>——可能是没测它,
+    也可能是鼠标或驱动根本没把它当成鼠标按键上报,<strong>不等于按了 0 次</strong>。
+    按住期间,对应的那一行会高亮。
+  </p>
+  <table class="ref-table by-button">
+    <thead>
+      <tr>
+        <th>按键</th>
+        <th>按住次数</th>
+        <th>疑似瞬断</th>
+        <th>最长一次 (ms)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        BUTTONS.map((button) => (
+          <tr id={`btn-row-${button.code}`} data-current="false">
+            <td>{button.name}</td>
+            <td id={`btn-count-${button.code}`}>—</td>
+            <td id={`btn-drops-${button.code}`}>—</td>
+            <td id={`btn-longest-${button.code}`}>—</td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
 
   <div class="controls">
     <button type="button" id="reset">重置</button>
@@ -136,6 +197,19 @@ const jsonLd = {
       所以<strong>判读权在你自己手上</strong>:如果你确定自己一直按着没松手,
       这里却报了瞬断,那这只鼠标的按键信号确实断过。反过来,如果你中间真的换了手或者松了一下,
       那报出来的就是你自己干的。日志里那几次的时长和路程可以帮你回忆当时在做什么。
+    </p>
+    <p>
+      还有一类是<strong>页面根本收不到</strong>的情况:有些鼠标的侧键被驱动发成键盘事件,
+      有些浏览器不允许网页取消侧键的前进/后退。这时那一行会一直空着(破折号),
+      而<strong>空着不是“0 次”</strong>——是“没有测到”。这两件事在数据上长得一样,结论却相反。
+    </p>
+    <p>
+      第三种是<strong>浏览器自己把右键抢走</strong>:Edge 有一个自带的“鼠标手势”功能,
+      按住右键拖动会被它解释成在画手势——屏幕上会跟着画出一条蓝线,而这条轨迹不是本页画的,
+      <strong>网页也没有任何办法阻止它</strong>(微软官方确认过,连命令行开关都关不掉)。
+      它比前两种更麻烦的地方在于:手势凑够形状后浏览器会直接执行动作(后退、关标签页),
+      整页一跳走,刚测的成绩就没了。它在<strong>中文区的 Edge 里默认开着</strong>,
+      关法是 edge://settings/mouseGesture,详见下面常见问题里的那一问。
     </p>
 
     <h2>和“拖拽掉落”的关系</h2>
@@ -172,6 +246,18 @@ const jsonLd = {
     /* .drag-live 的定位、[hidden]、大字和标签都在 global.css 里
        (和 CPS / DPI / 滚轮三页共用) */
 
+    /*
+     * 这张表后三列全是数字,都要等宽 + tabular —— 值每隔 100ms 变一次,
+     * 比例数字会让整列左右跳。global.css 里只有 `.ref-table--kv` 那一档
+     * 管第二列,而这里第二到第四列都是数值,所以在页面里补一条
+     * (这是那份全局规则本来就允许的方向:数值列由各自页面决定)。
+     */
+    .by-button td:nth-child(n + 2) {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
     /* 拖拽必然带文字选中,测试期间抑制掉 */
     :global(html.is-testing) {
       user-select: none;
@@ -180,10 +266,13 @@ const jsonLd = {
   </style>
 
   <script>
-    import { analyzeDragEpisodes, type DragEvent } from '../lib/analysis';
+    import { analyzeDragEpisodesByButton, type DragEpisode, type DragEvent } from '../lib/analysis';
+    import { BUTTON_CODES, buttonName, maskFromButtons } from '../lib/mouse-buttons';
+    import { suppressSideButtonNavigation } from '../lib/side-buttons';
     import {
       createTicker,
       el,
+      format,
       mountCapabilityNotices,
       setBadge,
       setStat,
@@ -196,20 +285,38 @@ const jsonLd = {
     // 右键菜单 / 中键自动滚动会打断拖拽。判据和实现见 ui.ts
     suppressWorkbenchDefaults();
 
+    /*
+     * 侧键在浏览器里被硬绑成「后退 / 前进」,一按整页就跳走——而侧键正是这一页
+     * 要测的东西之一。拦截的机制见 side-buttons.ts。
+     *
+     * **刻意不接它返回的还原函数**,理由和 `suppressWorkbenchDefaults()` 完全相同
+     * (见 ui.ts 的文件头):页面进 bfcache 时 `pagehide` 照样触发,在那里把它摘掉,
+     * 用户按返回键把页面恢复回来之后侧键就再没人拦了——一按侧键整页跳走、成绩全丢。
+     */
+    suppressSideButtonNavigation();
+
     /**
      * 移动事件的记录间隔(毫秒)。采样层在 1000Hz 下每秒会产生 1000 个事件,
      * 一次十几秒的拖拽就是上万个点——而对"算个路程"来说,每 8ms 采一个
      * (最多 2 像素的误差)完全够用,所以抽稀掉。
      *
      * **按下和松开不抽稀**:瞬断判据靠的就是这两个事件的精确时刻,
-     * 抽掉一个就等于把故障本身删了。
+     * 抽掉一个就等于把故障本身删了。多按键之后这条扩展成"**掩码一变就不抽稀**"
+     * ——见下面 pointermove 里的说明。
      */
     const MOVE_SAMPLE_MS = 8;
 
-    /** 松开后还保持"在跟踪"的时长,用来捕获瞬断之后的重新按下 */
+    /**
+     * 松开后还保持"在跟踪"的时长,用来捕获瞬断之后的重新按下。
+     *
+     * 这是**指针级**的宽限,不按每个键各算一份:它接住的是"松手后又落回区域外"
+     * 这件事,而那是整个指针的状态,不是某一个键的。
+     */
     const REPRESS_GRACE_MS = 80;
 
     const LOG_LIMIT = 10;
+
+    const DEFAULT_NOTE = '按住任意一个键拖动,松开后这里会给出结论';
 
     const area = el('area');
     const hint = el('hint');
@@ -225,6 +332,15 @@ const jsonLd = {
     let lastMoveAt = 0;
 
     /**
+     * 上一次事件时按着哪些键(本站编号的位掩码)。
+     *
+     * 两个用处:决定"这次移动要不要抽稀掉",以及高亮表格里正被按着的那些行。
+     * 各键自己的按下/松开**不在这里判断**——那是 `analyzeDragEpisodesByButton`
+     * 的活,页面只负责如实记录每一次事件的掩码。
+     */
+    let downMask = 0;
+
+    /**
      * 记一条事件。
      *
      * `t` 由调用方给,而不是在这里统一取 `performance.now()`:瞬断的判据是
@@ -235,9 +351,12 @@ const jsonLd = {
      * 所以真实事件一律传 `event.timeStamp`(事件自己带的时刻,不吃派发延迟),
      * 只有 `blur` 里补发的那条合成事件用 `performance.now()`——那条本来就没有
      * 对应的真实事件。两者同源,可以直接相减。
+     *
+     * 这条约定对**从掩码里比对出来的**那些按下/松开同样成立:它们的时刻就是
+     * 暴露了这次变化的那条真实事件的时刻,所以下面传的一律是 `event.timeStamp`。
      */
-    function record(t: number, x: number, y: number, kind: DragEvent['kind']): void {
-      events.push({ t, x, y, kind });
+    function record(t: number, x: number, y: number, kind: DragEvent['kind'], buttonMask: number): void {
+      events.push({ t, x, y, kind, buttonMask });
     }
 
     function arm(): void {
@@ -253,6 +372,7 @@ const jsonLd = {
       window.clearTimeout(armTimer);
       armTimer = window.setTimeout(() => {
         armed = false;
+        downMask = 0;
         area?.setAttribute('data-holding', 'false');
         document.documentElement.classList.remove('is-testing');
         render();
@@ -261,51 +381,110 @@ const jsonLd = {
 
     // ---- 渲染 ----
 
+    /** 一个按键的一次按住,带上它是哪个键 */
+    interface KeyedEpisode {
+      code: number;
+      episode: DragEpisode;
+    }
+
+    function setRowCurrent(code: number, on: boolean): void {
+      const row = el(`btn-row-${code}`);
+      if (!row) return;
+      const value = on ? 'true' : 'false';
+      if (row.getAttribute('data-current') !== value) row.setAttribute('data-current', value);
+    }
+
     function render(): void {
-      const episodes = analyzeDragEpisodes(events);
-      const finished = episodes.filter((episode) => !episode.open);
+      const byButton = analyzeDragEpisodesByButton(events);
+      const all: KeyedEpisode[] = [];
 
       let totalDrops = 0;
       let longest = 0;
       let distance = 0;
-      for (const episode of finished) {
-        totalDrops += episode.drops;
-        distance += episode.distancePx;
-        if (episode.durationMs > longest) longest = episode.durationMs;
+      let open = 0;
+      let holding: KeyedEpisode | null = null;
+      const dropKeys: number[] = [];
+
+      for (const [code, episodes] of byButton) {
+        let count = 0;
+        let drops = 0;
+        let longestHere = 0;
+
+        for (const episode of episodes) {
+          all.push({ code, episode });
+
+          /*
+           * 未结束的那一段**也计入**次数与最长一次——它是一次真实的按住,
+           * 只是页面没收到松开事件。原先只数已结束的,结果是:如果你唯一那次
+           * 拖拽没收到松开,统计面板会说"0 次拖拽",而下面的日志里明明躺着一行,
+           * 自己跟自己打架。分开计数由"没收到松开"那一格负责。
+           */
+          count++;
+          drops += episode.drops;
+          distance += episode.distancePx;
+          if (episode.durationMs > longestHere) longestHere = episode.durationMs;
+          if (episode.durationMs > longest) longest = episode.durationMs;
+
+          if (episode.open) {
+            open++;
+            // 实时读数取**最近开始**的那一段:同时按住两个键时,看的是刚按下的那个
+            if (holding === null || episode.startMs > holding.episode.startMs) {
+              holding = { code, episode };
+            }
+          }
+        }
+
+        if (drops > 0) dropKeys.push(code);
+        totalDrops += drops;
+
+        setText(el(`btn-count-${code}`), format(count));
+        setText(el(`btn-drops-${code}`), format(drops));
+        setText(el(`btn-longest-${code}`), format(longestHere));
+        setRowCurrent(code, armed && (downMask & (1 << code)) !== 0);
+      }
+
+      // 一个事件都没收到过的键:整行破折号。"没测到"不是"0 次"
+      for (const code of BUTTON_CODES) {
+        if (byButton.has(code)) continue;
+        setText(el(`btn-count-${code}`), '—');
+        setText(el(`btn-drops-${code}`), '—');
+        setText(el(`btn-longest-${code}`), '—');
+        setRowCurrent(code, false);
       }
 
       setText(el('drops-total'), String(totalDrops));
-      setStat('sessions', String(finished.length));
-      setStat('longest', longest === 0 ? '—' : longest.toFixed(0));
-      setStat('distance', distance.toFixed(0));
-      setStat('open', String(episodes.length - finished.length));
+      setStat('sessions', format(all.length));
+      setStat('longest', format(longest));
+      setStat('distance', format(distance));
+      setStat('open', format(open));
 
+      const names = dropKeys.map(buttonName).join('、');
       if (totalDrops > 0) {
-        setBadge(el('state-badge'), '疑似瞬断', 'poor');
+        setBadge(el('state-badge'), `${names} 疑似瞬断`, 'poor');
         setText(
           el('verdict-note'),
-          `有 ${totalDrops} 次“极短且原地”的重按。如果你当时并没有松手,那就是按键信号断过。`,
+          `${names}上 ${totalDrops} 次“极短且原地”的重按。当时若没松手,就是按键信号断过。`,
         );
-      } else if (finished.length > 0) {
+      } else if (all.length > 0) {
         setBadge(el('state-badge'), '未发现瞬断', 'good');
-        setText(el('verdict-note'), `共 ${finished.length} 次拖拽,全程没有出现过断开。`);
+        setText(el('verdict-note'), `共 ${all.length} 次按住,全程没有出现过断开。`);
       }
 
       // ---- 实时数字 ----
-      const current = episodes.length > 0 ? episodes[episodes.length - 1] : null;
-      if (armed && current && current.open) {
+      if (armed && holding !== null) {
         // 按住不动时不会产生任何事件,`durationMs` 会停在最后一个事件上,
         // 所以实时这个数必须走墙上时钟,否则松手前它永远是 0。
-        setText(el('live-hold'), (performance.now() - current.startMs).toFixed(0));
-        setText(el('live-distance'), current.distancePx.toFixed(0));
+        setText(el('live-hold'), (performance.now() - holding.episode.startMs).toFixed(0));
+        setText(el('live-distance'), holding.episode.distancePx.toFixed(0));
+        setText(el('live-button'), buttonName(holding.code));
       }
 
-      renderLog(episodes);
+      renderLog(all);
     }
 
-    function renderLog(episodes: ReturnType<typeof analyzeDragEpisodes>): void {
+    function renderLog(all: readonly KeyedEpisode[]): void {
       if (!logHost) return;
-      if (episodes.length === 0) {
+      if (all.length === 0) {
         const empty = document.createElement('li');
         empty.className = 'log-empty';
         empty.textContent = '还没有拖拽记录';
@@ -313,29 +492,33 @@ const jsonLd = {
         return;
       }
 
-      const shown = episodes.slice(Math.max(0, episodes.length - LOG_LIMIT)).reverse();
+      const shown = all.slice(Math.max(0, all.length - LOG_LIMIT)).reverse();
       const fragment = document.createDocumentFragment();
 
       for (let i = 0; i < shown.length; i++) {
-        const episode = shown[i];
+        const { code, episode } = shown[i];
         const item = document.createElement('li');
         item.className = episode.drops > 0 ? 'log-item log-item--alert' : 'log-item';
 
         const index = document.createElement('span');
         index.className = 'log-item__index';
-        index.textContent = `#${episodes.length - i}`;
+        index.textContent = `#${all.length - i}`;
 
         const value = document.createElement('span');
         value.className = 'log-item__value';
         value.textContent = episode.open ? '按着没松' : `${episode.durationMs.toFixed(0)} ms`;
 
+        /*
+         * 按键名并进**文字**里,不另起一个元素。日志条目是运行期由 JS 拼出来的,
+         * 页面 `<style>` 的规则带着 data-astro-cid 够不着它们(ui.ts 拼出来的
+         * `.notice` 就是这个下场),新元素要配样式就得动 global.css。
+         */
         const note = document.createElement('span');
         note.className = 'log-item__note';
-        if (episode.drops > 0) {
-          note.textContent = `疑似瞬断 ${episode.drops} 次`;
-        } else {
-          note.textContent = `拖动 ${episode.distancePx.toFixed(0)} px`;
-        }
+        note.textContent =
+          episode.drops > 0
+            ? `${buttonName(code)} 疑似瞬断 ${episode.drops} 次`
+            : `${buttonName(code)} 拖动 ${episode.distancePx.toFixed(0)} px`;
 
         item.append(index, value, note);
         fragment.appendChild(item);
@@ -357,34 +540,72 @@ const jsonLd = {
      * 两个理由:瞬断之后的重新按下可能落在区域外;以及第一次按下如果落在
      * 区域内的文字上,事件照样要算数。`armed` 那个宽限期之外的、落在区域外的
      * 按下则会被忽略——否则页面上随便点一下也会开始记一笔。
+     *
+     * 取键一律走 `event.buttons` 的掩码,**不用 `event.button`**:第二个键的按下
+     * 和第一个键的松开都不会有 `pointerdown` / `pointerup`,只有掩码会变
+     * (见 CLAUDE.md「组合按键」)。
      */
     window.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
+      const mask = maskFromButtons(event.buttons);
+      if (mask === 0) return;
 
       const inside = area?.contains(event.target as Node) ?? false;
       if (!inside && !armed) return;
 
-      event.preventDefault();
+      /*
+       * 只在主键上 preventDefault:它挡的是拖拽必然带起的原生拖放(拖图片、拖链接),
+       * 那是左键的事。右键菜单和中键自动滚动已经由 suppressWorkbenchDefaults 处理,
+       * 在这里再取消一次会把兼容鼠标事件一并吞掉——比如右键点在链接上的
+       * 「在新标签页中打开」。
+       */
+      if ((mask & 0b1) !== 0) event.preventDefault();
+
       arm();
-      record(event.timeStamp, event.clientX, event.clientY, 'down');
+      downMask = mask;
+      record(event.timeStamp, event.clientX, event.clientY, 'down', mask);
+      render();
     });
 
     window.addEventListener(
       'pointermove',
       (event) => {
         if (!armed) return;
+
+        const mask = maskFromButtons(event.buttons);
+        const changed = mask !== downMask;
+
+        /*
+         * 抽稀只抽"什么都没变"的那种移动。**掩码一变就必须记**,哪怕它落在上一个
+         * 采样点的 2ms 之内——一个键的按下或松开改变了后面全部的结论,抽掉它等于
+         * 把那次按键删了。这和"按下和松开不抽稀"是同一条道理,多按键之后
+         * 那些边沿正是藏在移动事件里的。
+         *
+         * (不这么写的话会很难查:按住左键再松开左键,浏览器一次 `pointerup`
+         * 都不派发,左键那一段就会永远挂着不结束。)
+         */
         const now = performance.now();
-        if (now - lastMoveAt < MOVE_SAMPLE_MS) return;
+        if (!changed && now - lastMoveAt < MOVE_SAMPLE_MS) return;
         lastMoveAt = now;
-        record(event.timeStamp, event.clientX, event.clientY, 'move');
+
+        downMask = mask;
+        record(event.timeStamp, event.clientX, event.clientY, 'move', mask);
       },
       { passive: true },
     );
 
     function release(event: PointerEvent): void {
-      if (!armed || event.button !== 0) return;
-      record(event.timeStamp, event.clientX, event.clientY, 'up');
+      if (!armed) return;
+
+      /*
+       * 掩码一律记 0:`pointerup` 只在**最后一个键**松开时派发,所以此刻手上确实
+       * 一个键都不剩;`pointercancel` 更彻底——指针被系统收走了,键也不再算按着。
+       * 至于松开的**是哪个**键,这个事件本身并不携带(它的 `buttons` 就是 0),
+       * 由 analyzeDragEpisodesByButton 跟上一份掩码比对推出来。
+       */
+      record(event.timeStamp, event.clientX, event.clientY, 'up', 0);
+      downMask = 0;
       scheduleDisarm();
+      render();
     }
 
     window.addEventListener('pointerup', release);
@@ -397,8 +618,11 @@ const jsonLd = {
       if (!armed) return;
       const last = events[events.length - 1];
       // 合成事件:没有真实事件可依,取当下的墙钟时间
-      if (last && last.kind !== 'up') record(performance.now(), last.x, last.y, 'up');
+      if (last && last.buttonMask !== 0) {
+        record(performance.now(), last.x, last.y, 'up', 0);
+      }
       armed = false;
+      downMask = 0;
       area?.setAttribute('data-holding', 'false');
       document.documentElement.classList.remove('is-testing');
       render();
@@ -412,13 +636,14 @@ const jsonLd = {
     el('reset')?.addEventListener('click', () => {
       events.length = 0;
       armed = false;
+      downMask = 0;
       window.clearTimeout(armTimer);
       area?.setAttribute('data-holding', 'false');
       document.documentElement.classList.remove('is-testing');
       hint?.removeAttribute('hidden');
       live?.setAttribute('hidden', '');
       setBadge(el('state-badge'), '等待拖拽', 'idle');
-      setText(el('verdict-note'), '按住左键拖动,松开后这里会给出结论');
+      setText(el('verdict-note'), DEFAULT_NOTE);
       render();
     });
 
