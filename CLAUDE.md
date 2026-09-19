@@ -143,11 +143,25 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。
 - **FAQ 答案里的 `**强调**` 必须走 `faq.ts` 的两个函数**,不能直接 `{item.a}`。答案在 frontmatter 里是普通字符串,而 `{...}` 是**转义输出**、不是 markdown——直接插值的话 `**` 会原样显示成星号(六个页面都中过招,装了才发现)。渲染用 `faqHtml`(配 `set:html`),JSON-LD 用 `faqText`(去掉标记),两处都从同一份原文出发,不会漂。
 - 页面 `<style>` 的规则会被加上 `data-astro-cid-*` —— **是选择器带 cid,元素不带**。所以 `global.css` 里写 `.cps-live { … }` 照样命中那些元素,四页共用的实时读数定位才能收在一处。反过来,**没有 `<style>` 块的页面**(如 `button-test.astro`)**一条本页规则都没有**,它全部长相都只能在 `global.css` 里改;而 `ui.ts` 在运行期拼出来的节点(`.notice`)连页面 `<style>` 都够不着。
 
-## 部署(尚未开始)
+## 部署
 
-- `astro.config.mjs` 的 `site` 还是 `https://example.com`,上线前要换成备案域名。另外两处占位:`public/robots.txt` 的 Sitemap 行、`src/pages/index.astro` 的 JSON-LD。
-- `astro.config.mjs` 里的 `server.headers` **只作用于 `astro dev` / `astro preview`,对 `dist/` 完全无效**。它的存在只是为了让本地开发就能拿到跨域隔离,好验证高精度那条路径。
-- 上线时 COOP/COEP 必须由托管方发出。国内平台不认 `public/_headers`(那是 Cloudflare/Netlify 的格式,会被当普通文件发布),需要用 Nginx `add_header ... always;`(必须带 `always`,否则 404 等响应不带)或平台自己的响应头配置。
+**当前部署在 GitHub Pages 的「项目站」上**:https://yueliangshuxia.github.io/mouse-test/
+(仓库 `yueliangshuxia/mouse-test`,公开)。
+
+站点因此**落在子路径上**,不是域名根。这就是 `astro.config.mjs` 里 `base: '/mouse-test'` 的由来,也是 `src/lib/url.ts` 存在的理由——站内链接**必须**走 `href()`,写根路径(`/cps-test/`)会 404 且**构建不报错**。以后换备案域名(落在域名根)时,把 `base` 去掉即可,页面代码一行都不用动。
+
+- 部署走 `.github/workflows/deploy.yml`(Actions),**不经过 Jekyll**。不能改用「从分支发布」:`dist/_astro/` 以**下划线开头**,Jekyll 默认忽略这类目录,结果是 CSS/JS 全部 404、页面裸奔。(`public/.nojekyll` 是兜底。)
+- `dist/` 不入库,由 CI 现构建。CI 里**顺带跑了 typecheck 和单测**。
+- `astro.config.mjs` 的 `server.headers` **只作用于 `astro dev` / `astro preview`,对 `dist/` 完全无效**。它的存在只是为了让本地开发就能拿到跨域隔离,好验证高精度那条路径。
+
+### 这个托管方的已知短板(别当成正式站)
+
+- **发不了 COOP/COEP。** GitHub Pages 不支持自定义响应头,所以 `crossOriginIsolated` 恒为 false,`performance.now()` 精度被卡在 100µs,回报率页的 8000Hz 高精度路径会**降级**。能力探测会如实告警,不会骗人,但那条路就是没了。要它正常,**必须换能发响应头的托管方**:Nginx `add_header ... always;`(必须带 `always`,否则 404 等响应不带)或平台自己的后台配置。国内平台不认 `public/_headers`(Cloudflare/Netlify 格式,会被当普通文件发布)。
+- **`github.io` 在国内访问不稳定,且不能备案。** 本站的目标是「面向中国大陆用户做流量」,所以 Pages 只适合当**预览/演示环境**;正式上线仍要备案域名 + 国内托管。
+
+### 这台机器上的推送前提
+
+本机的 `github.com` 直连不通(`api.github.com` 却通),`git push` 和 `gh` 必须走本地代理 `http://127.0.0.1:7890`。该仓库的 `.git/config` 里已设 `http.proxy` / `https.proxy`(仓库级),**代理没开时推送会超时失败**,别误判成认证过期。
 
 ## 文档
 
