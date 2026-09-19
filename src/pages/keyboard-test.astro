@@ -1,0 +1,530 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { ALL_KEYS, MAIN_ROWS, NAV_ROWS, NUMPAD, isGap } from '../lib/keyboard-layout';
+
+const tool = findTool('keyboard-test')!;
+
+const KEY_COUNT = ALL_KEYS.length;
+
+const FAQ = [
+  {
+    q: '同时按好几个键,有一个不亮,是键盘坏了吗?',
+    a:
+      '先单独按一次那个键。单独按也不亮,才是键坏了;单独按能亮、一起按就不亮,那是键盘的**无冲能力**不够,' +
+      '也就是俗称的鬼键。薄膜键盘普遍只能同时识别 6 个键左右,而且不同按键组合的表现还不一样,' +
+      '这是硬件设计决定的,换键盘才能解决,和系统设置无关。',
+  },
+  {
+    q: '为什么某些组合键按下后页面没反应?',
+    a:
+      '因为那些组合被浏览器或系统抢走了,网页拦不住。Ctrl+W 关标签页、Ctrl+T 开新标签、Alt+Tab 切窗口、' +
+      '以及键盘上的 Win 键,都在浏览器拿到事件之前就被处理掉了。要测这些键,用专门的键盘测试软件,' +
+      '或者去 BIOS 里测。',
+  },
+  {
+    q: '按了 Alt+Tab 回来之后,有键一直亮着?',
+    a:
+      '这是正常的,不是粘键。窗口失去焦点时浏览器不再收到 keyup,页面就无从知道你已经松手了。' +
+      '本页在窗口失焦时会主动清空按键状态,所以看到的是"自己灭掉"而不是"一直亮着"。' +
+      '如果你什么都没做,某个键却自己亮着不灭,那才是真的粘键。',
+  },
+  {
+    q: '为什么按住一个键,计数只加了 1?',
+    a:
+      '因为系统的自动重复被刻意过滤掉了。按住不放时操作系统会以每秒几十次的频率反复发送按下事件,' +
+      '那是软件在模拟连击,不是你在按。本页用 `KeyboardEvent.repeat` 把这类事件排除在外,' +
+      '只有真正的按下才计数。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>键盘按键测试</h1>
+
+  <p class="prose">
+    按下键盘上的任意键,对应的键帽会立即高亮。用来排查<strong>某个键失灵</strong>,
+    或者验证<strong>同时按下多个键时会不会有键被漏掉</strong>(键盘的无冲能力)。
+    共收录 {KEY_COUNT} 个键位,含小键盘与编辑键。
+  </p>
+
+  <div class="notice notice--info">
+    <ul>
+      <li>
+        有几种组合是浏览器和系统<strong>抢在前面处理掉</strong>的,网页拿不到,别当成按键失灵:
+        <code>Ctrl+W</code>(关标签)、<code>Ctrl+T</code>(新标签)、<code>Alt+Tab</code>(切窗口)、
+        <code>Ctrl+Shift+Esc</code>(任务管理器)以及键盘上的 <code>Win</code> 键。
+      </li>
+      <li>
+        按 <code>F11</code>、<code>F12</code> 之类的功能键时,浏览器可能自己先响应(全屏、开发者工具),
+        这也是正常的。
+      </li>
+    </ul>
+  </div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">当前按住</div>
+      <div><span class="verdict__value" id="held">0</span><span class="verdict__unit">个键</span></div>
+      <div class="verdict__note" id="held-note">把光标放在这个页面上,然后按键</div>
+    </div>
+    <div class="verdict__aside">
+      <span class="badge badge--idle" id="state-badge">等待按键</span>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="presses" label="累计按下" primary hint="不含系统自动重复" />
+    <StatPanel id="unique" label="已触发的键" hint={`共 ${KEY_COUNT} 个`} />
+    <StatPanel id="max-held" label="同时按住最多" unit="键" hint="反映无冲能力" />
+    <StatPanel id="stuck" label="仍未松开" hint="失焦导致的不算" />
+  </div>
+
+  <div class="keyboard well" id="keyboard">
+    <div class="keyboard__main">
+      {
+        MAIN_ROWS.map((row) => (
+          <div class="kb-row">
+            {row.map((item) =>
+              isGap(item) ? (
+                <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
+              ) : (
+                <div
+                  class="kb-key"
+                  data-code={item.code}
+                  data-held="false"
+                  data-tested="false"
+                  style={`flex:${item.width ?? 1}`}
+                >
+                  {item.label}
+                </div>
+              ),
+            )}
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="keyboard__side">
+      <div class="kb-grid kb-grid--nav">
+        {
+          NAV_ROWS.map((row) => (
+            <div class="kb-row">
+              {row.map((item) =>
+                isGap(item) ? (
+                  <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
+                ) : (
+                  <div
+                    class="kb-key kb-key--small"
+                    data-code={item.code}
+                    data-held="false"
+                    data-tested="false"
+                    style={`flex:${item.width ?? 1}`}
+                  >
+                    {item.label}
+                  </div>
+                ),
+              )}
+            </div>
+          ))
+        }
+      </div>
+
+      <div class="kb-grid kb-grid--numpad">
+        {
+          NUMPAD.map((key) => (
+            <div
+              class="kb-key kb-key--small"
+              data-code={key.code}
+              data-held="false"
+              data-tested="false"
+              style={`${key.colSpan ? `grid-column: span ${key.colSpan};` : ''}${key.rowSpan ? `grid-row: span ${key.rowSpan};` : ''}`}
+            >
+              {key.label}
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="reset">重置</button>
+    <span class="test-hint">
+      没亮过的键会保持暗色,一闪即逝的键也来得及看
+    </span>
+  </div>
+
+  <h2>按键记录</h2>
+  <p class="prose tight">最近 12 次按键,新的在上面。</p>
+  <ul class="log-list" id="log"></ul>
+
+  <section class="prose">
+    <h2>怎么判断是坏键还是无冲不足</h2>
+    <ol class="steps">
+      <li>
+        <strong>逐个按一遍。</strong>按过的键会变成"已触发"的状态色,所以按完一整轮,
+        哪个键还是暗的一目了然——这就是失灵键。<strong>不用一边按一边盯着看</strong>,
+        这一点对排查闪烁式的接触不良特别有用。
+      </li>
+      <li>
+        <strong>再同时按住三到六个键。</strong>如果单个按都亮、一起按就有键不亮,
+        那是键盘的无冲能力不足(鬼键),不是坏键。薄膜键盘一般只能同时识别 6 个,
+        机械键盘视轴体和二极管设计而定。
+      </li>
+      <li>
+        <strong>看"同时按住最多"这个数。</strong>你按住了五个键,这里却只显示三个,
+        说明有两个被键盘吃掉了。这个数字是判断无冲能力最直接的证据。
+      </li>
+    </ol>
+
+    <h2>这项测试的边界</h2>
+    <p>
+      浏览器能看到的只有<strong>操作系统转发过来的按键</strong>。键盘固件在检测到
+      按键冲突时会直接把冲突的键丢掉,系统根本不知道你按过——所以"某个键没亮"这个现象,
+      本页只能如实报告,无法告诉你是键盘吃掉的还是那个键本身坏了。
+      区分方法就是上面第 1 步:单独按一次。
+    </p>
+    <p>
+      另外,<strong>这一页测不出按键的"手感"和"触发深度"</strong>。
+      微动开关的触发行程、段落感、以及轴的磨损程度,都要靠手感和专业设备,
+      网页拿到的只有"按下"和"松开"两个瞬间。能测的是<strong>时机</strong>和
+      <strong>有没有漏</strong>,仅此而已。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /* 底色、边框、圆角由 global.css 的 .well 提供 —— 键帽是"仪器"那一侧的 */
+    .keyboard {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      padding: 16px;
+    }
+
+    .keyboard__main {
+      flex: 1 1 520px;
+      min-width: 0;
+    }
+
+    .keyboard__side {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 0 0 auto;
+    }
+
+    .kb-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+
+    .kb-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .kb-grid--numpad {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-auto-rows: 32px;
+      gap: 4px;
+    }
+
+    .kb-gap {
+      flex: none;
+    }
+
+    .kb-key {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 40px;
+      padding: 0 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      text-align: center;
+      overflow: hidden;
+      white-space: nowrap;
+      transition: background 0.05s linear, border-color 0.05s linear;
+      user-select: none;
+    }
+
+    .kb-key--small {
+      height: 32px;
+      flex: none;
+    }
+
+    /* 按过的键:留一个"已触发"的底色,这样不必盯着看也能事后回溯 */
+    .kb-key[data-tested='true'] {
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+
+    .kb-key[data-held='true'] {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    @media (max-width: 720px) {
+      .keyboard__main {
+        flex-basis: 100%;
+      }
+
+      .kb-key {
+        height: 34px;
+        font-size: 0.62rem;
+      }
+    }
+  </style>
+
+  <script>
+    import { summarizeKeyboard, type KeyEvent } from '../lib/analysis';
+    import { ALL_KEYS, keyLabel } from '../lib/keyboard-layout';
+    import { el, mountCapabilityNotices, setBadge, setStat, setText } from '../lib/ui';
+
+    // 重新算一遍而不是引用 frontmatter 里的同名变量:Astro 的 `<script>` 会被
+    // 单独打包成外链模块,frontmatter 的变量在那个作用域里根本不存在。
+    const KEY_COUNT = ALL_KEYS.length;
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    /**
+     * 这些键不拦的话,按下时浏览器会做别的事:Tab 会跳走焦点、空格和方向键会滚动页面、
+     * 退格可能触发后退、斜杠和单引号是 Firefox 的快速查找。拦掉它们,测试才连得下去。
+     */
+    const INTERCEPTED = new Set([
+      'Tab',
+      'Space',
+      'Backspace',
+      'Enter',
+      'ArrowUp',
+      'ArrowDown',
+      'ArrowLeft',
+      'ArrowRight',
+      'PageUp',
+      'PageDown',
+      'Home',
+      'End',
+      'Slash',
+      'Quote',
+      'F1',
+      'F3',
+      'F5',
+      'F7',
+    ]);
+
+    const LOG_LIMIT = 12;
+
+    const logHost = el('log');
+
+    /** 按住的键 -> 按下的时刻,用来在松开时算按住时长 */
+    const heldSince = new Map<string, number>();
+
+    /**
+     * 完整的按下/松开序列。所有统计量都从它派生(见 `summarizeKeyboard`),
+     * 页面自己不再另记一套计数器——两套计数迟早会不一致,而"累计按下 42 次"
+     * 和"已触发的键 43 个"同时出现在屏幕上,用户只会认为整个页面都是错的。
+     */
+    const events: KeyEvent[] = [];
+
+    /** 最近若干次按键的展示用记录 */
+    const logEntries: { label: string; holdMs: number | null }[] = [];
+
+    function renderKey(code: string, held: boolean): void {
+      const node = document.querySelector<HTMLElement>(`.kb-key[data-code="${code}"]`);
+      if (!node) return;
+      node.dataset.held = held ? 'true' : 'false';
+      if (held) node.dataset.tested = 'true';
+    }
+
+    function renderSummary(): void {
+      const stats = summarizeKeyboard(events);
+
+      setStat('presses', String(stats.presses));
+      setStat('unique', `${stats.uniqueKeys} / ${KEY_COUNT}`);
+      setStat('max-held', String(stats.maxSimultaneous));
+      setStat('stuck', String(stats.stuck));
+      setText(el('held'), String(stats.stuck));
+
+      if (stats.stuck > 0) {
+        const names = [...heldSince.keys()].map(keyLabel).join(' + ');
+        setText(el('held-note'), names);
+        setBadge(el('state-badge'), '正在按下', 'good');
+      } else if (stats.presses > 0) {
+        setText(el('held-note'), '没有键被按住');
+        setBadge(el('state-badge'), '等待按键', 'idle');
+      }
+    }
+
+    function renderLog(): void {
+      if (!logHost) return;
+      if (logEntries.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'log-empty';
+        empty.textContent = '还没有按键记录';
+        logHost.replaceChildren(empty);
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      for (let i = logEntries.length - 1; i >= 0; i--) {
+        const entry = logEntries[i];
+        const item = document.createElement('li');
+        item.className = 'log-item';
+
+        const index = document.createElement('span');
+        index.className = 'log-item__index';
+        index.textContent = `#${i + 1}`;
+
+        const value = document.createElement('span');
+        value.className = 'log-item__value';
+        value.textContent = entry.label;
+
+        const note = document.createElement('span');
+        note.className = 'log-item__note';
+        note.textContent =
+          entry.holdMs === null ? '按着没松' : `按住了 ${entry.holdMs.toFixed(0)} ms`;
+
+        item.append(index, value, note);
+        fragment.appendChild(item);
+      }
+      logHost.replaceChildren(fragment);
+    }
+
+    /**
+     * 把已经不合法的"按住"状态清掉。
+     *
+     * 唯一的来源是窗口失焦:用户切走了,浏览器不再派发 keyup,页面就无从知道
+     * 那些键已经松了。**不记时长**——真去量的话会得到几十秒的假数字。
+     *
+     * 这里必须**补发合成的松开事件**,而不是只清 DOM。统计量全部派生自
+     * `events` 序列,光把界面上的高亮抹掉的话,`summarizeKeyboard` 仍然认为
+     * 那些键按着,"仍未松开"会一直挂着一个不存在的故障。
+     */
+    function clearHeld(): void {
+      if (heldSince.size === 0) return;
+
+      const now = performance.now();
+      for (const code of heldSince.keys()) {
+        events.push({ t: now, code, down: false });
+        renderKey(code, false);
+      }
+      heldSince.clear();
+      renderSummary();
+    }
+
+    window.addEventListener('keydown', (event) => {
+      // 带 Ctrl/Alt/Meta 的组合交给浏览器 —— 那些拦不住(见页面上的说明),
+      // 强行 preventDefault 只会让 Ctrl+C 之类也用不了
+      if (!event.ctrlKey && !event.altKey && !event.metaKey && INTERCEPTED.has(event.code)) {
+        event.preventDefault();
+      }
+
+      // 系统的自动重复:按住不放时操作系统每秒发几十次,那是软件模拟的连击,
+      // 不是用户在按。混进计数里会让"累计按下"完全失去意义。
+      if (event.repeat) return;
+
+      heldSince.set(event.code, performance.now());
+      events.push({ t: event.timeStamp, code: event.code, down: true });
+
+      renderKey(event.code, true);
+      renderSummary();
+
+      // 先占个位,松开时再补时长
+      logEntries.push({ label: keyLabel(event.code), holdMs: null });
+      if (logEntries.length > LOG_LIMIT) logEntries.shift();
+      renderLog();
+    });
+
+    window.addEventListener('keyup', (event) => {
+      const startedAt = heldSince.get(event.code);
+      heldSince.delete(event.code);
+      events.push({ t: event.timeStamp, code: event.code, down: false });
+      renderKey(event.code, false);
+
+      if (startedAt !== undefined) {
+        // 找到这条按键在日志里的位置,把按住时长补上。日志容量有限,
+        // 按得太多时早期条目已经被挤掉了,这时找不到就跳过。
+        for (let i = logEntries.length - 1; i >= 0; i--) {
+          if (logEntries[i].label === keyLabel(event.code) && logEntries[i].holdMs === null) {
+            logEntries[i].holdMs = performance.now() - startedAt;
+            break;
+          }
+        }
+        renderLog();
+      }
+
+      renderSummary();
+    });
+
+    // 窗口失焦时按键状态不再可信 —— 用户在别处松的手,这里收不到 keyup
+    window.addEventListener('blur', clearHeld);
+
+    el('reset')?.addEventListener('click', () => {
+      heldSince.clear();
+      events.length = 0;
+      logEntries.length = 0;
+
+      for (const node of document.querySelectorAll<HTMLElement>('.kb-key')) {
+        node.dataset.held = 'false';
+        node.dataset.tested = 'false';
+      }
+
+      renderSummary();
+      renderLog();
+    });
+
+    renderSummary();
+    renderLog();
+  </script>
+</BaseLayout>

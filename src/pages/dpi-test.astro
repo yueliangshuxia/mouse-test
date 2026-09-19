@@ -1,0 +1,458 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { CM_PER_INCH, STANDARD_DPI } from '../lib/analysis';
+
+const tool = findTool('dpi-test')!;
+
+/** 可选的移动距离。10cm 是折中:再短则手的抖动占比太大,再长则桌面放不下尺子 */
+const DISTANCES = [
+  { cm: 5, label: '5 厘米' },
+  { cm: 10, label: '10 厘米' },
+  { cm: 20, label: '20 厘米' },
+];
+
+const FAQ = [
+  {
+    q: '为什么必须关掉“提高指针精确度”?',
+    a:
+      '因为那是**指针加速度**。开着它的时候,系统会根据你移动的快慢额外放大位移——' +
+      '同样移动 10 厘米,快着推光标会走得更远。于是“每厘米对应多少像素”这个换算关系根本不存在,' +
+      '测出来的数与你的手速绑定,不可复现。关掉它是这项测试的前提,不是可选项。' +
+      '位置在:控制面板 → 鼠标 → 指针选项 → 取消勾选“提高指针精确度”。',
+  },
+  {
+    q: '显示缩放为什么要填?',
+    a:
+      '因为浏览器报的坐标是 **CSS 像素**,不是鼠标计数。屏幕上 150% 缩放时,一个鼠标计数只对应 ' +
+      '1/1.5 个 CSS 像素,所以量到的 CSS 像素要乘回 1.5 才是真实计数。' +
+      '页面会自动读系统的缩放比例,但如果你的浏览器缩放不是 100%(按 Ctrl+0 可以复位),' +
+      '读到的值会被浏览器缩放污染,这时需要手动指定。',
+  },
+  {
+    q: '测出来的数和我鼠标标称的 DPI 差一点,正常吗?',
+    a:
+      '正常,而且几乎一定会有偏差。误差有三个来源:你手动推的那 10 厘米本身就不可能精确' +
+      '(差 2 毫米就是 2%),指针速度滑块如果不在正中间(第 6 格)会引入一个固定比例,' +
+      '鼠标自己标称的 DPI 也常有 5% 左右的出入。所以本页把结果显示成“大约相当于”某个档位,' +
+      '而不是一个精确结论。',
+  },
+  {
+    q: '为什么要把指针速度滑块放在正中间?',
+    a:
+      'Windows 的指针速度滑块共 11 格,只有正中间那一格(第 6 格)是 1:1 映射——' +
+      '一个鼠标计数对应一个屏幕像素。往左会被缩小,往右会被放大,而且是**整数倍的阶梯式缩放**, ' +
+      '不是平滑的。滑块不在正中间时,本页测出的是“滑块缩放 × 硬件 DPI”的乘积。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标 DPI 测试</h1>
+
+  <p class="prose">
+    浏览器读不到鼠标的硬件 DPI,只能反过来估:让你沿着尺子推一段<strong>已知的物理距离</strong>,
+    再量屏幕上光标走了多少像素,两者一除就是每英寸多少个计数(CPI/DPI)。
+    这项测试<strong>需要一把尺子</strong>,而且必须先关掉系统的指针加速,否则测出来的数字没有意义。
+  </p>
+
+  <h2>开始之前</h2>
+  <ol class="steps">
+    <li>
+      <strong>关掉指针加速。</strong>控制面板 → 鼠标 → 指针选项 →
+      取消勾选“<strong>提高指针精确度</strong>”。这一步不做,后面的数字不用看。
+    </li>
+    <li>
+      <strong>把指针速度滑块拖到正中间(第 6 格)。</strong>
+      只有这一格是 1:1 映射,偏一格结果就会差一截。
+    </li>
+    <li>
+      <strong>按 Ctrl+0 复位浏览器缩放</strong>,准备一把尺子,把鼠标放在某个刻度上。
+    </li>
+    <li>
+      <strong>在下面选好要推的距离</strong>,点“开始测量”,然后沿尺子<strong>直着</strong>推这段距离,
+      推到头停住。<strong>停下约 0.7 秒后自动结算</strong>,不用再点按钮。
+    </li>
+  </ol>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    {
+      DISTANCES.map((option, index) => (
+        <button
+          type="button"
+          class="distance"
+          data-cm={option.cm}
+          aria-pressed={index === 1 ? 'true' : 'false'}
+        >
+          {option.label}
+        </button>
+      ))
+    }
+    <button type="button" id="start">开始测量</button>
+    <button type="button" id="stop" disabled>
+      提前结束
+    </button>
+  </div>
+
+  <div class="controls">
+    <label class="field">
+      <span class="field__label">显示缩放</span>
+      <select id="scale"></select>
+    </label>
+    <span class="test-hint" id="scale-note">检测中…</span>
+  </div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">估算 DPI</div>
+      <div>
+        <span class="verdict__value" id="dpi-main">—</span><span class="verdict__unit">DPI</span>
+      </div>
+      <div class="verdict__note" id="dpi-note">
+        按上面的步骤准备好,点“开始测量”,然后沿尺子推出选定的距离
+      </div>
+    </div>
+    <div class="verdict__aside">
+      <span class="badge badge--idle" id="tier-badge">等待测量</span>
+    </div>
+  </div>
+
+  <div class="test-area well dpi-pad" id="pad" data-measuring="false">
+    <div class="test-area__hint" id="hint">
+      点“开始测量”后,把指针放在这里,然后沿尺子推
+    </div>
+    <div class="dpi-live" id="live" hidden>
+      <div class="dpi-live__value" id="live-px">0</div>
+      <div class="dpi-live__label">已移动像素 · 推完停住即可</div>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="pixels" label="屏幕位移" unit="px" hint="沿主轴量到的净位移" />
+    <StatPanel id="duration" label="用时" unit="ms" />
+    <StatPanel id="speed" label="平均速度" unit="px/s" />
+    <StatPanel id="drift" label="推歪了" unit="px" hint="垂直于主轴的偏移" />
+  </div>
+
+  <section class="prose">
+    <h2>D 是多少就是多少?其实是 CPI</h2>
+    <p>
+      严格说这个量叫 <strong>CPI</strong>(counts per inch,每英寸计数),
+      而 <strong>DPI</strong>(dots per inch,每英寸点数)原本是打印机的指标。
+      但鼠标行业从很多年前就把这两个词混着用了,现在厂商、驱动、玩家社群一律写 DPI,
+      所以本站也跟着写 DPI——你要知道的是它们在这里指的是同一件事。
+    </p>
+
+    <h2>参考档位</h2>
+    <p>
+      下面这些是常见的标称档位,只用来给一句“大约相当于”。
+      <strong>它不构成判定</strong>:鼠标标称值和实测值差 5% 是常态,
+      而本页靠手动推 10 厘米来量,误差本来就有几个百分点。
+    </p>
+    <table class="ref-table ref-table--kv">
+      <thead>
+        <tr>
+          <th>档位</th>
+          <th>计数 / 厘米</th>
+          <th>常见用途</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          STANDARD_DPI.map((dpi) => (
+            <tr data-ref-dpi={dpi}>
+              <td>{dpi} DPI</td>
+              <td>{(dpi / CM_PER_INCH).toFixed(0)}</td>
+              <td>
+                {dpi <= 800
+                  ? '办公、多屏、低灵敏度玩家'
+                  : dpi <= 1600
+                    ? '最常见的游戏档位'
+                    : dpi <= 3200
+                      ? '高分辨率屏幕或高灵敏度设置'
+                      : '通常是配合驱动里的降敏倍率在用'}
+              </td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>误差从哪里来</h2>
+    <ul>
+      <li>
+        <strong>手推的距离不准。</strong>这是最大的一项。10 厘米上差 2 毫米就是 2% 的偏差,
+        而且起止位置全靠肉眼对刻度。想更准就推 20 厘米——分母大了,同样的手抖占比就小了。
+      </li>
+      <li>
+        <strong>指针速度滑块不在正中间。</strong>不在第 6 格时,系统会先做一次整数倍缩放,
+        你测到的是乘积。这一项带来的偏差可以很大,务必先归位。
+      </li>
+      <li>
+        <strong>推歪了。</strong>本页取的是<strong>净位移</strong>,只在起点和终点之间量直线距离。
+        如果你推的是条弧线,量到的会小于实际走过的路程,结果偏低。上面的“推歪了”就是给你看这个的。
+      </li>
+      <li>
+        <strong>系统仍在做加速。</strong>有些鼠标驱动会绕过系统的“提高指针精确度”自己再加速一次。
+        如果两次测量(慢推一次、快推一次)结果差很多,那就是还有加速没关掉——
+        去用加速度测试页确认。
+      </li>
+    </ul>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .dpi-pad {
+      height: 240px;
+      cursor: ew-resize;
+    }
+
+    .dpi-pad[data-measuring='true'] {
+      border-color: var(--accent);
+    }
+
+    /* .dpi-live 的定位、[hidden]、大字和标签都在 global.css 里
+       (和 CPS / 拖拽 / 滚轮三页共用);选项按钮的选中态同理 */
+
+    .field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .field__label {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+  </style>
+
+  <script>
+    import { classifyDpi, estimateDpi } from '../lib/analysis';
+    import { createRulerMeasurement, type RulerResult } from '../lib/ruler';
+    import {
+      el,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // 右键菜单 / 中键自动滚动会打断"沿尺子推"的手势。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    /** 要沿尺子推的物理距离(厘米) */
+    let distanceCm = 10;
+
+    /** 显示缩放倍数。默认取系统检测值 */
+    let scale = window.devicePixelRatio || 1;
+
+    const pad = el('pad');
+    const hint = el('hint');
+    const live = el('live');
+    const startButton = el('start') as HTMLButtonElement | null;
+    const stopButton = el('stop') as HTMLButtonElement | null;
+
+    // ---- 显示缩放 ----
+
+    /**
+     * 缩放候选值。
+     *
+     * 首项是系统实测的 `devicePixelRatio`。这个值同时包含**系统缩放**和
+     * **浏览器缩放**两层,页面无法把两者分开——所以注明了"按 Ctrl+0 复位"。
+     */
+    function buildScaleOptions(): void {
+      const select = el('scale') as HTMLSelectElement | null;
+      if (!select) return;
+
+      const detected = window.devicePixelRatio || 1;
+      const candidates = [detected, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+      const seen = new Set<number>();
+
+      for (const value of candidates) {
+        const rounded = Math.round(value * 100) / 100;
+        if (seen.has(rounded)) continue;
+        seen.add(rounded);
+
+        const option = document.createElement('option');
+        option.value = String(rounded);
+        option.textContent =
+          rounded === detected ? `${rounded}× (系统检测)` : `${rounded}×`;
+        select.appendChild(option);
+      }
+
+      select.value = String(detected);
+      setText(el('scale-note'), '页面会自动读系统缩放;浏览器缩放请先按 Ctrl+0 复位');
+    }
+
+    buildScaleOptions();
+
+    el('scale')?.addEventListener('change', (event) => {
+      const value = Number((event.target as HTMLSelectElement).value);
+      if (Number.isFinite(value) && value > 0) scale = value;
+    });
+
+    // ---- 距离选择 ----
+
+    function renderDistances(): void {
+      for (const button of document.querySelectorAll<HTMLElement>('.distance')) {
+        button.setAttribute(
+          'aria-pressed',
+          Number(button.dataset.cm) === distanceCm ? 'true' : 'false',
+        );
+      }
+    }
+
+    for (const button of document.querySelectorAll<HTMLElement>('.distance')) {
+      button.addEventListener('click', () => {
+        if (ruler.running) return;
+        distanceCm = Number(button.dataset.cm) || 10;
+        renderDistances();
+        reset();
+      });
+    }
+
+    renderDistances();
+
+    // ---- 测量 ----
+
+    const ruler = createRulerMeasurement({
+      onProgress: (current) => {
+        setText(el('live-px'), current.pixels.toFixed(0));
+        setStat('pixels', current.pixels.toFixed(0));
+        setStat('duration', current.durationMs.toFixed(0));
+        setStat('speed', current.speedPxPerSec.toFixed(0));
+      },
+      onFinish: (result) => {
+        setMeasuring(false);
+        if (!result) {
+          setText(el('dpi-note'), '这次移动太短或没记录到,请沿尺子推出选定的距离再试一次。');
+          setBadge(el('tier-badge'), '没测到', 'idle');
+          return;
+        }
+        showResult(result);
+      },
+    });
+
+    function showResult(result: RulerResult): void {
+      setStat('pixels', result.pixels.toFixed(0));
+      setStat('duration', result.durationMs.toFixed(0));
+      setStat('speed', result.speedPxPerSec.toFixed(0));
+      setStat('drift', result.crossAxisDriftPx.toFixed(0));
+
+      const dpi = estimateDpi({ pixels: result.pixels, distanceCm, scale });
+      setText(el('dpi-main'), dpi === null ? '—' : dpi.toFixed(0));
+
+      if (dpi === null) {
+        setBadge(el('tier-badge'), '算不出来', 'idle');
+        setText(el('dpi-note'), '数据不足,请重新推一次。');
+        return;
+      }
+
+      const tier = classifyDpi(dpi);
+      setBadge(
+        el('tier-badge'),
+        tier === null ? '未识别档位' : `约 ${tier} DPI`,
+        tier === null ? 'fair' : 'good',
+      );
+
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-dpi]')) {
+        row.dataset.current =
+          tier !== null && Number(row.dataset.refDpi) === tier ? 'true' : 'false';
+      }
+
+      const notes: string[] = [
+        `${distanceCm} 厘米里光标走了 ${result.pixels.toFixed(0)} 像素,用时 ${(result.durationMs / 1000).toFixed(2)} 秒。`,
+      ];
+      // 推歪了会让净位移小于实际路程,结果系统性偏低 —— 这是最该提示的一项
+      if (result.crossAxisDriftPx > result.pixels * 0.15) {
+        notes.push(
+          `垂直于主轴偏了 ${result.crossAxisDriftPx.toFixed(0)} 像素,推弧线会让读数偏低,建议重推一次。`,
+        );
+      }
+      if (result.pixels < 200) {
+        notes.push('位移太小,手的抖动占比过大,建议推长一点的距离。');
+      }
+      setText(el('dpi-note'), notes.join(' '));
+    }
+
+    function setMeasuring(next: boolean): void {
+      pad?.setAttribute('data-measuring', next ? 'true' : 'false');
+      hint?.setAttribute('hidden', next ? '' : '');
+      if (next) live?.removeAttribute('hidden');
+      else live?.setAttribute('hidden', '');
+      if (startButton) startButton.disabled = next;
+      if (stopButton) stopButton.disabled = !next;
+    }
+
+    startButton?.addEventListener('click', () => {
+      setText(el('live-px'), '0');
+      for (const id of ['pixels', 'duration', 'speed', 'drift']) setStat(id, '—');
+      setBadge(el('tier-badge'), '测量中', 'idle');
+      setText(el('dpi-note'), '沿尺子直着推,推到头停住,约 0.7 秒后自动结算。');
+      setMeasuring(true);
+      ruler.start();
+    });
+
+    stopButton?.addEventListener('click', () => ruler.finish());
+
+    function reset(): void {
+      ruler.cancel();
+      setMeasuring(false);
+      for (const id of ['pixels', 'duration', 'speed', 'drift']) setStat(id, '—');
+      setText(el('dpi-main'), '—');
+      setBadge(el('tier-badge'), '等待测量', 'idle');
+      setText(el('dpi-note'), '按上面的步骤准备好,点“开始测量”,然后沿尺子推出选定的距离');
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-dpi]')) {
+        row.dataset.current = 'false';
+      }
+    }
+
+    window.addEventListener('pagehide', () => ruler.destroy());
+  </script>
+</BaseLayout>

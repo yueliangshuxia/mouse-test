@@ -1,0 +1,23 @@
+---
+import { READY_TOOLS } from '../lib/tools';
+
+interface Props {
+  /** 当前页面的 slug,用于高亮 */
+  current?: string;
+}
+
+const { current } = Astro.props;
+---
+
+<nav class="site-nav" aria-label="工具导航">
+  {
+    READY_TOOLS.map((tool) => (
+      <a
+        href={`/${tool.slug}/`}
+        aria-current={current === tool.slug ? 'page' : undefined}
+      >
+        {tool.name}
+      </a>
+    ))
+  }
+</nav>

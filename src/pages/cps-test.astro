@@ -1,0 +1,605 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+
+const tool = findTool('cps-test')!;
+
+/** 时长选项。30 秒那个是给"耐力型"测法用的——手速在 30 秒里一定会掉 */
+const DURATIONS = [
+  { ms: 5000, label: '5 秒' },
+  { ms: 10000, label: '10 秒' },
+  { ms: 30000, label: '30 秒' },
+];
+
+/**
+ * CPS 参考区间。
+ *
+ * **这些是常见区间,不是标准,官方也没有标准。** 数值受鼠标微动的回弹速度、
+ * 你用的是哪根手指、以及是不是用了特殊点击法影响极大,所以只能说"大多数人在
+ * 这个范围里"。页面上要这么写,不能说成"你应该达到多少"。
+ *
+ * 分档对着的是公开的实测区间:常人平均 4–7、抖动点击 10–14、蝴蝶点 15–25、
+ * 拖拽点 25 往上(25–40 常见,好的鼠标能上三位数)。**别把拖拽点合进 15–25**
+ * ——它是从 25 起算的,合进去会让练过的人以为自己"超出量程"。
+ *
+ * 高档位的保留意见是**分不出来**,不是报不出来:25 CPS 远在任何硬件上限之下
+ * (消抖 4ms 约合 250 CPS,最慢的 125Hz 回报率也还有约 60),鼠标会如实上报。
+ * 早先这里写的是"超出固件如实上报的范围",那是错的——把"服务器会拦"和
+ * "固件报不出"混成了一件事。
+ */
+const REFERENCE = [
+  { range: '3 以下', level: '偏慢', note: '多见于老年人、刚上手触控板的人,或用了很硬的微动' },
+  { range: '4 – 6', level: '普通', note: '不常玩游戏的成年人基本都在这一带' },
+  { range: '7 – 9', level: '熟练', note: '常玩射击游戏的玩家很容易达到' },
+  { range: '10 – 14', level: '很快', note: '需要抖动点击(jitter click)之类的技巧' },
+  { range: '15 – 25', level: '特殊点击法', note: '蝴蝶点(butterfly click)——靠手指在微动上弹,不是靠肌肉' },
+  {
+    range: '25 以上',
+    level: '拖拽点',
+    note: '手指贴着微动拖擦出连续通断,常见 25–40,好的鼠标能更高。到这个量级,人手和自动点击器在数据上已经分不出来——数字是真实的,只是没法证明它是手点的',
+  },
+];
+
+const FAQ = [
+  {
+    q: '为什么我点的次数比实际点的少?',
+    a:
+      '先怀疑鼠标的固件消抖(debounce)。微动在按下和弹起的一瞬间会产生几毫秒的机械抖动,固件会把太近的两次通断合并成一次——' +
+      '消抖时间设得长的鼠标,快速连点会被整片吞掉。其次是回报率:鼠标的按键状态是搭在每一次上报里送出去的,125Hz 意味着每 8ms 才采样一次按键,' +
+      '比这更短的按压可能一次都没被采到。' +
+      '这一页**自己也占一小份**,但少得很有限:计时不是精确卡在整秒上停的,它每 80 毫秒结算一次,' +
+      '所以到点之后、结算之前那几十毫秒里落下的点击会被判在窗口外丢掉——**一次测试最多一两下**。' +
+      '如果差的远不止这个数,那就不是页面的问题,回到上面两条去查。',
+  },
+  {
+    q: 'CPS 多少算正常?',
+    a:
+      '没有官方标准,也不该有。常见区间是 4–6(普通人)、7–9(常玩射击游戏)、10 以上(需要专门的点击技巧)。' +
+      '同一个人的成绩还会随手指、疲劳程度、鼠标微动的硬度大幅变化,所以把两次测量的差异当"参考"看就好,别当成体检指标。',
+  },
+  {
+    q: '为什么只算左键?',
+    a:
+      '因为 CPS 比的是"用最常用的那根手指能点多快",把右键和中键混进来会让不同人之间的成绩根本没法比。' +
+      '另外这一页只统计左键,中键和右键一律不计;中键的自动滚动和右键菜单在测试时也被挡掉了,不会打断你连点。' +
+      '想单独测右键响应,用按键测试页。',
+  },
+  {
+    q: '高 CPS 会伤鼠标吗?',
+    a:
+      '会加速微动磨损,这是有代价的。微动的标称寿命通常是按几千万次点击计的,而高频连点会让触点反复拉弧、弹片反复形变。' +
+      '如果只是偶尔测一下成绩无所谓;天天刷纪录,微动提前出现连击是很常见的结果。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标 CPS 点击速度测试</h1>
+
+  <p class="prose">
+    选好时长,然后在下面的框里<strong>直接开始快速连点左键</strong>——
+    第一下点击就是开始,不用先按什么。结束时会给出全程平均和任意一秒内的最高点击次数。
+    成绩只保存在你自己的浏览器里。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    {
+      DURATIONS.map((option) => (
+        <button type="button" class="duration" data-ms={option.ms}>
+          {option.label}
+        </button>
+      ))
+    }
+    <button type="button" id="toggle">重置</button>
+  </div>
+
+  <div class="test-area well cps-pad" id="pad" data-running="false">
+    <div class="test-area__hint" id="hint">
+      <span class="cps-start">
+        <span class="cps-start__call">点击开始</span>
+        <span class="cps-start__meta" id="hint-meta">5 秒 · 在这里快速连点左键</span>
+      </span>
+    </div>
+    <div class="cps-live" id="live" hidden>
+      <div class="cps-live__count" id="live-count">0</div>
+      <div class="cps-live__meta">
+        次点击 · 剩余 <span id="live-left">—</span> 秒 · <span id="live-cps">—</span> CPS
+      </div>
+    </div>
+    <div class="cps-over" id="over" hidden>
+      <div class="cps-live__count" id="over-count">0</div>
+      <div class="cps-live__meta">时间到 · 再点一下重来</div>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="average" label="平均 CPS" primary hint="总次数 ÷ 测试时长" />
+    <StatPanel id="peak" label="峰值 CPS" hint="任意 1 秒内最多几下" />
+    <StatPanel id="clicks" label="点击次数" />
+    <StatPanel id="best" label="历史最佳" hint="峰值,存在本机" />
+  </div>
+
+  <h2>每秒点击次数</h2>
+  <p class="prose tight">
+    每根柱子是一秒钟里点了多少下。柱子从高到低说明手速在掉——
+    这是正常的,人体持续发力本来就撑不住;柱子<strong>忽高忽低</strong>则多半是
+    点着点着节奏乱了,或者某一秒鼠标吞掉了点击。
+  </p>
+  <div class="rate-chart" id="chart"></div>
+  <div class="histogram-axis">
+    <span id="chart-left">—</span>
+    <span id="chart-right">—</span>
+  </div>
+
+  <section class="prose">
+    <h2>参考区间</h2>
+    <p>
+      下面这些是<strong>常见区间,不是标准</strong>。鼠标微动的软硬、你用哪根手指、
+      有没有用特殊点击法,都能让同一个人的成绩差出好几倍。
+    </p>
+    <table class="ref-table">
+      {/*
+        这一张必须固定前两列的宽度。第三列的说明比别的表长得多,auto 布局会把
+        宽度几乎全给它,把第二列压到 58px(窄屏 41px)——「特殊点击法」于是折成
+        三行、表头「大致水平」折成四行。第一列 5rem 够「25 以上」不折行,第二列
+        6rem 够最长的「特殊点击法」。
+      */}
+      <colgroup>
+        <col style="width: 5rem" />
+        <col style="width: 6rem" />
+        <col />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>CPS</th>
+          <th>大致水平</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          REFERENCE.map((row) => (
+            <tr>
+              <td>{row.range}</td>
+              <td>{row.level}</td>
+              <td>{row.note}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>平均和峰值差得很远,该看哪个?</h2>
+    <p>
+      <strong>两个都要看,因为它们回答的是不同的问题。</strong>
+      平均 CPS 是总次数除以总时长,反映你在这段时间里<strong>撑住了多少</strong>;
+      峰值是任意一秒里最多的那一下,反映你<strong>最快能有多快</strong>。
+      典型的成绩是平均 6、峰值 9——开头猛冲、后面掉,这个形状本身就是正常的,
+      页面上那张每秒柱状图就是给你看这个形状的。
+    </p>
+    <p>
+      也正因为这样,测试时长<strong>一定要显式计时</strong>。“前 1 秒猛点 20 下、
+      后 4 秒没力气了”如果按最后一次点击来截断,会被算成 20 CPS——
+      而后面那段空档在点击时间戳里根本不存在,不点就没有事件,只有计时器知道它发生过。
+    </p>
+
+    <h2>点得比实际少,通常是鼠标的问题</h2>
+    <p>
+      这是 CPS 测试最有价值的一个用途。如果屏幕上你明明点了 100 下,页面只记到 88 下,
+      那么丢掉的 12 下<strong>不是页面漏记,而是鼠标压根没报出来</strong>。两个常见成因:
+    </p>
+    <ul>
+      <li>
+        <strong>固件消抖时间设得长。</strong>微动在通断的一瞬间会产生几毫秒的机械抖动,
+        固件要把太近的两次合并成一次,否则光标会自己连点。代价是消抖窗口内的真实点击
+        也一起被吞了。有些鼠标的驱动里可以调这个值。
+      </li>
+      <li>
+        <strong>回报率太低。</strong>鼠标的按键状态是搭在每一次上报里送出去的,
+        <strong>125Hz 意味着每 8ms 才采样一次按键</strong>。比 8ms 还短的一次按压,
+        可能一次也没被采到。想确认的话去跑一遍回报率测试。
+      </li>
+    </ul>
+    <p>
+      这两种情况都属于<strong>鼠标在丢你的操作</strong>,而不是测试工具的问题——
+      换一只鼠标测同样的手法,数字会明显不一样。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .cps-pad {
+      height: 300px;
+      cursor: pointer;
+    }
+
+    .cps-pad[data-running='true'] {
+      border-color: var(--accent);
+    }
+
+    /*
+     * 测试面正中那行"点击开始"。
+     *
+     * **只加内层这两个类,不动 `.test-area__hint`** —— 那个类还被 DPI、拖拽、
+     * 滚轮、轨迹四页共用,改它等于改四个页面。
+     *
+     * 颜色用 `--text` / `--text-dim` 而不是写死:这一段落在 `.well` 子树里,
+     * 两个令牌会被自动重指到仪器窗的色值,所以它天然就是"井里的字",不用管主题。
+     */
+    .cps-start {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cps-start__call {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    .cps-start__meta {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    /*
+     * .cps-live / .cps-over 的定位、[hidden]、大字和次要文字都在 global.css 里
+     * ——它们和 DPI、拖拽、滚轮三页的实时读数共用同一套规则,四份逐字重复的
+     * 副本没必要各留一份。
+     *
+     * 下面这条是这里独有的:结算之后那个数不再是"实时读数",而是一个**结论**,
+     * 所以要用正文色而不是强调色。它落在仪器窗里,`--text` 会被 `.well` 自动
+     * 重指成浅色 —— 这正是该有的行为(早先硬写 var(--text) 时,纸面是深色主题
+     * 才没暴露出问题)。
+     */
+    .cps-over .cps-live__count {
+      color: var(--text);
+    }
+
+    /* 连点很容易顺带选中页面文字,测试期间一律抑制 */
+    :global(html.is-testing) {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+  </style>
+
+  <script>
+    import { computeCps } from '../lib/analysis';
+    import {
+      createTicker,
+      el,
+      format,
+      loadBest,
+      mountCapabilityNotices,
+      saveBest,
+      setHint,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // 右键菜单 / 中键自动滚动会盖住测试区、打断连点。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    const BEST_KEY = 'mouse-test:cps-best';
+
+    const pad = el('pad');
+    const hint = el('hint');
+    const live = el('live');
+    const over = el('over');
+    const toggleButton = el('toggle') as HTMLButtonElement | null;
+    const chartHost = el('chart');
+
+    /** 当前选中的时长(毫秒) */
+    let durationMs = 5000;
+
+    let running = false;
+    let startedAt = 0;
+    /** 点击时刻,相对 `startedAt`。测试结束后保留,用于重算和画图 */
+    let clickTimes: number[] = [];
+
+    let stopTicker: (() => void) | null = null;
+
+    /**
+     * 结算之后多久内,测试面上的点击**不算"想再来一轮"**。
+     *
+     * 这一条是实测逼出来的,不是拍脑袋加的:计时到点由 ticker 每 80ms 结算一次,
+     * 而人手在 5 秒里连点完之后不会立刻停 —— 实测跑一轮 5 秒(约 20 CPS),
+     * 到点时还在惯性地按,结果 `finish()` 刚把 78 次摆上去,**50ms 后那一下就把
+     * 它抹掉、直接开了第二轮**。成绩在屏幕上存在的时间比一次眨眼还短,等于白测。
+     *
+     * 900ms 够看清一个三位数、也够看清下面四块面板刷新;之后点击恢复成"再来一轮"。
+     *
+     * 这个数是量出来的,不是估的:用机器以 20 CPS 从结算那一刻起不停地按,
+     * 成绩在**第 872ms** 被抹掉 —— 也就是说人类要打破它,得在计时结束后
+     * 仍以极限速度多按二十几下。而人真正的收手反射只多出 1–3 下(约 50–150ms),
+     * 留了六倍余量。所以这条锁不是"够长",是"比人长得多"。
+     */
+    const RESTART_LOCK_MS = 900;
+    /** 在这个时刻之前,测试面上的点击不触发新一轮 */
+    let lockUntil = 0;
+
+    // ---- 时长选择 ----
+
+    function renderDurations(): void {
+      let label = '';
+      for (const button of document.querySelectorAll<HTMLElement>('.duration')) {
+        const selected = Number(button.dataset.ms) === durationMs;
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        if (selected) label = button.textContent?.trim() ?? '';
+      }
+      // 时长标签从按钮上读,不从 DURATIONS 拿:frontmatter 的变量在 `<script>` 里
+      // 不存在(脚本被单独打包成外链模块),照着重写一遍等于多留一份会漂的副本
+      setText(el('hint-meta'), `${label} · 在这里快速连点左键`);
+    }
+
+    for (const button of document.querySelectorAll<HTMLElement>('.duration')) {
+      button.addEventListener('click', () => {
+        if (running) return;
+        durationMs = Number(button.dataset.ms) || 5000;
+        renderDurations();
+        reset();
+      });
+    }
+
+    renderDurations();
+
+    // ---- 画图 ----
+
+    /**
+     * 每秒点击次数柱状图。
+     *
+     * 分桶用**测试时钟**而不是真实时间,所以最后一格即使不满一秒也照画——
+     * 它代表的正是"最后那零点几秒点了多少",略掉的话手速掉下去的那一段
+     * 恰好会看不见。
+     */
+    function renderChart(): void {
+      if (!chartHost) return;
+
+      if (clickTimes.length === 0) {
+        chartHost.replaceChildren();
+        setText(el('chart-left'), '—');
+        setText(el('chart-right'), '—');
+        return;
+      }
+
+      const bucketCount = Math.ceil(durationMs / 1000);
+      const buckets = new Array<number>(bucketCount).fill(0);
+      for (const t of clickTimes) {
+        const index = Math.min(bucketCount - 1, Math.floor(t / 1000));
+        buckets[index]++;
+      }
+
+      let max = 0;
+      for (const count of buckets) if (count > max) max = count;
+      if (max === 0) return;
+
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < bucketCount; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'rate-chart__bar';
+        // 最低留 2% 高度,否则 0 次的那一秒和 1 次的那一秒在视觉上没区别
+        bar.style.height = `${Math.max(2, (buckets[i] / max) * 100)}%`;
+        bar.title = `第 ${i + 1} 秒 · ${buckets[i]} 次`;
+        fragment.appendChild(bar);
+      }
+      chartHost.replaceChildren(fragment);
+
+      setText(el('chart-left'), '1s');
+      setText(el('chart-right'), `${bucketCount}s · 满格 ${max} 次/秒`);
+    }
+
+    // ---- 结算 ----
+
+    function finish(): void {
+      stopTicker?.();
+      stopTicker = null;
+      running = false;
+      // 结算后先锁一小段,让人看清成绩 —— 理由见 `RESTART_LOCK_MS`
+      lockUntil = performance.now() + RESTART_LOCK_MS;
+      pad?.setAttribute('data-running', 'false');
+      document.documentElement.classList.remove('is-testing');
+      setText(toggleButton, '重置');
+
+      live?.setAttribute('hidden', '');
+      over?.removeAttribute('hidden');
+      setText(el('over-count'), String(clickTimes.length));
+
+      const stats = computeCps(clickTimes, { durationMs });
+      setStat('clicks', String(clickTimes.length));
+      setStat('average', stats ? format(stats.average, 2) : '0');
+      setStat('peak', stats ? String(stats.peak) : '0');
+
+      const previousBest = loadBest(BEST_KEY);
+      const isRecord = Boolean(stats && stats.peak > 0 && (previousBest === null || stats.peak > previousBest));
+      if (stats && stats.peak > 0) saveBest(BEST_KEY, stats.peak);
+
+      const best = loadBest(BEST_KEY);
+      setStat('best', best === null ? '—' : String(best));
+      setHint('best', isRecord ? '本次刷新了纪录' : '峰值,存在本机');
+
+      renderChart();
+    }
+
+    // ---- 计时 ----
+
+    function tick(): void {
+      const elapsed = performance.now() - startedAt;
+      const remaining = Math.max(0, durationMs - elapsed);
+
+      // 实时数字用**已过时间**算,而不是等结算,否则跑到一半看不到进度
+      const cps = elapsed > 0 ? (clickTimes.length / elapsed) * 1000 : 0;
+      setText(el('live-count'), String(clickTimes.length));
+      setText(el('live-left'), (remaining / 1000).toFixed(1));
+      setText(el('live-cps'), cps.toFixed(1));
+
+      setStat('clicks', String(clickTimes.length));
+      setStat('average', cps.toFixed(2));
+
+      if (remaining <= 0) finish();
+    }
+
+    /**
+     * 开始一轮。
+     *
+     * `atMs` 由**触发起始的那一次点击**传进来(见下面的 pointerdown),这样第一下
+     * 点击的偏移正好是 0,而且这一下本身也计入成绩。不传时退回 `performance.now()`。
+     *
+     * 这里必须是**事件自己的时刻**而不是现取 `performance.now()`:`event.timeStamp`
+     * 和 `performance.now()` 同源、可以直接相减,但后取的会晚于事件发生的时刻,
+     * 于是第一下的偏移变成负数。
+     */
+    function start(atMs?: number): void {
+      clickTimes = [];
+      startedAt = atMs ?? performance.now();
+      running = true;
+
+      pad?.setAttribute('data-running', 'true');
+      document.documentElement.classList.add('is-testing');
+      hint?.setAttribute('hidden', '');
+      live?.removeAttribute('hidden');
+      over?.setAttribute('hidden', '');
+      // 测试中这个钮是"取消",所以**不能**像早先那样 disable —— 那会让人中途退不出来
+      setText(toggleButton, '取消');
+
+      setStat('clicks', '0');
+      setStat('average', '0');
+      setStat('peak', '0');
+      chartHost?.replaceChildren();
+
+      stopTicker?.();
+      stopTicker = createTicker(80, tick);
+    }
+
+    function reset(): void {
+      stopTicker?.();
+      stopTicker = null;
+      running = false;
+      clickTimes = [];
+      // 这是人主动按的,不该再锁着:重置完立刻点测试面应当马上开局
+      lockUntil = 0;
+
+      pad?.setAttribute('data-running', 'false');
+      document.documentElement.classList.remove('is-testing');
+      hint?.removeAttribute('hidden');
+      live?.setAttribute('hidden', '');
+      over?.setAttribute('hidden', '');
+      setText(toggleButton, '重置');
+
+      for (const id of ['average', 'peak']) setStat(id, '—');
+      setStat('clicks', '0');
+      const best = loadBest(BEST_KEY);
+      setStat('best', best === null ? '—' : String(best));
+      setHint('best', '峰值,存在本机');
+      chartHost?.replaceChildren();
+      setText(el('chart-left'), '—');
+      setText(el('chart-right'), '—');
+    }
+
+    // ---- 交互 ----
+
+    /*
+     * 这个钮不再负责"开始"——开始交给测试面本身,点一下就开始连点,少一步。
+     * 它现在只剩一件事:把状态清回起点。测试中按下是"取消",有成绩时按下是
+     * "重置",两者收尾是同一套,所以共用 `reset()`。
+     */
+    toggleButton?.addEventListener('click', () => reset());
+
+    /**
+     * 只认左键,而且只认**在测试面上按下**的那一次。
+     *
+     * 用 `pointerdown` 的 `event.button === 0` 而不是 `mousedown`:指针事件是
+     * 这个站上其他页面统一在用的那一套,而且 `button === 0` 在所有实现里都
+     * 确定地表示左键(`buttons` 的位序就不一样了,中键和右键是反的)。
+     * 每次按下只会派发一次 `pointerdown`,所以不存在重复计数。
+     *
+     * **空闲时按下就开局**,而且这一下同时算作第一次点击 —— 先把计时起点定成
+     * 这一下的时刻,再按同一时刻记进 `clickTimes`,偏移正好是 0。反过来先
+     * `start()` 再由它取 `performance.now()` 的话,起点会晚于这一下,偏移就成了负数。
+     *
+     * 唯一的例外是刚结算完的那一小段(`RESTART_LOCK_MS`):那时手还在惯性连点,
+     * 由着它开局的话成绩根本来不及看。
+     */
+    pad?.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+
+      if (!running) {
+        // 刚结算完的余韵里,手还在惯性连点 —— 那几下不算"想再来一轮",
+        // 丢掉它们,成绩才留得住。锁定期一到,点击恢复成开局。
+        if (performance.now() < lockUntil) return;
+        start(event.timeStamp);
+      }
+
+      // 用事件的时刻而不是处理函数里的 `performance.now()`:连点很容易让浏览器
+      // 把好几次按下攒进同一个任务里派发,那时 `performance.now()` 的差会塌到 0,
+      // 一秒窗口里能塞进的次数就被虚报了。`event.timeStamp` 与 `performance.now()`
+      // 同源,可以直接和 `startedAt` 相减。
+      const offset = event.timeStamp - startedAt;
+
+      // 计时到点由 ticker 每 80ms 结算一次,所以截止之后、`finish()` 之前落进来的
+      // 点击会被顺手记下 —— 那几下**不在这一轮的时间窗里**,计进去就是实打实的
+      // 虚报(点得越密越明显)。窗口外的直接丢。
+      if (offset > durationMs) return;
+      clickTimes.push(offset);
+    });
+
+    // 连点很容易连带触发文字选中与拖拽,两样都会打断节奏
+    pad?.addEventListener('dragstart', (event) => event.preventDefault());
+    pad?.addEventListener('dblclick', (event) => event.preventDefault());
+
+    reset();
+
+    window.addEventListener('pagehide', () => {
+      stopTicker?.();
+      document.documentElement.classList.remove('is-testing');
+    });
+  </script>
+</BaseLayout>

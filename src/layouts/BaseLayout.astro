@@ -1,0 +1,123 @@
+---
+import '../styles/global.css';
+import ToolNav from '../components/ToolNav.astro';
+import { THEME_COLORS, THEME_KEY } from '../lib/theme';
+
+interface Props {
+  /** 页面 <title>,每页独立 */
+  title: string;
+  /** meta description,每页独立 */
+  description: string;
+  /** 当前页面 slug,用于导航高亮 */
+  current?: string;
+  /** 可选的 JSON-LD 结构化数据 */
+  jsonLd?: Record<string, unknown>;
+}
+
+const { title, description, current, jsonLd } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical.href} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content={THEME_COLORS.light} />
+
+    <!--
+      主题必须在**首次绘制之前**定下来,否则选了深色的人每次加载都会先闪一帧
+      浅色。所以这个脚本是内联的:Astro 默认的 <script> 会被打包成延迟执行的
+      module,等它跑起来首帧已经画完了。
+
+      它读的是**存起来的偏好**(auto / light / dark),在系统偏好那里解析成
+      具体值,然后把结果写到 <html data-theme> 上。CSS 那边因此只需要一个
+      深色选择器,不必为「跟随系统」再写一遍整套令牌——理由见 src/lib/theme.ts。
+
+      常量走 define:vars 注入:内联脚本不能 import,但键名和色值也不该在
+      这里再手抄一份。
+    -->
+    <script is:inline define:vars={{ themeKey: THEME_KEY, themeColors: THEME_COLORS }}>
+      (function () {
+        var pref = 'auto';
+        try {
+          pref = localStorage.getItem(themeKey) || 'auto';
+        } catch {
+          /*
+           * 隐私模式下 localStorage 一碰就抛。**不能因此退回浅色**——
+           * 系统的深色偏好和 localStorage 没关系,不该被它连累,
+           * 继续往下走,让 matchMedia 去决定。
+           */
+        }
+
+        var dark =
+          pref === 'dark' ||
+          (pref !== 'light' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+
+        // 手机状态栏的颜色也得跟着走,否则和页面底色对不上
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) {
+          meta.setAttribute('content', dark ? themeColors.dark : themeColors.light);
+        }
+      })();
+    </script>
+
+    {
+      jsonLd && (
+        <script
+          type="application/ld+json"
+          set:html={JSON.stringify(jsonLd)}
+        />
+      )
+    }
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="/">鼠标测试</a>
+        <ToolNav current={current} />
+        <!-- 按钮由 ui.ts 的 mountThemeToggle 建出来(文案取 THEME_LABELS) -->
+        <div class="theme-switch" id="theme-switch" role="group" aria-label="外观主题"></div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>所有测试均在浏览器本地完成,数据不会上传到服务器。</p>
+        <p>建议使用桌面版 Chrome 或 Edge 以获得最准确的测量结果。</p>
+      </div>
+    </footer>
+
+    <!--
+      底部悬浮条。**现在是关着的** —— 去掉下面那个 `hidden` 就会立刻出现,
+      不用改别的地方:页脚底部的留白是靠 `html:has(.site-dock:not([hidden]))`
+      跟它绑在一起的(见 global.css),开关这一个属性就够了。
+
+      里面是空的。以后放二维码 / 图片,把 .site-dock__placeholder 整块替换掉
+      即可(虚线和文字一起删)。
+
+      它是 position: fixed,所以**每个页面都会看到**。只想让首页显示的话,
+      把这一段整体搬进 src/pages/index.astro。
+    -->
+    <div class="site-dock well" hidden>
+      <p class="site-dock__placeholder">二维码 / 图片位</p>
+    </div>
+
+    <script>
+      import { el, mountThemeToggle } from '../lib/ui';
+
+      mountThemeToggle(el('theme-switch'));
+    </script>
+  </body>
+</html>

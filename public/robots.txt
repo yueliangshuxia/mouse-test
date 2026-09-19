@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# TODO: 上线时替换为备案通过的正式域名
+Sitemap: https://example.com/sitemap-index.xml

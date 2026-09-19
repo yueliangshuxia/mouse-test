@@ -1,0 +1,1615 @@
+/**
+ * 全站样式。
+ *
+ * ## 两个寄存器
+ *
+ * 这一版把配色拆成**两套并存的令牌**,靠元素上的 `.well` 切换:
+ *
+ * - **纸面**(默认,`:root`):文档。正文、表格、FAQ、日志、判定横幅、统计面板。
+ *   浅灰底、**无彩色**——强调色就是墨色本身,不另开一个蓝。
+ * - **仪器窗**(`.well`):**正在出数的那个面**。近黑底、磷光绿。
+ *
+ * 判断一个块该用哪套,只有一句话:**它是"波形/脉冲/亮度"的实时呈现,
+ * 还是文字与结论?** 前者进仪器窗,后者留纸面。深色因此不再是"整页的底色",
+ * 而是一个有含义的记号——扫一眼就知道哪里是活的。
+ *
+ * **纸面走无彩色,是这套系统成立的前提。** 全站只有三处有颜色:仪器窗的磷光绿
+ * (唯一一处"活着"的记号)、警告的赭黄、故障的朱砂。纸面上任何一处额外的彩色
+ * 都会稀释掉"绿色 = 在出数"这个信号,所以链接、选中态、强调数字一律用墨色
+ * 加粗加重来表达,不靠色相。
+ *
+ * ## 机制
+ *
+ * `.well` 在子树里把**通用令牌名**(`--bg` / `--text` / `--accent` …)**整套**重指到
+ * `--well-*`。自定义属性在元素上求值,所以页面 `<style>` 里那些编译后带
+ * `data-astro-cid` 的高优先级规则(比如 `.cps-live__count { color: var(--accent) }`)
+ * 落进仪器窗会**自动**变成磷光绿,不需要写第二套规则。
+ *
+ * 代价是 remap **必须完整**:漏掉任何一个名字,那个名字在仪器窗里就还是纸面的值,
+ * 而 `var()` 解析失败是**静默**的——继承类属性会变成 inherit(颜色不对但看得见),
+ * 简写属性会整体回落到初始值(`border: 1px dashed var(--border)` 直接变成没有边框)。
+ * 加新令牌时记得同步加进 `.well`。
+ *
+ * 另一个边界:自定义属性在**元素**上求值,所以写在 `html` / `body` 这一层的用量
+ * (`body` 背景、滚动条、`color-scheme`)拿不到仪器窗的值,只能手工指定。
+ *
+ * ## 字体
+ *
+ * 不引入任何网络字体:Google Fonts 在国内不可达,自托管中文字体又要子集化
+ * (完整思源黑体 16MB+),对工具站来说收益远小于代价。所以全站只有两族:
+ * 系统无衬线(标题与正文)、等宽带 tabular(数字)。
+ *
+ * 标题**曾经用衬线**,靠字族分工把"文档"和"界面"分开。现在整族退场,层级改由
+ * **字号 / 字重 / 字距**三件事建立,所以下面的字阶比一般站点拉得开 ——
+ * 少了一个维度,另外三个就得多承担一点,否则标题会退回成"加粗的正文"。
+ *
+ * 数字用等宽不是装饰:实时读数每帧都在改,不等宽的数字会左右跳。
+ *
+ * 配色全部走 CSS 变量,因为 Canvas 也要取用同一套颜色(见 renderer.ts 读
+ * --trail-color),硬编码会导致主题切换后画布和界面脱节。
+ */
+
+:root {
+  /*
+   * 原生控件(滚动条、<select> 弹出层、UA 焦点环)的配色跟着它走。
+   * 仪器窗里必须显式写回 dark —— 见下面 .well 里的说明。
+   */
+  color-scheme: light;
+
+  /* ---- 纸面 ---- */
+  --bg: #f1f3f4;
+  --bg-elevated: #ffffff;
+  --bg-inset: #dfe5e9;
+
+  /*
+   * 这两条横线是**全站唯一的结构手段** —— 没有卡片、没有阴影,区块之间的
+   * 边界全靠一道 1px。所以它们的对比度就是这个页面有没有"骨架"。
+   *
+   * 原来 `--border` 是 #d3dade,压在本页底色上只有 1.29:1,等于没画:
+   * 于是 `.stat` / `.tool-item` / `.faq__item` / `.ref-table` 的分隔线全部
+   * 消失,一个 3000px 的长页面会读成一整片灰。现在 1.55:1 —— 看得见,但仍是
+   * "纸上一道细线",不是"表格边框"。`--border-strong` 拉开到 2.33:1,它管的是
+   * 按钮和下拉框的外沿,那是**控件的边**,必须比背景线更硬。
+   */
+  --border: #bcc7ce;
+  --border-strong: #93a3ae;
+
+  --text: #16202a;
+  --text-dim: #55636e;
+  --text-faint: #7c8a94;
+
+  /*
+   * 纸面是**无彩色**的:强调色就是墨色本身,不是一个蓝。
+   *
+   * 这一条是全站色彩纪律的支点。`--accent` 有 8 个读取点(焦点环、选中按钮、
+   * 导航当前项、`.stat--primary`、`.badge--good`、`.confidence--exact`,以及
+   * 四个页面里"测量中"的边框),它们全部共享这一个值 —— 所以把它从蓝改成墨,
+   * 全站一起跟着走,不需要逐个页面去改。
+   *
+   * 底下三个语义位是**唯一允许有彩色的地方**:赭黄(警告)/ 朱砂(故障),
+   * 以及仪器窗里的磷光绿。再往纸面加任何一个彩色,都会稀释"绿色 = 正在出数"。
+   */
+  --accent: #16181a;
+  --accent-dim: #e4e7e9;
+  --warn: #8a5a00;
+  --warn-bg: #fbf1dc;
+  --danger: #c2410c;
+  --danger-bg: #fae7df;
+
+  /* ---- 仪器窗 ---- */
+  --well: #10161c;
+  --well-raised: #18212a;
+  --well-border: #2a3742;
+  --well-border-strong: #3c4c5a;
+
+  --well-text: #dce5ec;
+  --well-text-dim: #94a3b0;
+  --well-text-faint: #6b7b88;
+
+  /*
+   * 磷光绿。原来是 #4ade80(Tailwind green-400),饱和度和亮度都偏高 ——
+   * 它现在要落在近黑的井底上、以 3.6rem 的字号出现,而且**全站只有这一处
+   * 有颜色**,太吵就盖过内容了。收一档:亮度基本不动(读数还要够亮),
+   * 把饱和度降下来。
+   *
+   * 改这个值必须同步改 `src/lib/renderer.ts` 里的兜底常量,
+   * 两处不一致会让画布和界面脱节。
+   */
+  --well-accent: #5ed69b;
+  --well-accent-dim: #13301d;
+  --well-warn: #fbbf24;
+  --well-warn-dim: #3a2e12;
+  --well-danger: #f87171;
+  --well-danger-dim: #3a1d1d;
+
+  /*
+   * 叠在刻度栅格上的文字用的底色遮罩。大字号压 20px 细网格会有"发抖"的观感,
+   * 这一层把字从栅格上垫起来。
+   */
+  --well-scrim: radial-gradient(
+    ellipse 70% 70% at 50% 50%,
+    var(--well) 0%,
+    transparent 100%
+  );
+
+  /* 画布 —— renderer.ts 会读取这个值。要和上面的 --well-accent 保持一致 */
+  --trail-color: #5ed69b;
+
+  /*
+   * 回报率页那条铺满视口的轨迹。它**不落在仪器窗里**(整页都是采样面,
+   * 铺不了深底),所以得自己在纸面上挑一个够淡、又不至于看不见的颜色——
+   * 像一道铅笔线,从字缝和页边透出来,不跟正文抢注意力。
+   *
+   * **它是灰的,不是绿的。** 绿是"正在出数"的记号,只属于仪器窗;而轨迹铺在
+   * 纸面上,是环境的一部分(读者多半正盯着旁边那块深色的实时读数看)。
+   * 纸面既然已经无彩色,这里再放一个绿(或任何一个色相)就会变成全页唯一的
+   * 颜色 —— 那等于让一条背景轨迹盖过真正的读数。
+   *
+   * 单独给个名字,而不是让它写 `var(--accent)`:它比强调色淡得多,
+   * 故意不参与"强调 = 最大对比"那套。
+   */
+  --trail-overlay: rgba(22, 24, 26, 0.28);
+
+  /*
+   * 字族只剩两族。**衬线整族已经退场** —— 原来 `--font-serif` 给标题用,
+   * 用途是"把文档和界面分开";改成无衬线之后它一个引用点都不剩,所以连定义
+   * 一起删掉。留一个没人用的令牌只会让下一个人以为它还有意义。
+   */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', 'Cascadia Mono', Consolas,
+    'Liberation Mono', Menlo, monospace;
+
+  /*
+   * 圆角阶梯。原来只有一个 5px 打天下,于是"按钮、输入框、整个仪器窗、
+   * 测试面"全是同一个圆角 —— 尺寸差着十几倍,圆角却一样,看着就假。
+   * 分成四档之后,平面的大小和它的圆角一起变大,层级才对得上。
+   *
+   * `--radius` 被三处页面样式读取(acceleration-test 的 .run、
+   * polling-rate-test 的 .frame)和 `.well` 引用,改这一处会一起跟着走。
+   */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /*
+   * 栏宽比上一版宽了 60px,而 `.prose` 的 68ch 行宽上限**没动** ——
+   * 这是故意的:文字不跟着变宽,多出来的宽度全部变成两侧的留白。
+   */
+  --max-width: 1100px;
+}
+
+/* ---------- 深色纸面 ---------- */
+
+/*
+ * 深色主题。**只覆盖这一套令牌,不新增任何选择器。**
+ *
+ * 为什么是 `:root[data-theme='dark']` 而不是 `@media (prefers-color-scheme: dark)`:
+ * 见 `src/lib/theme.ts` 的文件头。「跟随系统」是**存起来的偏好**,在 `<head>`
+ * 里那个阻塞脚本里解析成具体值之后再写到 `<html>` 上;CSS 这边看到的永远只有
+ * light / dark 两态,所以深色令牌**只存在这一份**。写媒体查询就得写两份,
+ * 而两份迟早会漂移。
+ *
+ * 优先级:`:root[data-theme='dark']` 是 (0,2,0),`:root` 是 (0,1,0),
+ * 直接压过,**不依赖源码顺序**。
+ *
+ * ## 仪器窗那组令牌为什么几乎不动
+ *
+ * `--well-*` 那组前景色(`--well-text*` / `--well-accent*` / `--well-warn*` /
+ * `--well-danger*`)**在两个主题下是同一份**,不在这里重写:井底本来就是近黑,
+ * 它上面的字色不需要跟着纸面变。这条也是底部那条悬浮条(挂 `.well`)不用写
+ * 第二套规则的原因。
+ *
+ * ## 「井比纸面深」这条规律在深色下会被压到极限
+ *
+ * 浅色纸面 #f1f3f4 上压一口 #050506 的井,对比是压倒性的,井一眼就是"陷进去的
+ * 一个窗口"。但深色纸面本身就是近黑,井只能再往下挖几个亮度单位 ——
+ * 两者相差约 1.1:1,**边界几乎全部由那 1px 边框承担**。
+ *
+ * 这是这套配色里最脆弱的一处,所以写下来:如果截图里井读起来只是"一块黑",
+ * 正确的修法不是继续往下挖(挖不动了),而是把它改成**比纸面浅一档的凸起面**
+ * (用 `--well-raised` 那一档的亮度)。那时"井"的含义从"凹进去"变成"独立的一块
+ * 仪器面",规律换一条,但视觉上仍然成立。
+ */
+:root[data-theme='dark'] {
+  /*
+   * 原生控件(滚动条、<select> 弹出层、UA 默认焦点环)跟着根元素走。
+   * 漏掉这一条,dpi-test 那个下拉面板会是一块刺眼的白。
+   */
+  color-scheme: dark;
+
+  /* ---- 纸面:近黑,不带蓝调 ---- */
+  --bg: #0b0c0e;
+  --bg-elevated: #15171a;
+  --bg-inset: #07080a;
+
+  /* 和浅色那两条同理:分节线得看得见,纸面才立得住 */
+  --border: #24282d;
+  --border-strong: #363b41;
+
+  --text: #f0f2f4;
+  --text-dim: #9ba3ab;
+  --text-faint: #6e767e;
+
+  /*
+   * 强调色在深色下就是**最亮的那一档**,也就是 --text 本身。
+   *
+   * 浅色下它是最深的墨、深色下它是最亮的白 —— 两个方向上都取"离纸面最远"
+   * 的那一端。这是无彩色纸面唯一自洽的写法:强调 = 最大对比,不是某个色相。
+   * 用 var(--text) 而不是再抄一遍色值,是为了让"强调就是正文色"这件事
+   * 在代码里也成立,以后调 --text 不会漏掉它。
+   */
+  --accent: var(--text);
+  --accent-dim: #1f2226;
+  --warn: #fbbf24;
+  --warn-bg: #3a2e12;
+  --danger: #f87171;
+  --danger-bg: #3a1d1d;
+
+  /* ---- 井再往下挖一档。这一档很浅,理由见上面「压到极限」那一节 ---- */
+  --well: #050506;
+  --well-raised: #101214;
+  /*
+   * 边框**必须**比别处重,这一条是量出来的,不是调出来的。
+   *
+   * 实测:井 #050506 压在纸面 #0b0c0e 上只有 1.03:1 —— 也就是说在这个亮度
+   * 区间里,两个平面靠**填充色根本分不开**。往深挖和往上抬都是 1.03:1
+   * (往上抬到 #101214 也是),所以原计划里"改成凸起面"那条退路**同样不成立**。
+   * 唯一的杠杆就是这道线,它得独自把"这里有一口井"说出来。
+   *
+   * #2e3034 对井 1.49:1、对纸面 1.45:1 —— 和浅色纸面那条 --border(1.55:1)
+   * 同一档,两边都看得见。
+   */
+  --well-border: #2e3034;
+  --well-border-strong: #454b52;
+
+  /*
+   * 注:`--well-scrim` 引用的是 `var(--well)`,自动跟着上面那个更深的井走,
+   * 不用在这里重写一遍。
+   */
+
+  /* 深底上要反过来:浅灰(中性,不带蓝调),理由见上面浅色那一条 */
+  --trail-overlay: rgba(202, 207, 212, 0.4);
+}
+
+/* ---------- 仪器窗 ---------- */
+
+/*
+ * 深色的测量面。这一条只做三件事:换令牌、铺底色、声明原生控件的配色。
+ *
+ * **背景只用 `background-color` 长写形式**,不要在这里写 `background` 简写:
+ * 栅格由 `.test-area` 用 `background-image` 提供,简写会把 image 重置成 none。
+ */
+.well {
+  --bg: var(--well);
+  --bg-elevated: var(--well-raised);
+  --bg-inset: var(--well);
+  --border: var(--well-border);
+  --border-strong: var(--well-border-strong);
+
+  --text: var(--well-text);
+  --text-dim: var(--well-text-dim);
+  --text-faint: var(--well-text-faint);
+
+  --accent: var(--well-accent);
+  --accent-dim: var(--well-accent-dim);
+  --warn: var(--well-warn);
+  --warn-bg: var(--well-warn-dim);
+  --danger: var(--well-danger);
+  --danger-bg: var(--well-danger-dim);
+
+  --trail-color: var(--well-accent);
+
+  background-color: var(--well);
+  border: 1px solid var(--well-border);
+  border-radius: var(--radius);
+  color: var(--text);
+
+  /*
+   * 仪器窗里的原生控件也必须是深色:滚动条、select 弹出层、UA 默认焦点环
+   * 全部继承宿主元素的 `color-scheme`。**这一条不是令牌能解决的**,必须显式写。
+   */
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/*
+ * 底色只能挂在 body 上,**绝不能提到 html**。
+ *
+ * 回报率页的轨迹画布是全屏固定定位、`z-index: -1` 压在正文下面,靠的正是
+ * "body 的背景被传播到根元素去画"这条规则。给 html 加背景会让轨迹被整片盖住。
+ */
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  /*
+   * 行高**保持 1.75,不要跟着参考收到 1.5**。参考是拉丁文,汉字是全角的,
+   * 同样行高下汉字的视觉密度高得多,收到 1.5 会挤成一片。这一版其他数值
+   * 都在向参考靠,唯独这一条不跟 —— 所以写下来,免得下一轮被"对齐参考"改掉。
+   */
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * 链接。
+ *
+ * 全站只有三个 `<a>`:报头的品牌、工具索引、首页的工具清单 —— **正文里
+ * 一个链接都没有**(FAQ、说明、提示条全是纯文字)。所以这里不需要"怎么让
+ * 行内链接在无彩色页面上仍然认得出来"那套方案(下划线 + 低对比线色),
+ * 那是给文档站准备的,本站加了就是死代码。
+ *
+ * 三个链接各自都有明确的悬停态,见下面各条。
+ */
+a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/*
+ * 字号阶梯:48 / 28 / 19 / 16。
+ *
+ * 衬线退场之后,**层级只剩字号、字重、字距三件事可用**,所以这一版把阶梯拉得
+ * 比以前开得多 —— 少了一个维度,另外三个就得多承担一点,否则标题会退回成
+ * "加粗的正文"。长页面的节奏就是靠这个差额建立的,不是靠留白:留白只让人
+ * 知道有间隔,字号的落差才让人知道**这是新的一节**。
+ *
+ * 字重取 600 不取 700:中文系统字体(微软雅黑 / 苹方)的 Bold 笔画很粗,
+ * 48px 下会糊成一块。参考用的 Inter 也落在 600 附近,视觉重量对得上。
+ */
+h1,
+h2 {
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 3rem;
+  line-height: 1.15;
+  /* 大字号的中文标题不加负字距会显松,字越大收得越多 */
+  letter-spacing: -0.02em;
+  margin: 0 0 0.8rem;
+}
+
+/*
+ * 分节线。它标的是"从这里开始是新的一节" —— 眼睛在 3000px 的长页上靠它找段落。
+ *
+ * **衬线退场之后它的担子更重了**:以前"新的一节"是衬线、字号、这条线三件事
+ * 一起说的,现在只剩字号和它。所以别再削弱这条线。
+ *
+ * **写在 h2 上而不是 .prose h2 上**:原来只有包在 `.prose` 里的 h2 才有这条线,
+ * 而同一页里 `<h2>每秒点击次数</h2>` 是 main 的直接子元素,于是半页有横线、
+ * 半页没有,节与节之间的观感不统一。分节这件事跟 h2 在不在 prose 里没关系。
+ */
+h2 {
+  font-size: 1.75rem;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  margin: 3.5rem 0 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+h3 {
+  font-size: 1.1875rem;
+  line-height: 1.45;
+  font-weight: 650;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+/* 焦点环:全站统一,纸面和仪器窗里都要看得见(靠 --accent 自动换色) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--accent-dim);
+}
+
+.well ::selection {
+  background: var(--well-accent-dim);
+}
+
+/* ---------- 布局 ---------- */
+
+.wrap {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/*
+ * 报头。**sticky** —— 页面普遍 3000px 长,而工具索引是主要导航,
+ * 滚到一半就够不着了,只能一路滚回顶部。
+ *
+ * 底色本来就是不透明的 `--bg-elevated`,所以**不需要 `backdrop-filter`** ——
+ * 那是一层额外的合成开销,换来的半透明毛玻璃在这里没有用武之地。
+ *
+ * z-index 取 20:高过正文和底部悬浮条(z-index: 5),低过任何弹层。
+ * 回报率页那条全屏轨迹画布是 `z-index: -1`,本来就在所有内容下面,不受影响。
+ */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+/*
+ * 报头。**两行,位置固定**,不随视口宽度变。
+ *
+ * 原来是 `display: flex; flex-wrap: wrap`:品牌、10 个导航项、外观开关挤在一个
+ * 可折行的 flex 行里,于是宽度一不够就各自找地方落脚 —— 1440px 上导航自己占
+ * 两行、开关被甩到第三行最右边;窄一点又是另一个排布。头部高度跟着视口宽度跳,
+ * 而"翻一份记录"这件事本身就要求版面是稳的。
+ *
+ * 现在是一张确定的网格:第一行左品牌、右外观开关,第二行整条留给工具索引。
+ * **一个字的标记都没动** —— 三个子元素在 DOM 里的顺序本来就是对的,只是用
+ * 显式定位把"谁在哪"写死,不再交给 flex 去猜。
+ */
+.site-header .wrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 20px;
+  padding-top: 8px;
+}
+
+.brand {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+
+  /* 负外边距抵掉下面的左内边距,字形仍然落在容器的对齐线上 */
+  margin-inline: -8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+
+  font-weight: 600;
+  font-size: 1.25rem;
+  line-height: 1.4;
+  /* 无衬线做大字号标记容易散,收一点让它成块 */
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/*
+ * 品牌也是链接,但**纸面已经没有色相可用了** —— 原来这里写的是
+ * `color: var(--accent)`,现在强调色就是 `--text` 本身,那是个空操作,
+ * 悬停会看不出任何变化。所以改用**底色**表达,和工具索引里的项同一套。
+ */
+.brand:hover {
+  text-decoration: none;
+  background: var(--bg-inset);
+}
+
+/*
+ * 工具索引占满第二行,放不下就折行。
+ *
+ * **试过横向滚动条,不行。** 10 个工具名加起来约 1160px,而这一栏是 1000px
+ * (--max-width 1040 减两侧 20px),收不进去。横向滚动能保住"永远一行",
+ * 但代价是**最后一个工具被裁在视野外**:从搜索直接落进来的人只会看到九个,
+ * 第十个要靠一个看不见的手势才找得到。少一个入口比多一行贵得多。
+ *
+ * 也试过缩字号硬塞 —— 要缩到 12px 以下还不一定够,而且 10 个名字每个都以
+ * "鼠标"开头,那两个字是重复的,把重复的部分压小是错的解法。
+ *
+ * 折行在桌面宽度上是**稳定的**:--max-width 封顶,所以视口从 1080px 往上,
+ * 这一栏恒为 1000px,索引就恒为两行,高度不会随窗口宽度跳。
+ */
+.site-nav {
+  grid-column: 1 / -1;
+  grid-row: 2;
+
+  display: flex;
+  flex-wrap: wrap;
+  /*
+   * 用列间距分开各项,**不给每项加左右内边距**:折行之后第二行的第一项
+   * 会跟着内边距缩进一格,两行对不齐。间距是各行共享的,内边距不是。
+   */
+  column-gap: 20px;
+
+  margin-top: 7px;
+  padding: 3px 0 5px;
+  border-top: 1px solid var(--border);
+}
+
+.site-nav a {
+  /*
+   * 负外边距抵掉自己的左内边距:flex 按**外边距盒**排布,所以这样既能
+   * 让文字回到对齐线上(第一个工具名和左边的品牌对齐,第二行第一项也
+   * 和第一行对齐),又给悬停底色留出了可以铺开的宽度。
+   *
+   * 内边距是 11px,所以列间距要 30px 才够 —— 负外边距是从**两边**各拉
+   * 11px 进来的,实际间距是 `column-gap - 22`,不是 `column-gap`。
+   */
+  margin-inline: -11px;
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.site-nav a:hover {
+  background: var(--bg-inset);
+  color: var(--text);
+  text-decoration: none;
+}
+
+/*
+ * 当前项用**淡底 + 满对比文字**,不用实心填充。
+ *
+ * 十个工具同屏,这是"你在哪"的**环境状态**,不是"你选了哪个"的**选择**。
+ * 实心药丸是留给选项按钮的(见下面 `button[aria-pressed='true']`)——
+ * 两种状态用同一种画法,会让"十个里我在这个"和"三个里我选了这个"看起来
+ * 是同一件事。
+ */
+.site-nav a[aria-current='page'] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/*
+ * 外观开关(跟随系统 / 浅色 / 深色)。按钮由 ui.ts 的 mountThemeToggle 建出来,
+ * 这里只管长相。
+ *
+ * 位置由网格给(第一行第二列),不再用 `margin-left: auto` —— 那是在 flex 里
+ * 把元素推到行尾的写法,进了网格就只剩一个多余的偏移。它和品牌同处第一行、
+ * 分列两端,这才是"身份"和"外观"该待的地方:它们都跟当前这一页是什么无关。
+ */
+.theme-switch {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+
+  display: flex;
+  gap: 2px;
+}
+
+.theme-switch button {
+  padding: 4px 11px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+
+.theme-switch button[aria-pressed='true'] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/*
+ * 版面留白主要加在**节与节之间**,不是元素内部 —— 参考的呼吸感来自
+ * 大段的竖直间距,而 h2 的 `margin-top` 已经是这个节奏的主要来源,
+ * 这里只负责首尾两端也留够。
+ */
+main {
+  padding: 56px 0 88px;
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.85rem;
+  padding: 32px 0;
+}
+
+/*
+ * 悬浮条是 position: fixed,不占流内空间。它在的时候,页脚底部必须留出余量,
+ * 否则滚到底时会被永久压住。
+ *
+ * 用 `:has()` 把这段留白**和悬浮条的存在绑在一起**:开关悬浮条只需要动
+ * BaseLayout 里那一个 `hidden` 属性,不必记得回来改这里。老浏览器不认
+ * `:has()` 的话这条整条失效 —— 而它失效的后果,只在悬浮条被打开时才看得见,
+ * 正合"默认关着"的现状。
+ */
+html:has(.site-dock:not([hidden])) .site-footer {
+  padding-bottom: 120px;
+}
+
+.site-footer p {
+  margin: 0 0 0.4rem;
+}
+
+/* ---------- 底部悬浮条 ---------- */
+
+/*
+ * 视口底部正中央的一条深色浮层,**现在里面是空的** —— 以后放二维码 / 图片。
+ *
+ * 它挂 `.well`:这是一块深色浮层,和仪器窗是同一个东西,底色、边框、
+ * 前景色、`color-scheme: dark` 全部现成。而且仪器窗的配色在深浅两套主题下
+ * 几乎不变(见上面「深色纸面」那一节),所以这颗悬浮条**不用写第二套规则
+ * 就自动在两个主题下都对**。
+ *
+ * z-index 取 5:高过回报率页那个 `z-index: 2` 的虚线视口边框,低过任何弹层。
+ */
+.site-dock {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 18px;
+  z-index: 5;
+  padding: 12px 16px;
+  text-align: center;
+}
+
+.site-dock__placeholder {
+  margin: 0;
+  padding: 26px 34px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text-faint);
+  font-size: 0.8rem;
+}
+
+/* ---------- 提示条 ---------- */
+
+/*
+ * 注意:这个块是 ui.ts 的 `showNotice()` 在运行期拼出来的,不带
+ * `data-astro-cid` —— 所以**只能在 global.css 里修**,任何页面的 <style>
+ * 都够不着它。它出现在约 10 个页面上。
+ */
+.notice {
+  border-left: 3px solid var(--warn);
+  background: var(--warn-bg);
+  /*
+   * 圆角取最小那一档,不用 --radius:左边那道 3px 竖线是这里的语义载体,
+   * 圆角一大它就会在两端收成一个尖,身份就糊了。小圆角只去掉直角,
+   * 不影响那道线的形状。
+   */
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  margin: 0 0 20px;
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.notice--info {
+  border-left-color: var(--border-strong);
+  background: var(--bg-inset);
+}
+
+.notice ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.notice li {
+  margin-bottom: 0.3rem;
+}
+
+.notice li:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- 统计面板 ---------- */
+
+/*
+ * 统计面板留在纸面:它们是实测数据的**旁注**,是"记录"的一部分,不是仪器。
+ * 所以不做卡片,只用一道细线起头,和正文拉开层级。
+ */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px 18px;
+  margin: 20px 0;
+}
+
+.stat {
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+}
+
+.stat__label {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin-bottom: 1px;
+}
+
+.stat__value {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.stat__unit {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-left: 3px;
+}
+
+.stat--primary .stat__value {
+  color: var(--accent);
+}
+
+.stat__hint {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  margin-top: 2px;
+}
+
+/* ---------- 测试区 ---------- */
+
+.test-area {
+  position: relative;
+  width: 100%;
+  height: 380px;
+  overflow: hidden; /* 圆角会把刻度栅格裁进弧线里,不留这层就会溢出 */
+  border-radius: var(--radius-lg);
+  touch-action: none; /* 触屏上禁止滚动手势干扰采样 */
+  user-select: none;
+
+  /*
+   * 刻度栅格。**只有画轨迹/看形状的面需要坐标系**,所以只有 .test-area 带它
+   * ——键位图、色带、柱状图加栅格只会变成噪点。
+   *
+   * 对比度压得很低是有意的:这是参照,不是背景图案。
+   * `background-origin: border-box` 让栅格从外沿起算,否则 1px 边框会让
+   * 相邻两个窗的刻度差一格。
+   */
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+  background-origin: border-box;
+}
+
+.test-area canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.test-area__hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 0.95rem;
+  pointer-events: none;
+  text-align: center;
+  padding: 20px;
+}
+
+.test-area__hint[hidden] {
+  display: none;
+}
+
+/*
+ * 叠在测试面上的实时读数。
+ *
+ * 这几个类名带页面前缀却能写在 global.css 里,是因为**页面 <style> 只给
+ * 自己的选择器加 cid,元素本身没有 cid** —— 全局的 `.cps-live` 一样命中。
+ * 四份逐字重复的定位规则收在这里,页面那边删掉即可。
+ *
+ * 定位之外还给一层同底色遮罩:下面那几个数是 3.6–4rem 的大字,直接压在
+ * 20px 的刻度栅格上会显得发抖。
+ */
+.cps-live,
+.cps-over,
+.dpi-live,
+.drag-live,
+.scroll-dir {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: var(--well-scrim);
+}
+
+.cps-live[hidden],
+.cps-over[hidden],
+.dpi-live[hidden],
+.drag-live[hidden],
+.scroll-dir[hidden] {
+  display: none;
+}
+
+/*
+ * 大字读数。等宽是功能性的:这几个数每帧都在变,比例字体下数字宽度不一
+ * 会让整块文字左右跳。
+ */
+.cps-live__count,
+.dpi-live__value,
+.drag-live__value {
+  font-family: var(--font-mono);
+  font-size: 3.6rem;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.cps-live__meta,
+.dpi-live__label,
+.drag-live__label {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin-top: 10px;
+}
+
+.scroll-dir {
+  font-family: var(--font-mono);
+  font-size: 4rem;
+  color: var(--accent);
+}
+
+/* ---------- 按键测试 ---------- */
+
+/*
+ * 五张按键卡片本身就是**实时指示灯**,所以整块是仪器窗。
+ * button-test.astro 没有 <style> 块,这里的每一条都只能在 global.css 里改。
+ */
+.mouse-diagram {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  margin: 0;
+}
+
+.mouse-button {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  text-align: center;
+  transition: background 0.06s linear, border-color 0.06s linear;
+}
+
+.mouse-button[data-active='true'] {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.mouse-button__name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.mouse-button__code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+
+.mouse-button__count {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.mouse-button[data-active='true'] .mouse-button__count {
+  color: var(--accent);
+}
+
+/* ---------- 柱状图 / 色带 / 坐标轴 ---------- */
+
+/*
+ * 柱状图和色带留在**纸面**,不进仪器窗。
+ *
+ * 这条是反直觉的,所以写下来:它们看着"像仪器",但它们各自的图例文字
+ * (「橙色柱子」「红色的那几条」)是纸面的,而同一个语义色在纸面和仪器窗里
+ * 是**两个色值**。把图块挪进仪器窗就会变成"橙色的说法指向另一个橙"。
+ * 判断标准是**图例和它指的那块必须在同一个寄存器里**,不是"像不像仪器"。
+ *
+ * 底色用极浅的内凹色而不是边框:给柱状图一个可以读基线的槽,同时不引入卡片。
+ */
+.rate-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 110px;
+  padding: 8px;
+  overflow: hidden;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+}
+
+/*
+ * 还没测的时候,**它不该是一个空槽**。
+ *
+ * 110px 的灰槽长得就像"组件没加载出来" —— 用户第一次打开页面看到的是
+ * 一整块不知道是什么的空白,而不是"这里还没有数据"。所以空的时候收成
+ * 一条基线:轴上没有柱子,就是没有柱子。真实的仪表盘在没信号时也是这个样子。
+ *
+ * 出数据后它会展开到 110px。这个高度跳变发生在用户自己按下"开始测试"
+ * 之后,是他动作的结果,不是页面自己在抖。
+ */
+.rate-chart:empty {
+  height: 0;
+  padding: 0;
+  background: none;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.rate-chart__bar {
+  flex: 1;
+  min-width: 1px;
+  background: var(--accent);
+  opacity: 0.75;
+  border-radius: 1px 1px 0 0;
+}
+
+.rate-chart__bar--low {
+  background: var(--warn);
+}
+
+.histogram-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  margin-top: 6px;
+}
+
+/*
+ * 一格一个事件的横向条带。滚轮方向、按键脉冲这类"看一眼形状就知道有没有
+ * 毛刺"的数据用它比数字直观得多。
+ *
+ * 同样留纸面(理由见上),但**必须有底色**:上下两个方向靠 `align-self`
+ * 贴顶/贴底来区分,没有槽就看不出边界在哪。
+ */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  padding: 7px 9px;
+  overflow: hidden;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+}
+
+.strip__mark {
+  width: 5px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  flex: none;
+}
+
+.strip__mark--up {
+  align-self: flex-start;
+}
+
+.strip__mark--down {
+  align-self: flex-end;
+}
+
+.strip__mark--glitch {
+  background: var(--danger);
+}
+
+/* ---------- 按钮与表单控件 ---------- */
+
+.controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 20px 0;
+}
+
+/*
+ * 按钮一律**药丸形**。控件是"可以按下去的东西",不是"一块面板",
+ * 所以它取圆角阶梯里最圆的那一档,和面板类元素(卡片、仪器窗)分开。
+ */
+button {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 9px 20px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--text);
+  background: var(--bg-inset);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+/*
+ * 已选中的选项按钮。`.target`(双击页)`.duration`(CPS 页)`.distance`
+ * (DPI / 加速度页)用的是同一套状态,收成一条。
+ *
+ * **实心填充 + 反色文字**,而不是淡底 + 同色文字。这几个按钮是**选择**:
+ * 同屏三五个,要一眼看出选中的是哪个 —— 而淡底在无彩色纸面上太弱了
+ * (它和 `button:hover` 的灰底几乎一样重,悬停和选中会分不出来)。
+ * 实心药丸是这里唯一够清楚的做法,也是参考里那颗白色药丸的写法。
+ *
+ * `color` 取 `--bg` 而不是写死白色:深色主题下 `--accent` 是白、`--bg` 是近黑,
+ * 这一对自动翻过来,不用写第二套规则。
+ */
+button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+select {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+/* 和按钮同处一个 flex 行的说明文字,要对齐到中线而不是被拉伸 */
+.test-hint {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+/* ---------- 工具索引 ---------- */
+
+/*
+ * 首页的目录。不是十张一模一样的卡片——是一份带细线分隔的清单,
+ * 每项右边标出**这个测量有多可信**。
+ */
+.tool-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.tool-item {
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-item__link {
+  display: grid;
+  grid-template-columns: 15rem 1fr auto;
+  gap: 6px 22px;
+  align-items: baseline;
+  padding: 15px 0;
+  color: inherit;
+}
+
+.tool-item__link:hover {
+  text-decoration: none;
+  color: var(--accent);
+}
+
+.tool-item__name {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.tool-item__desc {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.tool-item__link:hover .tool-item__desc {
+  color: var(--text-dim);
+}
+
+/* 可信度标记:直接测得 / 估算 / 只能给方向 */
+/*
+ * 可信度标记。**纸面去掉色相之后这三档只差明度**,而它是首页的核心信息 ——
+ * 所以这里的明度差必须拉足:墨(`--exact`)→ 赭黄(`--estimate`,唯一有色相
+ * 的一档)→ 淡灰(`--shape` / `--direction`)。改完要截图确认三档一眼分得开,
+ * 分不开就把 `--text-faint` 再提亮一档。
+ */
+.confidence {
+  font-size: 0.75rem;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+}
+
+/*
+ * 「直接测得」这一档用**淡底药丸**,不用描边。
+ *
+ * 它是首页出现最多的一档(10 个工具里 6 个)。原来写的是描边 + 满对比文字,
+ * 量出来的结果是:徽章文字和它标注的那个工具名**同为 rgb(240,242,244)** ——
+ * 元信息和内容一样重,六个白描边药丸成了整页最亮的东西。
+ *
+ * 改成淡底之后,三档靠**画法**就分开了,不必靠"谁更亮":
+ * 实心淡底(直接测得)/ 赭黄描边(估算)/ 灰描边(只能看形状、看方向)。
+ */
+.confidence--exact {
+  background: var(--accent-dim);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.confidence--estimate {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* `shape` 和 `direction` 是同一档(都只剩形状/方向可信),视觉上不区分 */
+.confidence--shape,
+.confidence--direction {
+  border-color: var(--border-strong);
+  color: var(--text-faint);
+}
+
+/* ---------- 说明文字 ---------- */
+
+/*
+ * 正文的行宽上限。
+ *
+ * 68ch 在中文里约合 34 个汉字 —— 汉字是全角,一行的舒适区比拉丁字母窄得多,
+ * 所以这里不能照搬"80 字符"。而页面是 1000px 宽的栏,不设上限的话一整段
+ * 会拉到 60 多个字,读到行尾要回头找下一行的开头。
+ */
+.prose {
+  max-width: 68ch;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.3rem;
+}
+
+.prose li {
+  margin-bottom: 0.35rem;
+}
+
+/* 紧跟图表的说明段落,收紧一点 */
+.tight {
+  margin-bottom: 8px;
+}
+
+/* 正文里指代图表颜色时用的字色,必须和它指的那块落在同一个寄存器里 */
+.mark-warn {
+  color: var(--warn);
+}
+
+.mark-danger {
+  color: var(--danger);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+/* ---------- 判定横幅 ---------- */
+
+/*
+ * 判定留在纸面:它是"结论",属于记录,不属于仪器。
+ *
+ * 刻意不做成卡片——这是这本记录里的一行**结果**,用上下两道横线界定,
+ * 和周围的大段说明拉开层级,而不是浮起来。
+ */
+.verdict {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 18px 0 16px;
+  border-top: 2px solid var(--text);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.verdict__label {
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  margin-bottom: 2px;
+}
+
+.verdict__value {
+  font-family: var(--font-mono);
+  font-size: 3.5rem;
+  font-weight: 600;
+  line-height: 1.05;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.verdict__unit {
+  font-size: 1.1rem;
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+
+.verdict__aside {
+  text-align: right;
+}
+
+/* 右侧叠两个徽章时(回报率页、滚轮页)留出行距 */
+.verdict__aside > div + div {
+  margin-top: 8px;
+}
+
+.verdict__note {
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  margin-top: 6px;
+  max-width: 62ch;
+}
+
+.badge {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  font-size: 0.9rem;
+  border: 1px solid transparent;
+}
+
+/*
+ * 判定徽章四档。「正常」用**实心墨色**,不是淡底 ——
+ *
+ * 纸面去掉色相之后,`--badge--good`(淡底 + 墨字)和 `--badge--idle`
+ * (淡底 + 灰字)会掉到几乎同一个样子:两个都是浅灰药丸,只差字的深浅。
+ * 而这一对恰恰是**测试前 / 测试后**的对照,混了就等于没有结论。
+ *
+ * 实心之后四档一眼排开:实心墨(正常)/ 赭黄(警告)/ 朱砂(故障)/ 灰描边(未测)。
+ * 这也和按钮的选中态同一套语言:实心 = 这件事已经有确定结果了。
+ */
+.badge--good {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.badge--fair {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.badge--poor {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.badge--idle {
+  background: var(--bg-inset);
+  color: var(--text-faint);
+  border-color: var(--border);
+}
+
+/* ---------- 参考值对照表 ---------- */
+
+.ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 4px 0 12px;
+}
+
+.ref-table th,
+.ref-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 11px 16px 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ref-table th {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.ref-table th:last-child,
+.ref-table td:last-child {
+  padding-right: 0;
+}
+
+/*
+ * **第一列**是各表共同的"短等宽值"位(档位、区间、指标名),6 张表都成立。
+ *
+ * 第二列在旧的写法里被当成等宽短值处理,但 6 张表里只有 2 张(DPI、回报率)
+ * 的第二列真是数值,其余 4 张是中文说明——那 4 张被迫在页面里写覆盖。
+ * 现在改成需要的那两张自己加 `.ref-table--kv`。
+ */
+.ref-table td:first-child {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.ref-table--kv td:nth-child(2) {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.ref-table tr[data-current='true'] td {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.ref-table tr[data-current='true'] td:first-child {
+  color: var(--accent);
+}
+
+.ref-table tr[data-current='true'] td:nth-child(2) {
+  color: var(--accent);
+}
+
+/* ---------- 常见问题 ---------- */
+
+.faq {
+  margin: 8px 0 0;
+}
+
+.faq__item {
+  border-bottom: 1px solid var(--border);
+  padding: 15px 0;
+}
+
+.faq__q {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.faq__a {
+  color: var(--text-dim);
+  margin: 0;
+  line-height: 1.75;
+}
+
+/* ---------- 操作步骤 ---------- */
+
+/*
+ * 编号步骤。DPI、加速度、静止漂移这几个测试都要求用户做一套**有顺序、
+ * 有精度要求**的操作,写成一整段话会被略读——而略读的代价是测出一个
+ * 看起来很精确的错数字。编号能让人对得上号。
+ */
+.steps {
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 18px;
+  max-width: 68ch;
+}
+
+.steps li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 34px;
+  margin-bottom: 11px;
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- 事件记录列表 ---------- */
+
+/*
+ * 日志留在纸面:它是**文本**,可读性优先于"像不像仪器"。
+ */
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 18px;
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.log-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-item__index {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  min-width: 2.2em;
+}
+
+.log-item__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  min-width: 5.5em;
+}
+
+.log-item__note {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.log-item--alert .log-item__value {
+  color: var(--danger);
+}
+
+.log-item--alert .log-item__note {
+  color: var(--danger);
+}
+
+.log-item--warn .log-item__value {
+  color: var(--warn);
+}
+
+.log-empty {
+  color: var(--text-faint);
+  font-size: 0.875rem;
+  padding: 14px;
+  text-align: center;
+  margin: 0;
+}
+
+/* ---------- 移动端 ---------- */
+
+@media (max-width: 760px) {
+  /*
+   * 报头在窄屏上**不吸附**。
+   *
+   * 桌面上它实测 121.8px(品牌行 + 两行工具索引);到了手机上工具索引会折成
+   * 四行,整条报头超过 200px —— 吸附的话会永久吃掉四分之一屏,而且吃掉的正是
+   * 最该留给内容的那一块。桌面保留吸附是因为那里它只占约 14%,
+   * 而工具索引是本站唯一的导航,滚到长页中段就够不着了。
+   */
+  .site-header {
+    position: static;
+  }
+
+  /*
+   * 阶梯在窄屏上整体降一档,但**比例不变** —— 如果只缩 h1 不缩 h2,
+   * 手机上标题和小节就一样大了,桌面端刚建立起来的那点层次会当场消失。
+   */
+  h1 {
+    font-size: 2rem;
+  }
+
+  h2 {
+    font-size: 1.375rem;
+    margin-top: 2.5rem;
+    padding-top: 1.15rem;
+  }
+
+  /*
+   * 工具索引在手机上回到**紧凑排布**:药丸的内边距和列间距都收掉。
+   * 10 个工具名在 380px 宽里按桌面的尺寸排会散成五六行,而且每一行
+   * 只有一个孤零零的药丸 —— 那时候药丸形状本身也没意义了。
+   */
+  .site-nav {
+    column-gap: 20px;
+    margin-top: 5px;
+  }
+
+  .site-nav a {
+    margin-inline: -8px;
+    padding: 4px 8px;
+  }
+
+  .test-area {
+    height: 260px;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .verdict__value {
+    font-size: 2.8rem;
+  }
+
+  .cps-live__count,
+  .dpi-live__value,
+  .drag-live__value {
+    font-size: 2.8rem;
+  }
+
+  /* 目录在窄屏上改成上下堆叠 */
+  .tool-item__link {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .confidence {
+    justify-self: start;
+  }
+
+  .ref-table {
+    font-size: 0.84rem;
+  }
+}
+
+/* ---------- 减弱动态效果 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

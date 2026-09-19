@@ -1,0 +1,350 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { CLICK_CHATTER_MS, CLICK_DOUBLE_MAX_MS } from '../lib/analysis';
+
+const tool = findTool('double-click-test')!;
+
+/** 可选的目标按键。`code` 用的是 `MouseEvent.button` 的编号,不是 buttons 的位序。 */
+const TARGETS = [
+  { code: 0, name: '左键' },
+  { code: 2, name: '右键' },
+  { code: 1, name: '中键' },
+];
+
+const FAQ = [
+  {
+    q: '“连击”和“双击”有什么区别?',
+    a:
+      '双击是你有意按了两下,连击是鼠标自己多报了一下。判定靠时间:人手最快也要 60ms 以上才能完成一次按下、抬起、再按下,' +
+      '所以间隔短于 ' + CLICK_CHATTER_MS + 'ms 的两次点击必定来自微动的触点抖动。本页把两者分开统计,' +
+      '就是为了不让你每双击一次就看到一次“故障”。',
+  },
+  {
+    q: '系统设置里的“双击速度”会影响这个判断吗?',
+    a:
+      '不会,那是两码事。系统里的双击速度是操作系统用来判断“这两下算不算一次双击操作”的阈值,默认 500ms,可以在控制面板里随便调;' +
+      '而本页判断的是“这两下是不是同一个物理动作被记了两次”,阈值取的是人的机械极限。两者差着一个数量级,不会互相干扰。',
+  },
+  {
+    q: '为什么要求点得慢一点?',
+    a:
+      '因为要给你自己的双击留出空间。如果你连着快速双击,产生的大量 50–500ms 间隔会把日志刷满,真正有问题的那一两次会被淹掉。' +
+      '建议是:正常速度单击十几次,再故意快速双击几次,最后看日志里有没有夹着几毫秒的条目。',
+  },
+  {
+    q: '反过来,快速双击没被记到是为什么?',
+    a:
+      '那是另一个方向的故障:固件的消抖时间设得太长,把真实的第二下也一起吞了。表现是想双击打开文件却没反应、或者拖动时中途掉。' +
+      '检测方法是故意快速双击,看页面记到的是 2 次还是 1 次。有些鼠标的驱动里能调消抖时间。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标双击测试</h1>
+
+  <p class="prose">
+    在下面的区域里点击选中的那个键,页面会记录<strong>相邻两次按下之间隔了多少毫秒</strong>,
+    并把它们分成三类:几毫秒的是微动触点抖动(俗称连击,是故障),
+    几十到几百毫秒的是你自己在双击,更长的就是两次独立点击。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">最短间隔</div>
+      <div>
+        <span class="verdict__value" id="min-gap">—</span><span class="verdict__unit">ms</span>
+      </div>
+      <div class="verdict__note" id="verdict-note">
+        在下面的区域里点击,至少点三次才能看出间隔
+      </div>
+    </div>
+    <div class="verdict__aside">
+      <span class="badge badge--idle" id="verdict-badge">等待测试</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    {
+      TARGETS.map((target, index) => (
+        <button type="button" class="target" data-code={target.code} aria-pressed={index === 0 ? 'true' : 'false'}>
+          {target.name}
+        </button>
+      ))
+    }
+    <button type="button" id="reset">重置</button>
+  </div>
+
+  <div class="test-area well" id="area">
+    <div class="test-area__hint" id="hint">
+      在这里点击,建议先正常速度单击十几次,再故意快速双击几次
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="presses" label="点击次数" primary />
+    <StatPanel id="chatter" label="疑似连击" hint={`间隔小于 ${CLICK_CHATTER_MS}ms`} />
+    <StatPanel id="doubles" label="正常双击" hint={`${CLICK_CHATTER_MS}–${CLICK_DOUBLE_MAX_MS}ms`} />
+    <StatPanel id="median" label="中位间隔" unit="ms" />
+  </div>
+
+  <h2>间隔记录</h2>
+  <p class="prose tight">
+    最近 20 次点击的间隔,新的在上面。<span class="mark-danger">红色</span>的那几条
+    就是微动在抖——如果你并没有连续快速点击却出现了红色条目,那只鼠标的微动已经开始老化了。
+  </p>
+  <ul class="log-list" id="log"></ul>
+
+  <section class="prose">
+    <h2>怎么测才有意义</h2>
+    <ol class="steps">
+      <li>
+        <strong>先正常速度单击十几次。</strong>间隔会落在几百毫秒以上,全都会被归到“独立点击”。
+        这一步是给后面的快速点击做对照。
+      </li>
+      <li>
+        <strong>再故意快速双击几次。</strong>你会看到日志里出现一批 60–200ms 的“双击”条目,
+        这些是正常的,不是故障。
+      </li>
+      <li>
+        <strong>最后看有没有夹着几毫秒的条目。</strong>那才是故障证据——
+        你没有连点,它却报出了两次按下。一次就足以说明微动有问题,多按几次是为了确认不是偶发。
+      </li>
+    </ol>
+
+    <h2>读数的边界在哪里</h2>
+    <p>
+      本页测的是<strong>按下到按下</strong>的间隔,单位毫秒,精度取决于浏览器给事件打的时间戳。
+      未开启跨域隔离时这个精度被限制在 100µs,对毫秒级的判断完全够用——这里的数量级和回报率测试
+      完全不同,那边要分辨的是 0.125ms,这边最细也只需要分辨到几毫秒。
+    </p>
+    <p>
+      真正需要留意的是<strong>“没记到的点击”</strong>。本页只能统计收到的事件,报不出来的那一次
+      它是看不见的——而固件消抖吞掉点击的表现正是“没记到”。想知道有没有发生这种事,去用
+      CPS 测试页:那里你点的总数和记到的总数一对比就看出来了。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    #area {
+      cursor: crosshair;
+    }
+  </style>
+
+  <script>
+    import {
+      CLICK_CHATTER_MS,
+      classifyClickGap,
+      summarizeClickGaps,
+      type ClickGapKind,
+    } from '../lib/analysis';
+    import {
+      el,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // 右键菜单会盖住日志,而这个页面本来就要测右键。
+    // **必须整页拦,不能只挂在测试区上**:按着右键拖出区域是常事,拖出去那一刻
+    // 菜单照弹。链接和按钮除外,那里右键是正常操作。
+    suppressWorkbenchDefaults();
+
+    /** 日志里最多保留这么多条,再多就没人看了 */
+    const LOG_LIMIT = 20;
+
+    const area = el('area');
+    const hint = el('hint');
+    const logHost = el('log');
+
+    /** `code` 用 `MouseEvent.button` 的编号:0=左键 1=中键 2=右键 */
+    let targetCode = 0;
+
+    /** 每个键各自的按下时刻,分开记 —— 左右键交错按不该互相产生间隔 */
+    const pressTimes = new Map<number, number[]>();
+
+    function timesFor(code: number): number[] {
+      let list = pressTimes.get(code);
+      if (!list) {
+        list = [];
+        pressTimes.set(code, list);
+      }
+      return list;
+    }
+
+    const KIND_LABEL: Record<ClickGapKind, string> = {
+      chatter: '疑似连击',
+      double: '双击',
+      separate: '独立点击',
+    };
+
+    const KIND_CLASS: Record<ClickGapKind, string> = {
+      chatter: 'log-item log-item--alert',
+      double: 'log-item log-item--warn',
+      separate: 'log-item',
+    };
+
+    /** 当前目标键的间隔序列 */
+    function currentGaps(): number[] {
+      const times = timesFor(targetCode);
+      const gaps: number[] = [];
+      for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1]);
+      return gaps;
+    }
+
+    function render(): void {
+      const times = timesFor(targetCode);
+      const gaps = currentGaps();
+      const stats = summarizeClickGaps(gaps);
+
+      setText(el('min-gap'), stats.minMs === null ? '—' : stats.minMs.toFixed(0));
+      setStat('presses', String(times.length));
+      setStat('chatter', String(stats.chatter));
+      setStat('doubles', String(stats.double));
+      setStat('median', stats.medianMs === null ? '—' : stats.medianMs.toFixed(0));
+
+      // ---- 结论 ----
+      if (times.length < 3) {
+        setBadge(el('verdict-badge'), '等待测试', 'idle');
+        setText(el('verdict-note'), '在下面的区域里点击,至少点三次才能看出间隔');
+      } else if (stats.chatter > 0) {
+        setBadge(el('verdict-badge'), '疑似微动连击', 'poor');
+        setText(
+          el('verdict-note'),
+          `出现了 ${stats.chatter} 次 ${CLICK_CHATTER_MS}ms 以内的间隔,最短 ${stats.worstChatterMs?.toFixed(0)}ms —— ` +
+            '如果没有连点却报出这些,微动已经在抖了',
+        );
+      } else {
+        setBadge(el('verdict-badge'), '未发现连击', 'good');
+        setText(
+          el('verdict-note'),
+          `共 ${times.length} 次点击,最短间隔 ${stats.minMs?.toFixed(0)}ms,都在人能做到的范围内`,
+        );
+      }
+
+      // ---- 日志 ----
+      if (!logHost) return;
+      if (gaps.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'log-empty';
+        empty.textContent = '还没有间隔数据';
+        logHost.replaceChildren(empty);
+        return;
+      }
+
+      // 新的在上面:最近的间隔才是用户此刻在看的
+      const shown = gaps.slice(Math.max(0, gaps.length - LOG_LIMIT)).reverse();
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < shown.length; i++) {
+        const gap = shown[i];
+        const kind = classifyClickGap(gap);
+        const item = document.createElement('li');
+        item.className = KIND_CLASS[kind];
+
+        const index = document.createElement('span');
+        index.className = 'log-item__index';
+        index.textContent = `#${gaps.length - i}`;
+
+        const value = document.createElement('span');
+        value.className = 'log-item__value';
+        value.textContent = `${gap.toFixed(1)} ms`;
+
+        const note = document.createElement('span');
+        note.className = 'log-item__note';
+        note.textContent = KIND_LABEL[kind];
+
+        item.append(index, value, note);
+        fragment.appendChild(item);
+      }
+      logHost.replaceChildren(fragment);
+    }
+
+    // ---- 交互 ----
+
+    area?.addEventListener('pointerdown', (event) => {
+      if (event.button !== targetCode) return;
+      event.preventDefault();
+      hint?.setAttribute('hidden', '');
+      // 记的是**两次点击之间的间隔**,所以必须取 `event.timeStamp` 而不是
+      // 处理函数里的 `performance.now()`。
+      //
+      // 浏览器会把攒在一起的事件放进同一个任务里派发,此时两个处理函数是在
+      // 同一瞬间跑的,`performance.now()` 的差会塌到 0——一次完全正常的人手
+      // 双击会被算成 0 毫秒,直接报成"连击"。这是本站最不该出的错:把一个
+      // 假数字当成故障结论。`event.timeStamp` 是事件自己带的时刻,不吃这份
+      // 派发延迟(剩下的批处理涂抹在 0.6ms 量级,对 50ms 的门槛可以忽略)。
+      timesFor(targetCode).push(event.timeStamp);
+      render();
+    });
+
+
+    for (const button of document.querySelectorAll<HTMLElement>('.target')) {
+      button.addEventListener('click', () => {
+        targetCode = Number(button.dataset.code);
+        for (const other of document.querySelectorAll<HTMLElement>('.target')) {
+          other.setAttribute(
+            'aria-pressed',
+            other === button ? 'true' : 'false',
+          );
+        }
+        render();
+      });
+    }
+
+    el('reset')?.addEventListener('click', () => {
+      pressTimes.clear();
+      hint?.removeAttribute('hidden');
+      render();
+    });
+
+    render();
+  </script>
+</BaseLayout>

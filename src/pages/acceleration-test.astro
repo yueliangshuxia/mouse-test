@@ -1,0 +1,546 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { ACCEL_MILD_RATIO, ACCEL_STRONG_RATIO } from '../lib/analysis';
+
+const tool = findTool('acceleration-test')!;
+
+const DISTANCES = [
+  { cm: 5, label: '5 厘米' },
+  { cm: 10, label: '10 厘米' },
+  { cm: 20, label: '20 厘米' },
+];
+
+const FAQ = [
+  {
+    q: '这个测试需要先关掉指针加速吗?',
+    a:
+      '恰恰相反——**开着才测得出东西**。这一页问的就是"我的系统现在有没有加速"。' +
+      '所以按你平时用鼠标的状态测就行。测完之后如果结论是"有加速",再决定要不要去关。',
+  },
+  {
+    q: '为什么两次移动的距离必须一样?',
+    a:
+      '因为要比的是"同样一段物理距离,屏幕上的位移是否相同"。距离不一样的话,两次的读数就不可比了。' +
+      '如果你第一次推了 10 厘米、第二次推了 12 厘米,那差异里混着手推的误差,得不出任何结论。' +
+      '所以页面会把两次的距离锁定成同一个值。',
+  },
+  {
+    q: '为什么快速那次要"推到头就停"?',
+    a:
+      '开了加速之后,同样推 10 厘米,快推会让光标走得更远——屏幕上可能根本放不下,光标会在中途撞到屏幕边缘。' +
+      '一旦撞边,浏览器报的坐标就停住了,量到的位移会小于实际,结果反而偏低。所以选一个短一点的距离,' +
+      '并且推到头立刻停手。',
+  },
+  {
+    q: '结论说"没有加速度",就一定没有吗?',
+    a:
+      '不是。这一页只能给出"在你刚才那个速度区间内,没有观察到放大"。如果你两次移动的速度其实差不太多,' +
+      '加速度就藏起来了——它只在速度差足够大时才显形。所以页面会把两次的实际速度显示出来,' +
+      '你可以自己看这个比值是在多大的速度差下得出的。速度差太小的话,结论不成立。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标加速度测试</h1>
+
+  <p class="prose">
+    指针加速的意思是:<strong>你移得越快,系统把位移放大得越多</strong>。
+    所以测试的方法就是——用<strong>慢</strong>和<strong>快</strong>两种速度,
+    各推同一段物理距离,看屏幕上光标走的距离是不是一样。
+    一样,说明没有加速;快的那次明显走得更远,就是有。
+  </p>
+
+  <p class="prose">
+    这一页<strong>不需要</strong>先关掉加速,它测的正是加速现在开着没开着。
+    需要一把尺子,并保证两次推的距离一致。
+  </p>
+
+  <h2>怎么测</h2>
+  <ol class="steps">
+    <li>
+      在下面选好距离(默认 10 厘米),把鼠标放在尺子的起点刻度上,
+      然后点<strong>第一次</strong>的“开始测量”。<strong>慢慢</strong>推完这段距离,停住。
+    </li>
+    <li>
+      停下约 0.7 秒后自动结算。然后把鼠标放回起点,点<strong>第二次</strong>的“开始测量”,
+      这次<strong>快速地</strong>推完<strong>同样的距离</strong>,推到头立刻停手。
+    </li>
+    <li>两次都有数之后,下面会给出结论。</li>
+  </ol>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    {
+      DISTANCES.map((option, index) => (
+        <button
+          type="button"
+          class="distance"
+          data-cm={option.cm}
+          aria-pressed={index === 1 ? 'true' : 'false'}
+        >
+          {option.label}
+        </button>
+      ))
+    }
+    <button type="button" id="reset">重置</button>
+    <span class="test-hint" id="hint">两次必须推同样长的距离,否则不可比</span>
+  </div>
+
+  <div class="runs">
+    <div class="run" id="run-slow" data-state="idle">
+      <div class="run__head">
+        <span class="run__index">第一次</span>
+        <span class="run__title">慢慢推</span>
+      </div>
+      <div class="run__value"><span id="slow-px">—</span><span class="run__unit">px</span></div>
+      <div class="run__meta" id="slow-meta">还没有测</div>
+      <div class="run__foot">
+        <button type="button" id="start-slow">开始测量</button>
+        <span class="run__speed" id="slow-speed">—</span>
+      </div>
+    </div>
+
+    <div class="run" id="run-fast" data-state="idle">
+      <div class="run__head">
+        <span class="run__index">第二次</span>
+        <span class="run__title">快速推</span>
+      </div>
+      <div class="run__value"><span id="fast-px">—</span><span class="run__unit">px</span></div>
+      <div class="run__meta" id="fast-meta">先做完第一次</div>
+      <div class="run__foot">
+        <button type="button" id="start-fast" disabled>开始测量</button>
+        <span class="run__speed" id="fast-speed">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">指针加速度</div>
+      <div>
+        <span class="verdict__value" id="ratio">—</span><span class="verdict__unit" id="ratio-unit"
+          >倍</span
+        >
+      </div>
+      <div class="verdict__note" id="verdict-note">两次都测完之后,这里会给出结论</div>
+    </div>
+    <div class="verdict__aside">
+      <span class="badge badge--idle" id="level-badge">等待测量</span>
+    </div>
+  </div>
+
+  <section class="prose">
+    <h2>这背后的判定标准</h2>
+    <p>
+      读数是<strong>快速那次的估算 DPI ÷ 慢速那次的估算 DPI</strong>。
+      两次推的是同一段物理距离,如果系统没有加速,这个比值应当是 1 左右——
+      不会精确等于 1,因为手推的距离本来就有几毫米的出入。
+    </p>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>比值</th>
+          <th>判定</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-ref-level="none">
+          <td>&lt; {ACCEL_MILD_RATIO.toFixed(2)}</td>
+          <td>没测到加速</td>
+          <td>差异在手速变化和测量误差能解释的范围内</td>
+        </tr>
+        <tr data-ref-level="mild">
+          <td>{ACCEL_MILD_RATIO.toFixed(2)} – {ACCEL_STRONG_RATIO.toFixed(2)}</td>
+          <td>轻微加速</td>
+          <td>Windows 的“提高指针精确度”在中等速度下大约是这个量级</td>
+        </tr>
+        <tr data-ref-level="strong">
+          <td>≥ {ACCEL_STRONG_RATIO.toFixed(2)}</td>
+          <td>明显加速</td>
+          <td>开了加速并且快速甩动时会到 2 倍甚至更多</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>为什么不直接告诉我“加速已开启”</h2>
+    <p>
+      因为网页<strong>读不到那个开关</strong>。系统有没有勾上“提高指针精确度”,
+      浏览器没有 API 能查。它也不告诉你当前鼠标驱动有没有自己再加一层加速——
+      有些游戏鼠标的驱动会绕过系统设置单独处理。
+    </p>
+    <p>
+      能观测到的只有行为:同样的手部动作,快慢两种速度下光标的响应是否一致。
+      所以这一页<strong>只能给出行为上的结论,不能断言那个复选框的状态</strong>。
+      如果你测出了加速,那无论开关在哪,你手上的确感觉到了加速——这就够你去做决定了。
+    </p>
+
+    <h2>测不准的几种情况</h2>
+    <ul>
+      <li>
+        <strong>两次速度差得不够大。</strong>这是最常见的一种。如果第一次和第二次的速度只差一点点,
+        加速就基本不显现,结论会偏向“没有”。页面上把两次的实际速度都列了出来,
+        <strong>速度差太小的时候,请把结论当成无效</strong>——不是鼠标没问题,是这次没测出来。
+      </li>
+      <li>
+        <strong>快速那次光标撞到屏幕边缘。</strong>开了加速时光标会走得很远,一旦撞边,
+        坐标就不再变化,量到的位移会偏小,把加速给掩盖掉。距离选短一点可以避免。
+      </li>
+      <li>
+        <strong>手推的距离不一致。</strong>这一项没法自动检测——页面只知道屏幕上走了多少像素,
+        不知道你的手实际推了多少。所以两次都要对着尺子的同一段刻度。
+      </li>
+    </ul>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .runs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .run {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      /* 和按键页的 .mouse-button 同一档:都是纸面上的"面板",圆角对齐 */
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      transition: border-color 0.1s linear;
+    }
+
+    .run[data-state='running'] {
+      border-color: var(--accent);
+    }
+
+    .run[data-state='done'] {
+      border-color: var(--border-strong);
+    }
+
+    .run__head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .run__index {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1px 6px;
+    }
+
+    .run__title {
+      font-weight: 600;
+    }
+
+    .run__value {
+      font-family: var(--font-mono);
+      font-size: 2.4rem;
+      font-weight: 700;
+      line-height: 1;
+      margin: 14px 0 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .run__unit {
+      font-size: 0.95rem;
+      color: var(--text-dim);
+      margin-left: 4px;
+      font-family: inherit;
+      font-weight: 400;
+    }
+
+    .run__meta {
+      color: var(--text-dim);
+      font-size: 0.88rem;
+      min-height: 1.3em;
+    }
+
+    .run__foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .run__speed {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--text-dim);
+    }
+
+  </style>
+
+  <script>
+    import { compareAcceleration, estimateDpi } from '../lib/analysis';
+    import { createRulerMeasurement, type RulerResult } from '../lib/ruler';
+    import {
+      el,
+      format,
+      mountCapabilityNotices,
+      setBadge,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // 右键菜单 / 中键自动滚动会打断"沿尺子推"的手势。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    /**
+     * 显示缩放倍数。
+     *
+     * 这里的结论是两次的**比值**,而缩放倍数在分子分母上会约掉——
+     * 所以它对本页的判定没有任何影响。带上它只是为了让两次列出来的
+     * 估算 DPI 和 DPI 测试页显示的是同一个数,免得两页对不上让人困惑。
+     */
+    const scale = window.devicePixelRatio || 1;
+
+    let distanceCm = 10;
+
+    let slowResult: RulerResult | null = null;
+    let fastResult: RulerResult | null = null;
+
+    const slowButton = el('start-slow') as HTMLButtonElement | null;
+    const fastButton = el('start-fast') as HTMLButtonElement | null;
+
+    // ---- 距离选择 ----
+
+    function renderDistances(): void {
+      for (const button of document.querySelectorAll<HTMLElement>('.distance')) {
+        button.setAttribute(
+          'aria-pressed',
+          Number(button.dataset.cm) === distanceCm ? 'true' : 'false',
+        );
+      }
+    }
+
+    for (const button of document.querySelectorAll<HTMLElement>('.distance')) {
+      button.addEventListener('click', () => {
+        if (slowRuler.running || fastRuler.running) return;
+        distanceCm = Number(button.dataset.cm) || 10;
+        renderDistances();
+        reset();
+      });
+    }
+
+    renderDistances();
+
+    // ---- 两次测量 ----
+
+    /**
+     * 两次测量共用同一套回调,靠 `which` 区分。
+     *
+     * 用同一个 `createRulerMeasurement` 建两个实例,而不是建一个反复用:
+     * 一次手势的起止点、极值都要独立保存,共用一个实例会让第二次覆盖掉第一次。
+     */
+    function makeRuler(which: 'slow' | 'fast') {
+      return createRulerMeasurement({
+        onProgress: (current) => {
+          setText(el(`${which}-px`), current.pixels.toFixed(0));
+        },
+        onFinish: (result) => {
+          setRunState(which, result ? 'done' : 'idle');
+          if (which === 'slow') slowResult = result;
+          else fastResult = result;
+
+          if (!result) {
+            setText(el(`${which}-meta`), '这次太短或没记录到,请重新推一次。');
+            render();
+            return;
+          }
+
+          setText(el(`${which}-px`), result.pixels.toFixed(0));
+          setText(
+            el(`${which}-speed`),
+            `${result.speedPxPerSec.toFixed(0)} px/s`,
+          );
+          setText(el(`${which}-meta`), describe(result));
+          render();
+        },
+      });
+    }
+
+    const slowRuler = makeRuler('slow');
+    const fastRuler = makeRuler('fast');
+
+    function describe(result: RulerResult): string {
+      const dpi = estimateDpi({ pixels: result.pixels, distanceCm, scale });
+      const axis = result.axis === 'x' ? '横向' : '纵向';
+      const drift =
+        result.crossAxisDriftPx > result.pixels * 0.15
+          ? ',推歪了,建议重推'
+          : '';
+      return `${distanceCm} 厘米走了 ${result.pixels.toFixed(0)} px(${axis})约 ${format(dpi)} DPI${drift}`;
+    }
+
+    function setRunState(which: 'slow' | 'fast', state: 'idle' | 'running' | 'done'): void {
+      el(`run-${which}`)?.setAttribute('data-state', state);
+    }
+
+    // ---- 结论 ----
+
+    function render(): void {
+      const comparison = compareAcceleration(
+        slowResult ? estimateDpi({ pixels: slowResult.pixels, distanceCm, scale }) : null,
+        fastResult ? estimateDpi({ pixels: fastResult.pixels, distanceCm, scale }) : null,
+      );
+
+      // 第一次没做完之前不该让人开始第二次:顺序反了的话,两次的物理距离
+      // 就没法保证一致,比出来的比值没有意义
+      if (fastButton) fastButton.disabled = slowResult === null || fastRuler.running;
+
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-level]')) {
+        row.dataset.current = row.dataset.refLevel === comparison.level ? 'true' : 'false';
+      }
+
+      if (comparison.ratio === null) {
+        setText(el('ratio'), '—');
+        setText(el('ratio-unit'), '倍');
+        setBadge(el('level-badge'), '等待测量', 'idle');
+        setText(el('verdict-note'), '两次都测完之后,这里会给出结论');
+        return;
+      }
+
+      setText(el('ratio'), comparison.ratio.toFixed(2));
+      setText(el('ratio-unit'), '倍');
+
+      const notes: string[] = [];
+
+      // 速度差太小的话比值没有意义 —— 这一点必须由页面主动指出来,
+      // 否则用户会把"藏起来了"当成"没有加速"
+      const slowSpeed = slowResult?.speedPxPerSec ?? 0;
+      const fastSpeed = fastResult?.speedPxPerSec ?? 0;
+      const speedRatio = slowSpeed > 0 ? fastSpeed / slowSpeed : 0;
+
+      switch (comparison.level) {
+        case 'none':
+          setBadge(el('level-badge'), '没测到加速', 'good');
+          notes.push('两次同样距离,屏幕上走的距离基本一致。');
+          break;
+        case 'mild':
+          setBadge(el('level-badge'), '轻微加速', 'fair');
+          notes.push('快速那次明显走得更远,存在与速度相关的放大。');
+          break;
+        case 'strong':
+          setBadge(el('level-badge'), '明显加速', 'poor');
+          notes.push('快速那次的位移被大幅放大了,加速是开着的。');
+          break;
+        default:
+          setBadge(el('level-badge'), '测不出来', 'idle');
+          notes.push('数据不足,无法判定。');
+      }
+
+      if (speedRatio > 0 && speedRatio < 2) {
+        notes.push(
+          `但这次两次的速度只差 ${speedRatio.toFixed(2)} 倍,` +
+            '差得不够大时加速度本来就显不出来 —— 这组数据得出的“没有加速”不能当数,建议快的那次再快些重测。',
+        );
+      }
+
+      if (comparison.level !== 'none' && comparison.level !== 'unknown') {
+        notes.push('关闭方法:控制面板 → 鼠标 → 指针选项 → 取消勾选“提高指针精确度”。');
+      }
+
+      setText(el('verdict-note'), notes.join(' '));
+    }
+
+    // ---- 按钮 ----
+
+    slowButton?.addEventListener('click', () => {
+      slowResult = null;
+      setText(el('slow-px'), '—');
+      setText(el('slow-speed'), '—');
+      setText(el('slow-meta'), '慢慢推,推完停住');
+      setRunState('slow', 'running');
+      render();
+      slowRuler.start();
+    });
+
+    fastButton?.addEventListener('click', () => {
+      fastResult = null;
+      setText(el('fast-px'), '—');
+      setText(el('fast-speed'), '—');
+      setText(el('fast-meta'), '快速推,推到头立刻停');
+      setRunState('fast', 'running');
+      render();
+      fastRuler.start();
+    });
+
+    function reset(): void {
+      slowRuler.cancel();
+      fastRuler.cancel();
+      slowResult = null;
+      fastResult = null;
+
+      setRunState('slow', 'idle');
+      setRunState('fast', 'idle');
+      setText(el('slow-px'), '—');
+      setText(el('fast-px'), '—');
+      setText(el('slow-speed'), '—');
+      setText(el('fast-speed'), '—');
+      setText(el('slow-meta'), '还没有测');
+      setText(el('fast-meta'), '先做完第一次');
+
+      if (slowButton) slowButton.disabled = false;
+      render();
+    }
+
+    el('reset')?.addEventListener('click', reset);
+
+    window.addEventListener('pagehide', () => {
+      slowRuler.destroy();
+      fastRuler.destroy();
+    });
+
+    reset();
+  </script>
+</BaseLayout>

@@ -1,0 +1,100 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { CONFIDENCE_LABEL, PLANNED_TOOLS, READY_TOOLS } from '../lib/tools';
+
+const title = '鼠标测试 - 在线检测鼠标按键、回报率与传感器性能';
+const description =
+  '免费在线鼠标测试工具。检测鼠标按键失灵、回报率(轮询率)、双击连击、滚轮、轨迹丢帧与传感器性能。基于浏览器原生接口,无需安装任何软件,数据全部在本地计算。';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: '鼠标测试',
+  description,
+  url: 'https://example.com/',
+};
+---
+
+<BaseLayout title={title} description={description} current="index" jsonLd={jsonLd}>
+  <h1>在线鼠标测试</h1>
+
+  <p class="prose">
+    打开网页即可检测鼠标的按键、回报率、传感器与滚轮状态,不需要下载任何驱动或客户端。
+    所有测量都在你的浏览器里完成,数据不会离开本机。
+  </p>
+
+  <h2>可用工具</h2>
+  <p class="prose">
+    每个工具右边标着<strong>这个测量有多可信</strong>。想知道按键坏没坏,就用「直接测得」的;
+    标着「只能看形状」的那几个,结论要自己对着说明读——它们能给你的线索是真的,
+    但线索不是证据。
+  </p>
+
+  <ul class="tool-list">
+    {
+      READY_TOOLS.map((tool) => (
+        <li class="tool-item">
+          <a class="tool-item__link" href={`/${tool.slug}/`}>
+            <span class="tool-item__name">{tool.name}</span>
+            <p class="tool-item__desc">{tool.description}</p>
+            <span class={`confidence confidence--${tool.confidence}`}>
+              {CONFIDENCE_LABEL[tool.confidence]}
+            </span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+
+  {
+    PLANNED_TOOLS.length > 0 && (
+      <>
+        <h2>即将上线</h2>
+        <ul class="tool-list">
+          {PLANNED_TOOLS.map((tool) => (
+            <li class="tool-item">
+              <div class="tool-item__link">
+                <span class="tool-item__name">{tool.name}</span>
+                <p class="tool-item__desc">{tool.description}</p>
+                <span class="confidence confidence--direction">开发中</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </>
+    )
+  }
+
+  <section class="prose">
+    <h2>关于测量精度</h2>
+    <p>
+      浏览器能读到的鼠标数据是有上限的,这里如实说明,避免你把平台限制误判成硬件故障:
+    </p>
+    <ul>
+      <li>
+        <strong>按键、双击、键盘、CPS</strong>——测得很准,浏览器直接提供原始事件流。
+      </li>
+      <li>
+        <strong>回报率</strong>——需要浏览器支持 <code>getCoalescedEvents()</code>。不支持时,
+        读数会被屏幕刷新率限住,1000Hz 和 125Hz 的鼠标会测出同样的数字。页面会检测这一点并提示。
+      </li>
+      <li>
+        <strong>2000Hz 以上</strong>——需要页面处于跨域隔离状态才能拿到足够的计时精度。
+        未隔离时计时器被限制在 100µs,而 8000Hz 的间隔只有 125µs,无法分辨。
+      </li>
+      <li>
+        <strong>滚轮</strong>——<code>deltaMode</code> 只说单位是像素、行还是页,
+        <strong>从不说"一格是多少"</strong>,所以格数只能估算;方向不需要任何换算,是可靠的。
+      </li>
+      <li>
+        <strong>轨迹与拖拽</strong>——浏览器拿不到报文的序列号,
+        "传感器漏点"和"你手甩快了"在数据上是同一个样子。页面只能给<strong>形状</strong>,
+        给不了"丢帧了几次"这种结论。
+      </li>
+      <li>
+        <strong>DPI 与加速度</strong>——浏览器读不到硬件 DPI,只能靠你移动固定物理距离间接反推。
+        手推的距离、指针速度滑块、系统缩放都会进到结果里。
+      </li>
+    </ul>
+  </section>
+</BaseLayout>

@@ -1,0 +1,337 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { WHEEL_LINES_PER_NOTCH, WHEEL_PIXELS_PER_NOTCH } from '../lib/analysis';
+
+const tool = findTool('scroll-test')!;
+
+/** 常见的一组换算,让用户对得上自己系统报出来的数 */
+const DELTA_MODES = [
+  { mode: 0, name: 'DOM_DELTA_PIXEL', note: '按像素计', divisor: WHEEL_PIXELS_PER_NOTCH },
+  { mode: 1, name: 'DOM_DELTA_LINE', note: '按行计', divisor: WHEEL_LINES_PER_NOTCH },
+  { mode: 2, name: 'DOM_DELTA_PAGE', note: '按页计', divisor: 1 },
+];
+
+const FAQ = [
+  {
+    q: '格数是准的吗?',
+    a:
+      '不准,它是个估算。浏览器只告诉你 deltaY 的数值和单位(像素/行/页),没告诉你“一格是多少”——' +
+      '系统里“一次滚动多少行”的设置、驱动的平滑滚动、以及鼠标是不是无极滚轮,都会改变这个数。' +
+      '本页按常见约定换算(像素模式 100 一格、行模式 3 行一格),所以真正可信的是**方向**和**方向反转**,那两个不需要任何换算。',
+  },
+  {
+    q: '怎么判断滚轮编码器坏了?',
+    a:
+      '最典型的表现是“反向毛刺”:你一直朝一个方向滚,中间突然跳一下反方向,而且前后都是正常的。' +
+      '本页会把这种波形单独数出来,就是下面那个“疑似跳格”。要注意它只是怀疑对象——手指打滑、' +
+      '触控板误触也能造出同样的波形,所以判读方法是:只朝一个方向匀速滚二十几格,看有没有出现毛刺。',
+  },
+  {
+    q: '为什么滚动的时候页面不动?',
+    a:
+      '这是故意的。如果让页面跟着滚,测试区会从指针底下溜走,越滚越测不到。所以本页把滚动事件拦了下来,' +
+      '只统计不滚动。想恢复正常浏览,把指针移出这个区域就行。',
+  },
+  {
+    q: '无极滚轮和普通滚轮的结果有什么不同?',
+    a:
+      '无极滚轮(可以一直转、带惯性自由滑行的那种)一次滑动会发出几十上百个连续的小 delta,' +
+      '所以条带会刷得飞快、累计格数也会大得离谱——那是它的正常工作方式,不是故障。' +
+      '判断这类鼠标要看**方向是否连贯**,而不是格数。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标滚轮测试</h1>
+
+  <p class="prose">
+    把指针放在下面的区域里,然后滚动滚轮。页面会实时显示滚动方向、累计格数与每一格的方向,
+    并在你<strong>持续朝一个方向滚动却出现反向</strong>时把它标出来——那是滚轮编码器开始
+    跳格时最典型的样子。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">累计滚动</div>
+      <div>
+        <span class="verdict__value" id="net">0</span><span class="verdict__unit">格</span>
+      </div>
+      <div class="verdict__note" id="net-note">正数向下,负数向上</div>
+    </div>
+    <div class="verdict__aside">
+      <div><span class="badge badge--idle" id="dir-badge">等待滚动</span></div>
+      <div>
+        <span class="badge badge--idle" id="glitch-badge">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="test-area well scroll-pad" id="area">
+    <div class="test-area__hint" id="hint">把指针放在这里,然后滚动滚轮</div>
+    <div class="scroll-dir" id="dir" hidden>↓</div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="down" label="向下" unit="格" />
+    <StatPanel id="up" label="向上" unit="格" />
+    <StatPanel id="glitches" label="疑似跳格" hint="持续同向时出现的反向" />
+    <StatPanel id="typical" label="一格原始值" hint="你系统里的 deltaY" />
+  </div>
+
+  <h2>最近 80 格的方向</h2>
+  <p class="prose tight">
+    向下滚是沉到底部,向上滚是顶到顶部。<span class="mark-danger">红色</span>的是
+    反向毛刺——你一直在朝一个方向滚,它却单独跳了一下。
+  </p>
+  <div class="strip" id="strip"></div>
+
+  <div class="controls">
+    <button type="button" id="reset">重置</button>
+    <span class="test-hint" id="delta-info">
+      当前事件:<span id="delta-raw">—</span>
+    </span>
+  </div>
+
+  <section class="prose">
+    <h2>怎么看结果</h2>
+    <ul>
+      <li>
+        <strong>疑似跳格</strong>是这里唯一指向故障的数字。它的定义很窄:一个孤立的反向事件,
+        前后都是同一个方向。用户在持续滚动时不会产生这种序列,所以它一旦出现就值得怀疑。
+        但<strong>它不是铁证</strong>——手指打滑、触控板误触、系统在做平滑插值都能造出同样的波形。
+        所以正确用法是:只朝一个方向匀速滚二十几格,如果反复冒红,那才是编码器的问题。
+      </li>
+      <li>
+        <strong>方向反转</strong>次数本身<strong>不是</strong>故障指标,所以没放在上面的面板里。
+        你自己每换一次方向它就会加一,滚上滚下几趟就能累积出一堆,拿它判断故障只会吓到自己。
+      </li>
+      <li>
+        <strong>一格原始值</strong>告诉你系统报出来的 deltaY 是多少。对上一眼:Windows 上
+        Chrome 通常是 100(像素模式),Firefox 通常报 3(行模式)。如果你的数完全不是这两个样子,
+        说明系统或驱动改过滚动设置,这时格子数的换算就只是粗略参考了。
+      </li>
+    </ul>
+
+    <h2>浏览器给的到底是什么</h2>
+    <p>
+      滚轮事件携带的是 <code>deltaY</code> 加一个 <code>deltaMode</code>,后者只说明单位是
+      像素、行还是页,<strong>但它不说“一行多高”“一格多少像素”</strong>。所以任何把 deltaY
+      换算成“格数”的做法都带一个假设。本页用的假设写在下面这张表里,你可以对照自己的实际情况:
+    </p>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>deltaMode</th>
+          <th>名称</th>
+          <th>含义</th>
+          <th>本页按几算一格</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          DELTA_MODES.map((row) => (
+            <tr>
+              <td>{row.mode}</td>
+              <td>{row.name}</td>
+              <td>{row.note}</td>
+              <td>{row.divisor}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+    <p>
+      也正因为换算是估算,本页把<strong>方向</strong>当作主指标。方向不需要任何换算——
+      直接读 deltaY 的符号就行,不受系统设置影响,跨浏览器也一致。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .scroll-pad {
+      height: 220px;
+      /* 触屏上没有滚轮,但双指滑动会派发 wheel 事件。禁掉手势,免得
+         用户以为自己在测滚轮,其实测的是触摸板的模拟滑动 */
+      touch-action: none;
+    }
+
+    /* .scroll-dir 的定位与配色在 global.css 里(和 CPS / DPI / 拖拽页的
+       实时读数共用一套规则),这里只留这个页面独有的东西 */
+
+    #delta-raw {
+      font-family: var(--font-mono);
+    }
+  </style>
+
+  <script>
+    import {
+      normalizeWheelDelta,
+      summarizeScroll,
+      type ScrollNotch,
+    } from '../lib/analysis';
+    import { createTicker, el, mountCapabilityNotices, setBadge, setStat, setText } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    /** 条带上显示多少格 */
+    const STRIP_SIZE = 80;
+
+    /**
+     * 参与统计的事件上限。滚轮事件来得极快(无极滚轮一秒能发上百个),
+     * 不设上限的话数组会一直长,而 `summarizeScroll` 是每轮全量重算的。
+     * 超过就砍掉前半——统计的是"有没有毛刺",不需要整个会话的历史。
+     */
+    const MAX_EVENTS = 4000;
+
+    const area = el('area');
+    const hint = el('hint');
+    const dirNode = el('dir');
+    const stripHost = el('strip');
+
+    let events: ScrollNotch[] = [];
+
+    function render(): void {
+      const stats = summarizeScroll(events);
+
+      setText(el('net'), stats.netNotches.toFixed(0));
+      setText(
+        el('net-note'),
+        stats.events === 0 ? '正数向下,负数向上' : `${stats.down} 格向下 · ${stats.up} 格向上`,
+      );
+
+      setStat('down', String(stats.down));
+      setStat('up', String(stats.up));
+      setStat('glitches', String(stats.glitches));
+      setStat(
+        'typical',
+        stats.typicalDelta === null ? '—' : stats.typicalDelta.toFixed(0),
+      );
+
+      setBadge(
+        el('glitch-badge'),
+        stats.glitches === 0 ? '未发现跳格' : `疑似跳格 ${stats.glitches} 次`,
+        stats.glitches === 0 ? (stats.events > 0 ? 'good' : 'idle') : 'poor',
+      );
+
+      // ---- 条带 ----
+      if (!stripHost) return;
+      if (events.length === 0) {
+        stripHost.replaceChildren();
+        return;
+      }
+
+      const shown = events.slice(Math.max(0, events.length - STRIP_SIZE));
+      const signs = shown.map((event) => (event.notches > 0 ? 1 : -1));
+
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < shown.length; i++) {
+        const mark = document.createElement('div');
+        // 毛刺的判据必须和 summarizeScroll 里一致:孤立的反向
+        const isGlitch =
+          i > 0 &&
+          i < shown.length - 1 &&
+          signs[i] !== signs[i - 1] &&
+          signs[i + 1] === signs[i - 1];
+
+        mark.className = isGlitch
+          ? 'strip__mark strip__mark--glitch'
+          : `strip__mark ${signs[i] > 0 ? 'strip__mark--down' : 'strip__mark--up'}`;
+        mark.title = `${shown[i].notches > 0 ? '向下' : '向上'} ${Math.abs(shown[i].notches).toFixed(2)} 格 · deltaY=${shown[i].raw}`;
+        fragment.appendChild(mark);
+      }
+      stripHost.replaceChildren(fragment);
+    }
+
+    // 滚轮事件可以来得很密,每来一个就重算一遍统计会拖慢滚动本身。
+    // 攒着,按固定节奏统一刷。
+    const stopTicker = createTicker(100, render);
+
+    // ---- 交互 ----
+
+    /**
+     * `passive: false` 是必需的:要 preventDefault 阻止页面跟着滚。
+     * 如果让页面滚起来,测试区会从指针底下溜走,越滚越测不到。
+     */
+    area?.addEventListener(
+      'wheel',
+      (event) => {
+        event.preventDefault();
+        hint?.setAttribute('hidden', '');
+        dirNode?.removeAttribute('hidden');
+
+        const notches = normalizeWheelDelta(event.deltaY, event.deltaMode);
+        if (notches === 0) return;
+
+        events.push({ notches, raw: event.deltaY, deltaMode: event.deltaMode });
+        if (events.length > MAX_EVENTS) {
+          events = events.slice(MAX_EVENTS / 2);
+        }
+
+        // 方向指示要跟手,不能等 100ms 的刷新节奏
+        setText(dirNode, notches > 0 ? '↓' : '↑');
+        setText(el('delta-raw'), `deltaY ${event.deltaY} · deltaMode ${event.deltaMode}`);
+        setBadge(
+          el('dir-badge'),
+          notches > 0 ? '正在向下' : '正在向上',
+          'good',
+        );
+      },
+      { passive: false },
+    );
+
+    el('reset')?.addEventListener('click', () => {
+      events = [];
+      hint?.removeAttribute('hidden');
+      dirNode?.setAttribute('hidden', '');
+      setBadge(el('dir-badge'), '等待滚动', 'idle');
+      setText(el('delta-raw'), '—');
+      render();
+    });
+
+    window.addEventListener('pagehide', stopTicker);
+  </script>
+</BaseLayout>

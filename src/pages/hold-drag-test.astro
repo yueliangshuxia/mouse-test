@@ -1,0 +1,433 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { REPRESS_RADIUS_PX, REPRESS_WINDOW_MS } from '../lib/analysis';
+
+const tool = findTool('hold-drag-test')!;
+
+const FAQ = [
+  {
+    q: '页面上的“疑似瞬断”到底测的是什么?',
+    a:
+      '测的是“松开后又极快地原地按下”。判据是两条同时成立:间隔短于 ' +
+      REPRESS_WINDOW_MS +
+      ' 毫秒,并且位置挪动不超过 ' +
+      REPRESS_RADIUS_PX +
+      ' 像素。这个动作人手做不出来——人最快的双击也在 60 毫秒以上,而且鼠标会因为反作用力挪位置。' +
+      '所以满足这两条的,基本只可能是按键信号自己断了一下。',
+  },
+  {
+    q: '为什么叫“疑似”而不是直接说故障?',
+    a:
+      '因为浏览器里根本没有“按键瞬断”这个信号。中途断一下,在事件流里就是一次松开加一次按下,' +
+      '和用户真的松手再按**完全一样**,没有任何字段能把两者区分开。能用的只有行为特征,' +
+      '而行为特征不是铁证。所以判读权在你手上:如果你确定自己一直按着没松,这里却报了瞬断,那就是鼠标的问题。',
+  },
+  {
+    q: '拖着拖着东西掉了,用这个能查出来吗?',
+    a:
+      '能,这正是它最主要的用途。拖拽文件时中途掉落,通常就是按住期间发生了瞬断——' +
+      '系统收到“松开了”,于是把文件丢在了当时的位置。测法是在这个区域里按住左键来回拖动十几秒,' +
+      '松开后看日志里那一次的瞬断次数是不是 0。' +
+      '注意别把窗口失焦算进去:按了 Alt+Tab 的话,系统确实会认为你松手了,那不是鼠标的错。',
+  },
+  {
+    q: '为什么有时候这一整段会被标成“全程按着”?',
+    a:
+      '如果你松开后页面没收到松开事件(比如指针在浏览器窗口外松的),那一段就会显示成还没结束。' +
+      '这是如实报告而不是出错——页面只能知道自己收到了什么。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标长按拖拽测试</h1>
+
+  <p class="prose">
+    按住左键在下面的区域里来回拖动十几秒,然后松开。页面会统计每一次按住期间
+    <strong>有没有出现过极短的断开又重按</strong>——那正是拖拽文件时中途掉落的成因。
+    按住期间即使把指针拖出这个区域也没关系,一样会继续跟踪。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">疑似瞬断</div>
+      <div>
+        <span class="verdict__value" id="drops-total">0</span><span class="verdict__unit">次</span>
+      </div>
+      <div class="verdict__note" id="verdict-note">
+        按住左键拖动,松开后这里会给出结论
+      </div>
+    </div>
+    <div class="verdict__aside">
+      <span class="badge badge--idle" id="state-badge">等待拖拽</span>
+    </div>
+  </div>
+
+  <div class="test-area well drag-pad" id="area" data-holding="false">
+    <div class="test-area__hint" id="hint">在这里按住左键,然后来回拖动</div>
+    <div class="drag-live" id="live" hidden>
+      <div class="drag-live__value" id="live-hold">0</div>
+      <div class="drag-live__label">按住中 · 已拖动 <span id="live-distance">0</span> px</div>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="sessions" label="拖拽次数" primary />
+    <StatPanel id="longest" label="最长一次" unit="ms" />
+    <StatPanel id="distance" label="累计路程" unit="px" />
+    <StatPanel id="open" label="未正常结束" hint="收不到松开事件" />
+  </div>
+
+  <div class="controls">
+    <button type="button" id="reset">重置</button>
+    <span class="test-hint" id="hint2">
+      指针拖出区域外也会继续跟踪,直到松开为止
+    </span>
+  </div>
+
+  <h2>每次拖拽的记录</h2>
+  <p class="prose tight">
+    最近 10 次,新的在上面。<span class="mark-danger">红色</span>的那几次里检测到了瞬断。
+  </p>
+  <ul class="log-list" id="log"></ul>
+
+  <section class="prose">
+    <h2>这项测试测不到什么</h2>
+    <p>
+      要诚实说明的是:<strong>浏览器没有“按键瞬断”这个信号。</strong>
+      按键中途断一下,在事件流里就是一次松开加一次按下——和用户真的松手再按
+      <strong>完全一样</strong>,没有任何字段能把两者分开。页面能做的只是在行为上找破绽:
+      人手不可能在 {REPRESS_WINDOW_MS} 毫秒内原地重按,所以满足“极短 + 位置几乎没变”
+      这两个条件的,才被算作疑似瞬断。
+    </p>
+    <p>
+      所以<strong>判读权在你自己手上</strong>:如果你确定自己一直按着没松手,
+      这里却报了瞬断,那这只鼠标的按键信号确实断过。反过来,如果你中间真的换了手或者松了一下,
+      那报出来的就是你自己干的。日志里那几次的时长和路程可以帮你回忆当时在做什么。
+    </p>
+
+    <h2>和“拖拽掉落”的关系</h2>
+    <p>
+      拖动文件时中途掉落,通常就是按住期间发生了瞬断:系统收到“松开了”,于是把文件放在了
+      当时指针的位置。同样的瞬断在普通点击里几乎看不出来(可能只是偶尔漏一次点击),
+      但在拖拽里会立刻显形——这是这项测试比点击测试更灵敏的原因。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .drag-pad {
+      cursor: grab;
+      height: 300px;
+    }
+
+    .drag-pad[data-holding='true'] {
+      cursor: grabbing;
+      border-color: var(--accent);
+    }
+
+    /* .drag-live 的定位、[hidden]、大字和标签都在 global.css 里
+       (和 CPS / DPI / 滚轮三页共用) */
+
+    /* 拖拽必然带文字选中,测试期间抑制掉 */
+    :global(html.is-testing) {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+  </style>
+
+  <script>
+    import { analyzeDragEpisodes, type DragEvent } from '../lib/analysis';
+    import {
+      createTicker,
+      el,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // 右键菜单 / 中键自动滚动会打断拖拽。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    /**
+     * 移动事件的记录间隔(毫秒)。采样层在 1000Hz 下每秒会产生 1000 个事件,
+     * 一次十几秒的拖拽就是上万个点——而对"算个路程"来说,每 8ms 采一个
+     * (最多 2 像素的误差)完全够用,所以抽稀掉。
+     *
+     * **按下和松开不抽稀**:瞬断判据靠的就是这两个事件的精确时刻,
+     * 抽掉一个就等于把故障本身删了。
+     */
+    const MOVE_SAMPLE_MS = 8;
+
+    /** 松开后还保持"在跟踪"的时长,用来捕获瞬断之后的重新按下 */
+    const REPRESS_GRACE_MS = 80;
+
+    const LOG_LIMIT = 10;
+
+    const area = el('area');
+    const hint = el('hint');
+    const live = el('live');
+    const logHost = el('log');
+
+    /** 完整的按下/松开/移动序列,所有统计都从它派生 */
+    const events: DragEvent[] = [];
+
+    /** 还在一次拖拽会话里(含松开后的宽限期,好接住瞬断后的重按) */
+    let armed = false;
+    let armTimer = 0;
+    let lastMoveAt = 0;
+
+    /**
+     * 记一条事件。
+     *
+     * `t` 由调用方给,而不是在这里统一取 `performance.now()`:瞬断的判据是
+     * **`pointerup` 与 `pointerdown` 之间的间隔**,而这两个事件很可能被浏览器
+     * 攒进同一个任务里派发——那一刻两个处理函数几乎是同时跑的,`performance.now()`
+     * 的差会塌到 0,于是一次正常的"松手再按"也会落进 30ms 的窗口里,报成瞬断。
+     *
+     * 所以真实事件一律传 `event.timeStamp`(事件自己带的时刻,不吃派发延迟),
+     * 只有 `blur` 里补发的那条合成事件用 `performance.now()`——那条本来就没有
+     * 对应的真实事件。两者同源,可以直接相减。
+     */
+    function record(t: number, x: number, y: number, kind: DragEvent['kind']): void {
+      events.push({ t, x, y, kind });
+    }
+
+    function arm(): void {
+      armed = true;
+      window.clearTimeout(armTimer);
+      area?.setAttribute('data-holding', 'true');
+      document.documentElement.classList.add('is-testing');
+      hint?.setAttribute('hidden', '');
+      live?.removeAttribute('hidden');
+    }
+
+    function scheduleDisarm(): void {
+      window.clearTimeout(armTimer);
+      armTimer = window.setTimeout(() => {
+        armed = false;
+        area?.setAttribute('data-holding', 'false');
+        document.documentElement.classList.remove('is-testing');
+        render();
+      }, REPRESS_GRACE_MS);
+    }
+
+    // ---- 渲染 ----
+
+    function render(): void {
+      const episodes = analyzeDragEpisodes(events);
+      const finished = episodes.filter((episode) => !episode.open);
+
+      let totalDrops = 0;
+      let longest = 0;
+      let distance = 0;
+      for (const episode of finished) {
+        totalDrops += episode.drops;
+        distance += episode.distancePx;
+        if (episode.durationMs > longest) longest = episode.durationMs;
+      }
+
+      setText(el('drops-total'), String(totalDrops));
+      setStat('sessions', String(finished.length));
+      setStat('longest', longest === 0 ? '—' : longest.toFixed(0));
+      setStat('distance', distance.toFixed(0));
+      setStat('open', String(episodes.length - finished.length));
+
+      if (totalDrops > 0) {
+        setBadge(el('state-badge'), '疑似瞬断', 'poor');
+        setText(
+          el('verdict-note'),
+          `有 ${totalDrops} 次“极短且原地”的重按。如果你当时并没有松手,那就是按键信号断过。`,
+        );
+      } else if (finished.length > 0) {
+        setBadge(el('state-badge'), '未发现瞬断', 'good');
+        setText(el('verdict-note'), `共 ${finished.length} 次拖拽,全程没有出现过断开。`);
+      }
+
+      // ---- 实时数字 ----
+      const current = episodes.length > 0 ? episodes[episodes.length - 1] : null;
+      if (armed && current && current.open) {
+        // 按住不动时不会产生任何事件,`durationMs` 会停在最后一个事件上,
+        // 所以实时这个数必须走墙上时钟,否则松手前它永远是 0。
+        setText(el('live-hold'), (performance.now() - current.startMs).toFixed(0));
+        setText(el('live-distance'), current.distancePx.toFixed(0));
+      }
+
+      renderLog(episodes);
+    }
+
+    function renderLog(episodes: ReturnType<typeof analyzeDragEpisodes>): void {
+      if (!logHost) return;
+      if (episodes.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'log-empty';
+        empty.textContent = '还没有拖拽记录';
+        logHost.replaceChildren(empty);
+        return;
+      }
+
+      const shown = episodes.slice(Math.max(0, episodes.length - LOG_LIMIT)).reverse();
+      const fragment = document.createDocumentFragment();
+
+      for (let i = 0; i < shown.length; i++) {
+        const episode = shown[i];
+        const item = document.createElement('li');
+        item.className = episode.drops > 0 ? 'log-item log-item--alert' : 'log-item';
+
+        const index = document.createElement('span');
+        index.className = 'log-item__index';
+        index.textContent = `#${episodes.length - i}`;
+
+        const value = document.createElement('span');
+        value.className = 'log-item__value';
+        value.textContent = episode.open ? '按着没松' : `${episode.durationMs.toFixed(0)} ms`;
+
+        const note = document.createElement('span');
+        note.className = 'log-item__note';
+        if (episode.drops > 0) {
+          note.textContent = `疑似瞬断 ${episode.drops} 次`;
+        } else {
+          note.textContent = `拖动 ${episode.distancePx.toFixed(0)} px`;
+        }
+
+        item.append(index, value, note);
+        fragment.appendChild(item);
+      }
+
+      logHost.replaceChildren(fragment);
+    }
+
+    // 按住不动时不会有事件,靠刷新循环把实时秒数推上去
+    const stopTicker = createTicker(100, () => {
+      if (armed) render();
+    });
+
+    // ---- 交互 ----
+
+    /**
+     * 按下监听见挂在 window 上,而不是只挂在测试区上。
+     *
+     * 两个理由:瞬断之后的重新按下可能落在区域外;以及第一次按下如果落在
+     * 区域内的文字上,事件照样要算数。`armed` 那个宽限期之外的、落在区域外的
+     * 按下则会被忽略——否则页面上随便点一下也会开始记一笔。
+     */
+    window.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+
+      const inside = area?.contains(event.target as Node) ?? false;
+      if (!inside && !armed) return;
+
+      event.preventDefault();
+      arm();
+      record(event.timeStamp, event.clientX, event.clientY, 'down');
+    });
+
+    window.addEventListener(
+      'pointermove',
+      (event) => {
+        if (!armed) return;
+        const now = performance.now();
+        if (now - lastMoveAt < MOVE_SAMPLE_MS) return;
+        lastMoveAt = now;
+        record(event.timeStamp, event.clientX, event.clientY, 'move');
+      },
+      { passive: true },
+    );
+
+    function release(event: PointerEvent): void {
+      if (!armed || event.button !== 0) return;
+      record(event.timeStamp, event.clientX, event.clientY, 'up');
+      scheduleDisarm();
+    }
+
+    window.addEventListener('pointerup', release);
+    // 系统把指针收走了(触控笔、驱动问题),当作松开收尾,免得一次拖拽永远挂着
+    window.addEventListener('pointercancel', release);
+
+    // 窗口失焦时收不到松开事件。补一条合成事件把这一段收尾,
+    // 否则它会一直显示成"按着没松"。
+    window.addEventListener('blur', () => {
+      if (!armed) return;
+      const last = events[events.length - 1];
+      // 合成事件:没有真实事件可依,取当下的墙钟时间
+      if (last && last.kind !== 'up') record(performance.now(), last.x, last.y, 'up');
+      armed = false;
+      area?.setAttribute('data-holding', 'false');
+      document.documentElement.classList.remove('is-testing');
+      render();
+    });
+
+    // 拖拽必然带起原生拖放(拖图片、拖链接),那会打断跟踪
+    window.addEventListener('dragstart', (event) => {
+      if (armed) event.preventDefault();
+    });
+
+    el('reset')?.addEventListener('click', () => {
+      events.length = 0;
+      armed = false;
+      window.clearTimeout(armTimer);
+      area?.setAttribute('data-holding', 'false');
+      document.documentElement.classList.remove('is-testing');
+      hint?.removeAttribute('hidden');
+      live?.setAttribute('hidden', '');
+      setBadge(el('state-badge'), '等待拖拽', 'idle');
+      setText(el('verdict-note'), '按住左键拖动,松开后这里会给出结论');
+      render();
+    });
+
+    window.addEventListener('pagehide', () => {
+      stopTicker();
+      window.clearTimeout(armTimer);
+      document.documentElement.classList.remove('is-testing');
+    });
+
+    render();
+  </script>
+</BaseLayout>

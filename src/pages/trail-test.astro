@@ -1,0 +1,661 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { TRAIL_JUMP_FACTOR, TRAIL_JUMP_FLOOR_PX } from '../lib/analysis';
+
+const tool = findTool('trail-test')!;
+
+const FAQ = [
+  {
+    q: '“跳变”是不是就是丢帧?',
+    a:
+      '不是,**页面抓到的跳变有两种来源,浏览器分不出来**。一是传感器漏报了几个计数——' +
+      '那是真的丢帧;二是你的手真的甩快了,一个采样间隔里本来就该走那么远。' +
+      '两者在数据上都是"相邻两个采样点之间距离特别大",没有任何字段能区分。' +
+      '所以本页只说"跳变",不说"丢帧"。',
+  },
+  {
+    q: '那我怎么判断到底是哪一种?',
+    a:
+      '看形态,别看总数。丢帧是"在一串均匀的小间距里插进一个孤立的大间距",像尖峰;' +
+      '手甩快了会让连续一串间距一起变大,是一条整体的隆起。页面就是按这个来的:' +
+      '标题那个数只数"孤立尖峰"(自己超线、左右两个邻居都没超),把连着出现的一起排除在外。' +
+      '所以正确的用法是匀速画上十几圈——孤立尖峰反复出现,那是丢帧;' +
+      '超线间隔很多而孤立尖峰是 0,那是你画快了。',
+  },
+  {
+    q: '静止漂移测试为什么要求手离开鼠标?',
+    a:
+      '因为这个测试要测的是"鼠标完全不动时,传感器会不会自己产生计数"。' +
+      '手搭在鼠标上,心跳和呼吸带来的微动就会被算进去——那不是传感器的问题,是你的手在动。' +
+      '所以要么把手完全拿开,要么只用一根手指轻轻搭着不施力。',
+  },
+  {
+    q: '为什么轨迹会自己慢慢消失?',
+    a:
+      '这是刻意做的渐隐,不是画丢了。鼠标在高回报率下每秒产生上千个点,画满十几秒之后' +
+      '整个区域会糊成一团黑,反而看不清轨迹的形状。渐隐让最近的轨迹最清楚,' +
+      '而分析用的数据一直在缓冲区里,不受影响。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标轨迹测试</h1>
+
+  <p class="prose">
+    在下面的区域里<strong>匀速画十几圈</strong>,看画出来的线是不是圆滑。
+    页面会数出轨迹里有多少处<strong>孤立尖峰</strong>——相邻采样点之间的距离突然变大、
+    而两边又都正常——以及鼠标完全静止时传感器会不会自己产生计数(<strong>静止漂移</strong>)。
+  </p>
+
+  <div class="notice">
+    <ul>
+      <li>
+        "相邻两点距离变大"<strong>不等于丢帧</strong>:传感器漏点和手甩快了在数据上是同一个样子。
+        所以这一页数的是<strong>形状</strong>——一串均匀小步里冒出的孤立尖峰才是丢帧的嫌疑,
+        连着一起变大的是你的手。
+      </li>
+      <li>
+        影响结果的还有鼠标垫。玻璃面、纯白纸、太光滑的桌面上,大多数鼠标都会明显变差——
+        测出来不理想时,先换一块深色布垫再测一次。
+      </li>
+    </ul>
+  </div>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <button type="button" id="toggle">开始绘制</button>
+    <button type="button" id="clear">清空轨迹</button>
+    <span class="test-hint" id="hint">点开始之后,在这个区域里匀速画圈</span>
+  </div>
+
+  <div class="test-area well trail-area" id="area" data-drawing="false">
+    <canvas id="canvas"></canvas>
+    <div class="test-area__hint" id="overlay">点“开始绘制”,然后在这里匀速画十几圈</div>
+  </div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">孤立尖峰</div>
+      <div>
+        <span class="verdict__value" id="jumps">—</span><span class="verdict__unit">处</span>
+      </div>
+      <div class="verdict__note" id="verdict-note">
+        画完之后点“停止”或松开,这里会给出统计
+      </div>
+    </div>
+    <div class="verdict__aside">
+      <span class="badge badge--idle" id="state-badge">等待绘制</span>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="samples" label="采样点数" />
+    <StatPanel id="duration" label="分析时长" unit="ms" hint="最长的一段连续运动" />
+    <StatPanel id="over-count" label="超线间隔" hint="含连着出现的,只作分母" />
+    <StatPanel id="median-step" label="中位步长" unit="px" hint="相邻两点的典型间距" />
+    <StatPanel id="max-step" label="最大步长" unit="px" />
+  </div>
+
+  <section class="prose">
+    <h2>怎么读这些数</h2>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>指标</th>
+          <th>看什么</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>孤立尖峰</td>
+          <td>丢帧的形状</td>
+          <td>
+            自己超过门槛,而<strong>左右两个邻居都没超</strong>。在一串均匀的小步里插进一个
+            大跨步,这正是丢帧该有的样子。首尾两步只有一侧有邻居,不参与判断。
+          </td>
+        </tr>
+        <tr>
+          <td>超线间隔</td>
+          <td>分母,不是结论</td>
+          <td>
+            超过门槛的间隔总数,<strong>把连着出现的一起算了进去</strong>。
+            匀速甩动时正常的间距会成串超线,所以它本身说明不了任何问题——
+            要和孤立尖峰对比着看:两者差不多,说明超线的基本都是尖峰;
+            超线很多而孤立尖峰是 0,那就是你画快了。
+          </td>
+        </tr>
+        <tr>
+          <td>中位步长</td>
+          <td>平滑度</td>
+          <td>
+            匀速画圈时它约等于"每个采样点走多远"。这个数本身无所谓好坏,
+            它取决于你画多快和鼠标回报率多高——它的用处是当基准,也就是上面那个门槛:
+            判定门槛是<strong>中位步长的 {TRAIL_JUMP_FACTOR} 倍且不低于 {TRAIL_JUMP_FLOOR_PX} 像素</strong
+            >。两个条件缺一不可:光有倍数的话,慢速移动时中位步长只有零点几像素,
+            手一抖就满屏"丢帧";光有绝对值的话,快速甩动时正常的间距也会全部超线。
+          </td>
+        </tr>
+        <tr>
+          <td>最大步长</td>
+          <td>有没有突变</td>
+          <td>
+            和门槛比一比。如果最大步长只比门槛高一点点,那基本是人手的抖动;
+            如果高出好几倍,那一下确实不正常。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>静止漂移:手离开鼠标单独测</h2>
+    <p>
+      轨迹测试只能看出"动的时候有没有问题"。传感器的另一个常见毛病是<strong>静不下来</strong>:
+      鼠标明明搁在桌上没人碰,光标却自己缓慢爬动。这个必须单独测,方法就是把鼠标放着不动。
+    </p>
+    <div class="controls">
+      <button type="button" id="drift-start">开始静止测试(5 秒)</button>
+      <span class="test-hint" id="drift-hint">点开始后先晃一下鼠标确认信号,然后停手</span>
+    </div>
+    <div class="stat-grid">
+      <StatPanel id="drift-samples" label="静止期间采样" hint="好鼠标应当是 0" />
+      <StatPanel id="drift-path" label="累计路程" unit="px" hint="来回抖动的总量" />
+      <StatPanel id="drift-span" label="抖动幅度" unit="px" hint="最远两点的距离" />
+      <StatPanel id="drift-verdict" label="判定" />
+    </div>
+    <p class="prose">
+      判据很干脆:<strong>鼠标不发报文,事件就不会派发</strong>,所以一只没有自激的鼠标在完全静止时,
+      采样数应当是 <strong>0</strong>。真收到了采样,说明传感器在动——可能是自激,
+      也可能是表面干扰(玻璃、反光、灰尘、桌面共振)。
+    </p>
+    <p class="prose">
+      但"0 个采样"本身是有歧义的:指针根本不在浏览器窗口里、或者鼠标没接上,
+      页面同样一个事件都收不到,和"鼠标很安静"在数据上完全一样,
+      而这两种情况的结论天差地别。所以流程多了一步——<strong>先让你把鼠标晃一下,
+      确认页面真的收得到信号</strong>(这一步的采样随后会全部丢掉,不计入结果),
+      再等你停手。走过这一步之后,"0"才真正等于静止。要是一直收不到信号,
+      页面会直接说"没收到信号",而不是替你判成静止。
+    </p>
+    <p class="prose">
+      需要说明的是:<strong>手放上去就不算数了</strong>。心跳、呼吸、甚至桌子被碰一下,
+      都会让手带着鼠标动,那测出来的是你的手,不是鼠标。所以要么把手完全拿开,
+      要么只用一根手指轻轻搭着不施力。
+    </p>
+  </section>
+
+  <section class="prose">
+    <h2>轨迹测试测不到什么</h2>
+    <p>
+      最重要的一条是前面反复说的:<strong>浏览器拿不到鼠标报文的序列号</strong>。
+      丢帧的本质是"本该有 8 个报文,只来了 7 个",而浏览器看到的只有它收到的那些,
+      它不知道应该有 8 个。所以"有没有丢帧"这个问题,网页在原理上就无法直接回答,
+      只能从轨迹的形状上找线索——而线索不是证据。
+    </p>
+    <p>
+      同理,<strong>这一页也测不出传感器的"加速度"和"平滑处理"</strong>。
+      有些鼠标会在固件里对原始数据做插值、去抖或加速,让画出来的线看着更顺滑,
+      代价是真实的微小移动被抹掉了。这两者网页都看不见,只有原始数据对比才能发现。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .trail-area {
+      height: 420px;
+      cursor: crosshair;
+    }
+
+    .trail-area[data-drawing='true'] {
+      border-color: var(--accent);
+    }
+
+    /* 画布铺满测试区。颜色由渲染层从 --trail-color 读取,不在 TS 里硬编码 */
+    .trail-area canvas {
+      position: absolute;
+      inset: 0;
+    }
+
+    /*
+     * 绘制期间抑制文字选中。指针在画布上拖动会顺带选中页面上的正文,
+     * 高亮一片蓝色,看起来像页面出了问题。
+     */
+    :global(html.is-testing) {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+  </style>
+
+  <script>
+    import { analyzeSegments, detectTrailJumps, measureDrift } from '../lib/analysis';
+    import { createTrailRenderer, observeResize } from '../lib/renderer';
+    import { createMoveSampler } from '../lib/sampler';
+    import {
+      createTicker,
+      el,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // 右键菜单 / 中键自动滚动会打断画圈和沿尺子推的手势。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    const DRIFT_MS = 5000;
+
+    const area = el('area');
+    const canvas = el('canvas') as HTMLCanvasElement | null;
+    const overlay = el('overlay');
+    const toggle = el('toggle') as HTMLButtonElement | null;
+    const driftStart = el('drift-start') as HTMLButtonElement | null;
+
+    if (!area || !canvas) throw new Error('测试区未就绪');
+
+    /**
+     * 画轨迹用的采样面是**测试区**,并且**关掉指针捕获**。
+     *
+     * 捕获会把指针事件全部重定向到画布上,画布的移动事件确实不会丢,
+     * 但捕获同时会把 `click` 一起重定向过去——页面上的按钮就再也点不动了。
+     * 画圈本来也不会甩出区域,这个代价不值得付。
+     *
+     * 采样面只取测试区,是因为轨迹也只该画在这个框里。
+     */
+    const sampler = createMoveSampler(area, { capture: false });
+    // 等用户点"开始绘制"再采。否则从页面加载起就一直在收事件,既浪费,
+    // 也会把用户移向按钮的路线混进轨迹里
+    sampler.stop();
+
+    /**
+     * 静止漂移用**另一个**采样器,面是**整个文档**。这一条不是随便选的。
+     *
+     * 漂移测试要求用户把手离开鼠标,而手离开之后指针就停在最后一次点击的位置
+     * ——也就是"开始静止测试"那个按钮上,而那个按钮在测试区**外面**。
+     * `pointermove` 只会派发到指针所在元素及其祖先,所以采样面如果只有测试区,
+     * 缓冲区永远是空的:不管鼠标是好是坏,都会报"完全静止"。
+     * 一个永远测不出故障的测试比没有测试更糟,所以这里必须铺到整个文档。
+     *
+     * 两者在时间上互斥,但面不同,没法共用一个实例。
+     */
+    const driftSampler = createMoveSampler(document.documentElement, {
+      capture: false,
+      capacity: 60_000,
+    });
+    driftSampler.stop();
+
+    const renderer = createTrailRenderer(canvas, sampler.buffer, { fade: 0.02 });
+
+    /**
+     * 漂移测试的阶段。
+     *
+     * - `arming`:等第一个采样到来,用来**证明页面收得到信号**
+     * - `settling`:确认已经停手(采样数不再增长)
+     * - `measuring`:真正的 5 秒窗口
+     *
+     * `arming` 这一步是必需的:没有它,"0 个采样"既可能是鼠标真的安静,
+     * 也可能是指针根本不在浏览器窗口里、页面压根没在听。两者在数据上完全一样,
+     * 而结论天差地别。用"先收到过信号"把后者排除掉,0 才真正等于静止。
+     */
+    type DriftPhase = 'idle' | 'arming' | 'settling' | 'measuring';
+    let driftPhase: DriftPhase = 'idle';
+    let driftStartedAt = 0;
+    let driftTimer = 0;
+    /** `settling` 期间用来判断"采样数已经不再增长" */
+    let driftLastN = 0;
+    let driftGrewAt = 0;
+    /** 等第一个采样的上限。超了就说明收不到信号,如实报告而不是判成"静止" */
+    const ARM_TIMEOUT_MS = 15_000;
+    /** 采样数不再增长多久,才认为用户已经停手 */
+    const SETTLE_MS = 600;
+
+    let drawing = false;
+
+    // ---- 轨迹绘制 ----
+
+    function startDrawing(): void {
+      if (driftPhase !== 'idle') return;
+      drawing = true;
+      sampler.reset();
+      renderer.clear();
+      sampler.start();
+      renderer.start();
+
+      area?.setAttribute('data-drawing', 'true');
+      overlay?.setAttribute('hidden', '');
+      document.documentElement.classList.add('is-testing');
+      setBadge(el('state-badge'), '绘制中', 'good');
+      setText(el('hint'), '匀速画十几圈,画完点“停止绘制”');
+      if (toggle) toggle.textContent = '停止绘制';
+    }
+
+    function stopDrawing(): void {
+      if (!drawing) return;
+      drawing = false;
+      sampler.stop();
+      renderer.stop();
+
+      area?.setAttribute('data-drawing', 'false');
+      document.documentElement.classList.remove('is-testing');
+      if (toggle) toggle.textContent = '重新开始';
+      analyze();
+    }
+
+    function analyze(): void {
+      const buffer = sampler.buffer;
+      // 只取最长的一段连续运动:中间停顿留下的空档会把中位步长拉低,
+      // 从而把判定门槛也一起拉低,凭空造出一堆"跳变"
+      const analysis = analyzeSegments(buffer.t, buffer.n);
+      if (!analysis) {
+        setText(el('jumps'), '—');
+        setBadge(el('state-badge'), '数据不足', 'idle');
+        setText(el('verdict-note'), '这一段太短或停顿太多,没能取到足够的连续运动,请多画几圈。');
+        for (const id of ['over-count', 'median-step', 'max-step']) setStat(id, '—');
+        return;
+      }
+
+      const jumps = detectTrailJumps(buffer.x, buffer.y, analysis.segment);
+      setStat('samples', String(buffer.n));
+      setStat('duration', analysis.durationMs.toFixed(0));
+
+      if (!jumps) {
+        setText(el('jumps'), '—');
+        setBadge(el('state-badge'), '数据不足', 'idle');
+        setText(el('verdict-note'), '采样点太少,不足以判断轨迹的平滑度。');
+        for (const id of ['over-count', 'median-step', 'max-step']) setStat(id, '—');
+        return;
+      }
+
+      setStat('over-count', String(jumps.jumps));
+      setStat('median-step', jumps.medianStep.toFixed(1));
+      setStat('max-step', jumps.maxStep.toFixed(1));
+
+      // 标题给的是**孤立尖峰**而不是超线间隔总数。
+      //
+      // 超线间隔里混着"手甩快了"造成的连续隆起,那个数只能当分母用;
+      // 而孤立尖峰——自己超线、左右两个邻居都没超——才是丢帧的形状。
+      // 页面反复讲"跳变不等于丢帧",标题就不能再端出一个两者混在一起的数。
+      setText(el('jumps'), String(jumps.isolated));
+
+      if (jumps.jumps === 0) {
+        setBadge(el('state-badge'), '未发现跳变', 'good');
+        setText(
+          el('verdict-note'),
+          `${jumps.steps} 个相邻间隔全部在门槛(${jumps.threshold.toFixed(1)} px)以内,` +
+            `最大的一次也只有 ${jumps.maxStep.toFixed(1)} px。这段轨迹是连续的。`,
+        );
+        return;
+      }
+
+      if (jumps.isolated === 0) {
+        // 超线的一个都不孤立 —— 全是连着出现的,也就是一整段隆起
+        setBadge(el('state-badge'), '未见孤立尖峰', 'good');
+        setText(
+          el('verdict-note'),
+          `有 ${jumps.jumps} 个间隔超过门槛(${jumps.threshold.toFixed(1)} px),` +
+            '但它们全是连着出现的,连成一个整体的隆起——这个形状对应的是"手甩快了",' +
+            '不是丢帧。想确认的话,下回把速度压匀再画一遍。',
+        );
+        return;
+      }
+
+      // 有孤立尖峰也不直接判故障 —— 手在某几下抖一下同样会是孤立尖峰,
+      // 所以照旧只把形态摊开,判读权留给用户
+      setBadge(el('state-badge'), '有孤立尖峰,需自行对照', 'fair');
+      setText(
+        el('verdict-note'),
+        `共 ${jumps.steps} 个相邻间隔,其中 ${jumps.jumps} 个超过门槛 ` +
+          `(${jumps.threshold.toFixed(1)} px),这里面有 ${jumps.isolated} 个是孤立的` +
+          `——左右两个邻居都没超线,最大的一次 ${jumps.maxStep.toFixed(1)} px。` +
+          '孤立尖峰是丢帧的形状;如果你当时确实是匀速画的,那这几处就是传感器漏了计数。',
+      );
+    }
+
+    toggle?.addEventListener('click', () => {
+      if (drawing) stopDrawing();
+      else startDrawing();
+    });
+
+    el('clear')?.addEventListener('click', () => {
+      if (drawing) return;
+      sampler.reset();
+      // 缓冲区清空后渲染层的游标还停在旧位置上,必须先对齐再重绘,
+      // 否则它会去读已经不存在的采样
+      renderer.clear();
+      setText(el('jumps'), '—');
+      setBadge(el('state-badge'), '等待绘制', 'idle');
+      setText(el('verdict-note'), '画完之后点“停止”或松开,这里会给出统计');
+      for (const id of ['samples', 'duration', 'over-count', 'median-step', 'max-step'])
+        setStat(id, '—');
+      overlay?.removeAttribute('hidden');
+      setText(el('hint'), '点开始之后,在这个区域里匀速画圈');
+      if (toggle) toggle.textContent = '开始绘制';
+    });
+
+    // ---- 静止漂移 ----
+
+    /**
+     * 开始静止漂移测试。
+     *
+     * 不直接开计时:先进入 `arming`,等页面真的收到一个采样,再让用户停手。
+     * 见 `DriftPhase` 的注释——这一步决定了"0 个采样"到底意味着什么。
+     */
+    function startDrift(): void {
+      if (drawing || driftPhase !== 'idle') return;
+
+      driftSampler.reset();
+      driftSampler.start();
+      driftPhase = 'arming';
+      driftGrewAt = performance.now();
+
+      if (driftStart) driftStart.disabled = true;
+      for (const id of ['drift-samples', 'drift-path', 'drift-span']) setStat(id, '—');
+      setStat('drift-verdict', '准备中');
+      setText(el('drift-hint'), '把鼠标在这个页面上轻轻晃一下,先确认页面收得到信号…');
+    }
+
+    /** 收到信号了,开始等用户停手。 */
+    function settleDrift(): void {
+      driftPhase = 'settling';
+      driftLastN = driftSampler.buffer.n;
+      driftGrewAt = performance.now();
+      setText(el('drift-hint'), '好,现在停手,把手离开鼠标…');
+    }
+
+    /** 真正开测。把"晃动确认"和"停手过程"留下的采样全部丢掉。 */
+    function beginDriftWindow(): void {
+      driftPhase = 'measuring';
+      driftSampler.reset();
+      driftStartedAt = performance.now();
+      driftTimer = window.setTimeout(finishDrift, DRIFT_MS);
+      setStat('drift-verdict', '测量中');
+    }
+
+    /** 收尾:停止采样,复位阶段和按钮。 */
+    function endDrift(): void {
+      driftPhase = 'idle';
+      driftSampler.stop();
+      window.clearTimeout(driftTimer);
+      driftTimer = 0;
+      if (driftStart) driftStart.disabled = false;
+    }
+
+    /**
+     * 一直等不到采样:如实说"收不到信号",**不能**判成"静止"。
+     *
+     * 指针在浏览器窗口外、或者鼠标根本没接上,都会走到这里。这与"鼠标很安静"
+     * 在数据上完全无法区分,所以只能把两种情况都摊开讲,让用户自己确认。
+     */
+    function abortDrift(): void {
+      endDrift();
+      for (const id of ['drift-samples', 'drift-path', 'drift-span']) setStat(id, '—');
+      setStat('drift-verdict', '没收到信号');
+      setText(
+        el('drift-hint'),
+        `这 ${ARM_TIMEOUT_MS / 1000} 秒里页面一个鼠标事件都没收到,` +
+          '所以这次测不出任何结果——注意这不是"鼠标很安静"。' +
+          '请确认指针在浏览器窗口内、鼠标确实接上了,再试一次。',
+      );
+    }
+
+    function finishDrift(): void {
+      endDrift();
+      setText(el('drift-hint'), '点开始后先晃一下鼠标确认信号,然后停手');
+
+      const buffer = driftSampler.buffer;
+      const n = buffer.n;
+
+      // 走到这里说明 arming 阶段确实收到过采样,装置是活的 —— 所以此刻的
+      // "0 个采样"是**真的静止**,不是"没在听"。这是整个 arming 流程换来的东西。
+      //
+      // 还必须单独处理,因为 `measureDrift` 对空区间返回 null(表示样本不足),
+      // 照搬会把"完全静止"显示成"测不出来",正好把结论说反。
+      if (n === 0) {
+        setStat('drift-samples', '0');
+        setStat('drift-path', '0');
+        setStat('drift-span', '0');
+        setStat('drift-verdict', '完全静止');
+        setText(
+          el('drift-hint'),
+          '这 5 秒里传感器一个计数都没产生,这是最好的结果。换几个不同的位置和方向再测两次更保险。',
+        );
+        return;
+      }
+
+      const drift = measureDrift(buffer.x, buffer.y, { start: 0, end: n });
+      if (!drift) {
+        setStat('drift-samples', String(n));
+        setStat('drift-verdict', '测不出来');
+        setText(el('drift-hint'), '数据异常,请重新测一次。');
+        return;
+      }
+
+      setStat('drift-samples', String(drift.samples));
+      setStat('drift-path', drift.pathPx.toFixed(1));
+      setStat('drift-span', drift.spanPx.toFixed(1));
+
+      if (drift.pathPx <= 2) {
+        setStat('drift-verdict', '基本静止');
+        setText(
+          el('drift-hint'),
+          '收到的采样很少,基本可以认为是静止的——剩余的一点点多半是桌面振动或手没完全离开。',
+        );
+      } else {
+        setStat('drift-verdict', '有漂移');
+        setText(
+          el('drift-hint'),
+          `这 5 秒里传感器产生了 ${drift.samples} 个计数,累计走了 ${drift.pathPx.toFixed(1)} px。` +
+            '如果手确实已经完全离开鼠标,那说明传感器在自激或受表面干扰——换一块鼠标垫再测一次。',
+        );
+      }
+    }
+
+    driftStart?.addEventListener('click', startDrift);
+
+    /**
+     * 漂移测试的推进器。
+     *
+     * 三个阶段都靠它走:`arming` 等第一个采样(超时则如实报"没收到信号"),
+     * `settling` 等采样数不再增长(说明用户停手了),`measuring` 推倒计时读数
+     * ——静止时没有任何事件可监听,剩余秒数只能靠刷新循环推上去。
+     */
+    const stopTicker = createTicker(100, (now) => {
+      if (driftPhase === 'idle') return;
+
+      const n = driftSampler.buffer.n;
+
+      if (driftPhase === 'arming') {
+        if (n > 0) settleDrift();
+        else if (now - driftGrewAt > ARM_TIMEOUT_MS) abortDrift();
+        return;
+      }
+
+      if (driftPhase === 'settling') {
+        // 采样数还在涨说明用户没停手,把计时往后推
+        if (n > driftLastN) {
+          driftLastN = n;
+          driftGrewAt = now;
+        } else if (now - driftGrewAt > SETTLE_MS) {
+          beginDriftWindow();
+        }
+        return;
+      }
+
+      const left = Math.max(0, DRIFT_MS - (now - driftStartedAt));
+      setText(el('drift-hint'), `正在测,别碰鼠标… 还剩 ${(left / 1000).toFixed(1)} 秒`);
+    });
+
+    // ---- 生命周期 ----
+
+    /**
+     * 测试区尺寸变了就得让渲染层重算 DPR 缩放和坐标原点,否则轨迹会错位。
+     *
+     * 重算会**清掉已经画出来的轨迹**——历史点存的是 client 坐标,而基准变了,
+     * 重绘旧轨迹只会画出一条错误的线。这是渲染层刻意的取舍,不是 bug。
+     * 分析用的数据在缓冲区里,不受影响。
+     */
+    const unobserve = observeResize(area, () => {
+      renderer.resize();
+    });
+
+    // 窗口失焦时用户已经不在看这个页面了,继续画没有意义,收尾出结果
+    window.addEventListener('blur', () => {
+      if (drawing) stopDrawing();
+    });
+
+    window.addEventListener('pagehide', () => {
+      stopTicker();
+      unobserve();
+      window.clearTimeout(driftTimer);
+      if (drawing) stopDrawing();
+      sampler.destroy();
+      driftSampler.destroy();
+      renderer.destroy();
+      document.documentElement.classList.remove('is-testing');
+    });
+  </script>
+</BaseLayout>

@@ -1,0 +1,815 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+
+const tool = findTool('polling-rate-test')!;
+
+/** 标称档位对照。间隔取 1000/hz,和测出来的周期是同一件事 */
+const REFERENCE = [
+  { hz: 125, interval: '8 ms', use: '办公 / 基础鼠标', note: '光标移动能看出台阶感' },
+  { hz: 250, interval: '4 ms', use: '入门游戏', note: '比 125Hz 明显跟手' },
+  { hz: 500, interval: '2 ms', use: '游戏', note: '大多数玩家的性价比档位' },
+  { hz: 1000, interval: '1 ms', use: '专业电竞', note: '目前最主流的高端档位' },
+  { hz: 2000, interval: '0.5 ms', use: '高端电竞', note: '需要 144Hz 以上屏幕才看得出差别' },
+  { hz: 4000, interval: '0.25 ms', use: '顶级电竞', note: 'CPU 占用开始变得可观' },
+  { hz: 8000, interval: '0.125 ms', use: '旗舰', note: '刷新率会先成为瓶颈' },
+];
+
+const FAQ = [
+  {
+    q: '为什么我测出来的数值比鼠标标称的低?',
+    a:
+      '最常见的原因是移动速度不够,而不是鼠标有问题。鼠标只在产生了新位移时才发报文,所以每秒报文数 ≈ 每秒移动的像素数。要打满 1000Hz,你需要每秒在屏幕上移动约 1000 像素;' +
+      '要打满 8000Hz 就是每秒 8000 像素,那已经相当快了。本页会实时显示你的移动速度,读数偏低时先看它。' +
+      '其次要确认驱动里确实开了高回报率模式——有些鼠标出厂默认是 125Hz,不装驱动改不了。无线鼠标的接收器插在 USB 3.0 口旁边也可能受干扰。',
+  },
+  {
+    q: '为什么高回报率鼠标测出来还是 1000Hz 左右?',
+    a:
+      '先看页面顶部的“计时精度”:如果显示未开启跨域隔离,时间戳精度只有 100µs,2000Hz 以上就分辨不出来了,' +
+      '此时读数只能当作下限。另外浏览器派发指针事件本身有开销,极端高的回报率在浏览器里本来就会被打折,' +
+      '想拿到硬件级的数字需要操作系统底层的接口(如 Windows Raw Input),那不是网页能做的。',
+  },
+  {
+    q: '峰值和当前回报率有什么区别?该看哪个?',
+    a:
+      '当前回报率是在最长的一段连续运动上,用样本总数除以总时长算出来的,最稳,适合判断鼠标实际工作在哪个档位。' +
+      '峰值是把这段运动切成 200ms 的小窗口,取其中最高的那个,反映“这只鼠标最多能跑到多少”。' +
+      '峰值天生会比真实值略高一点,因为它是许多个带噪声的窗口里取最大值;当作上界看,不要当作典型值。',
+  },
+  {
+    q: '回报率越高越好吗?',
+    a:
+      '收益是递减的。125Hz 到 500Hz 是质的差别,500Hz 到 1000Hz 明显,1000Hz 往上对绝大多数人已经难以分辨——' +
+      '屏幕刷新率通常先成为瓶颈。更高的回报率还会增加 CPU 占用,8000Hz 鼠标通常占 1–2%。',
+  },
+  {
+    q: '中途松开鼠标会影响结果吗?',
+    a:
+      '不会。松手和换方向的瞬间不产生任何指针事件,程序会在这些空档处把数据整段切开,' +
+      '只在最长的一段连续运动上做统计。这正是本页读数比同类工具稳定的原因——把空档算进去的算法,' +
+      '结果会取决于你什么时候松手,每次测出来都不一样。',
+  },
+  {
+    q: '为什么没有“抖动”“掉包率”这些指标?',
+    a:
+      '因为它们在浏览器里测不准,给出来只会误导人。这类指标都要靠相邻事件的间隔计算,' +
+      '而浏览器给事件打的时间戳是它自己处理到这条消息的时刻,实测有 0.3–0.6ms 的批处理延迟,' +
+      '而 1000Hz 的周期只有 1ms。一个完全正常的间隔光靠浏览器自身的延迟就能变成 1.6ms,' +
+      '于是任何“明显偏长就算掉包”的判据都会让一只好鼠标报出百分之几的掉包率。本页只给计数类的结论。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标回报率测试</h1>
+
+  <p class="prose">
+    回报率(轮询率)是鼠标每秒向电脑报告位置的次数,单位 Hz。1000Hz 意味着约 1ms 报告一次,
+    数值越高光标越跟手。点下面的按钮开始,然后<strong>在这个页面的任意位置按住并快速画圈</strong>——
+    画得越快,读数越接近真实值。
+  </p>
+
+  <div id="cap-notice"></div>
+  <div id="precision-notice"></div>
+
+  <div class="verdict">
+    <div>
+      <div class="verdict__label">当前回报率</div>
+      <div>
+        <span class="verdict__value" id="hz-main">—</span><span class="verdict__unit">Hz</span>
+      </div>
+      <div class="verdict__note" id="hz-note">点“开始测试”,然后按住鼠标快速画圈</div>
+    </div>
+    <div class="verdict__aside">
+      <div><span class="badge badge--idle" id="tier-badge">等待测试</span></div>
+      <div>
+        <span class="badge badge--idle" id="quality-badge">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="toggle">开始测试</button>
+    <button type="button" id="reset">重置</button>
+    <span class="test-hint" id="hint">
+      点“开始测试”,然后在页面<strong>任意位置</strong>按住鼠标快速画圈
+    </span>
+  </div>
+
+  <div class="frame" id="frame" data-running="false" aria-hidden="true"></div>
+  <canvas id="pad" aria-hidden="true"></canvas>
+
+  <div class="stat-grid">
+    <StatPanel id="peak" label="峰值" unit="Hz" hint="各 200ms 窗口的最高值" />
+    <StatPanel id="stability" label="窗口波动" unit="%" hint="各窗口速率的离散度" />
+    <StatPanel id="speed" label="移动速度" unit="px/s" hint="越快读数越准" />
+    <StatPanel id="samples" label="有效采样" hint="主段样本数" />
+  </div>
+
+  <div id="quality-note"></div>
+
+  <h2>实时回报率</h2>
+  <p class="prose tight">
+    每根柱子是一个 200ms 窗口的实测值,横轴是时间。稳定的鼠标应该是一排差不多高的柱子;
+    <span class="mark-warn">橙色柱子</span>表示这个窗口明显低于标称档位——
+    多半是那一瞬间画慢了,而不是鼠标出了问题。
+  </p>
+  <div class="rate-chart" id="chart"></div>
+  <div class="histogram-axis">
+    <span id="chart-left">—</span>
+    <span id="chart-right">—</span>
+  </div>
+
+  <section class="prose">
+    <h2>参考值</h2>
+    <p>
+      下面是常见档位。间隔就是 1000 ÷ Hz——鼠标每多少毫秒报告一次位置。
+    </p>
+    <table class="ref-table ref-table--kv">
+      <thead>
+        <tr>
+          <th>回报率</th>
+          <th>间隔</th>
+          <th>常见定位</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          REFERENCE.map((row) => (
+            <tr data-ref-hz={row.hz}>
+              <td>{row.hz} Hz</td>
+              <td>{row.interval}</td>
+              <td>{row.use}</td>
+              <td>{row.note}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </section>
+
+  <section class="prose">
+    <h2>怎么看结果</h2>
+    <ul>
+      <li>
+        <strong>当前回报率</strong>用的是计数法:在最长的一段连续运动里,拿样本数除以时长。
+        浏览器会拖延事件的派发,但<strong>不会丢报文</strong>,所以事件总数和总时长都是准的,
+        相除正好把派发的抖动平均掉。这是浏览器里唯一无偏的算法。
+      </li>
+      <li>
+        <strong>判定档位</strong>是把实测值归到最近的标称档位,容差 ±8%。超出容差就显示
+        “未识别”,不硬凑——880Hz 不会替你说成 1000Hz。
+      </li>
+      <li>
+        <strong>峰值</strong>是把这段运动切成 200ms 的窗口,取其中最高的一个,
+        反映这只鼠标最多能跑到多少。<strong>它天生会比真实值略高</strong>——
+        一组带噪声的数里取最大值,拿到的总是“真值 + 正向噪声”。好在每个窗口的噪声很小,
+        3 秒数据上通常只高出 1% 左右,当作上界看就好。
+      </li>
+      <li>
+        <strong>窗口波动</strong>是各窗口速率的离散程度,反映读数稳不稳。
+        它和峰值一样建立在<strong>计数</strong>上,不碰间隔,所以在浏览器里是可信的。
+        通常 5% 以内属于稳定。
+      </li>
+      <li>
+        <strong>移动速度</strong>——这是读数偏低时最该先看的数字。鼠标只在产生了新位移时
+        才发报文,所以每秒报文数 ≈ 每秒移动的像素数。<strong>这不是 bug</strong>,
+        但移动太慢时测出的数值没有意义。
+      </li>
+    </ul>
+
+    <h2>中途松开鼠标不影响结果</h2>
+    <p>
+      你松手、换方向的瞬间不会产生任何指针事件,缓冲区里会留下一个几百毫秒的空档。
+      本页的做法是<strong>在空档处把序列整段切开</strong>,只在最长的连续段上做统计。
+      这也是“每次测都不一样”的根源:如果直接把空档算进去,一个 500ms 的停顿混进
+      2000 个 1ms 的间隔里,平均值会从 1ms 变成 1.25ms,读数从 1000Hz 掉到 800Hz——
+      而它跌多少,完全取决于你什么时候松手。
+    </p>
+
+    <h2>本页不提供“抖动”“掉包率”</h2>
+    <p>
+      这是刻意的,而且是被实测逼出来的。这类指标都要靠<strong>相邻事件的间隔</strong>算,
+      而间隔恰恰是浏览器里最不可信的东西:时间戳是浏览器<strong>处理到这条消息的时刻</strong>,
+      不是硬件上报的时刻,实测有 <strong>0.3–0.6ms</strong> 的批处理延迟
+      (原生驱动接口只有 ±2µs)。1000Hz 的周期是 1ms,这点延迟足以让一个完全正常的间隔
+      越过任何“偏长”的门槛,于是好鼠标也会稳定报出百分之几的掉包率。
+      <strong>把门槛往上调只是把这个假象藏起来,治不了根</strong>,所以本页不给这类数字。
+      页面上保留的每一个指标——回报率、峰值、窗口波动——都只建立在<strong>计数</strong>上。
+    </p>
+
+    <h2>测不准的情况</h2>
+    <ul>
+      <li>
+        <strong>移动太慢。</strong>每秒报文数 ≈ 每秒移动的像素数。要打满 1000Hz,
+        你需要在屏幕上每秒移动约 1000 像素;要打满 8000Hz 就是每秒 8000 像素。
+        页面上的“移动速度”会实时告诉你够不够。<strong>画圈要甩开膀子画</strong>——
+        整个页面都是测试面,不必拘束在某一块区域里,幅度越小速度越上不去,
+        读数就越低。
+      </li>
+      <li>
+        <strong>计时精度分辨不出这只鼠标。</strong>
+        浏览器给事件的时间戳,精度在未开跨域隔离时只有 <strong>100µs</strong>(隔离后 5µs)。
+        8000Hz 鼠标的周期是 125µs,和量化台阶是同一个数量级——于是大批报文会
+        <strong>落进同一个时间戳</strong>。本页会实时统计这个比例,一旦偏高就把数据质量判为
+        “不可信”。此时<strong>回报率那个数仍然可信</strong>,但只能当作下限看。
+      </li>
+      <li>
+        <strong>页面未开启跨域隔离</strong>——计时精度被限制在 100µs。1000Hz 仍然可靠,
+        2000Hz 以上无法准确分辨,页面顶部会标明当前精度。
+      </li>
+      <li>
+        <strong>不是 HTTPS</strong>——Chrome 142 起,合并事件只在安全上下文中可用。
+        用 http 访问时本页会直接失效,顶部会有提示。
+      </li>
+      <li>
+        <strong>Firefox</strong>——部分版本把合并事件的时间戳设为 0,此时只能给出平均回报率,
+        <strong>无法给出峰值和窗口波动</strong>。这是浏览器实现差异,不是你的鼠标问题。
+      </li>
+      <li>
+        <strong>无线鼠标</strong>——接收器插在 USB 3.0 口旁边可能受干扰,读数会不稳。可以换个口再测。
+      </li>
+    </ul>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 整个页面都是测试面,不再是页面中间那个小方框。
+     *
+     * 这不只是"方便":回报率必须靠**速度**才测得准——鼠标只在产生了新位移时
+     * 才发报文,所以 1000Hz 需要每秒移动约 1000 像素。框子一小,用户就只能
+     * 在里面小幅度地蹭,速度上不去,读数一路偏低,而这看上去像是鼠标的问题。
+     * 画布铺满视口,用户能甩多大就甩多大。
+     *
+     * 轨迹走 z-index: -1,压在正文下面:文字保持清晰,轨迹从字缝和页边
+     * 空白里透出来。**这里依赖 body 的底色是被传播到根元素去画的**
+     * (html 自己没有 background,所以浏览器把 body 的背景提升到画布层),
+     * 于是负 z-index 画在底色之上、所有正文之下。哪天给 html 加了背景,
+     * 轨迹就会被盖住——那时改成把画布提到正文之上,并给它加透明度。
+     */
+    #pad {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+      pointer-events: none;
+      /*
+       * 这一页没有仪器窗(整个视口就是采样面,铺不了深底),所以轨迹颜色走
+       * `--trail-overlay`:一道低透明度的**灰线**,像铅笔线。浅色下是深灰、
+       * 深色下是浅灰,两端都不带色相——纸面已经无彩色,轨迹再带一个色相
+       * 就会变成全页唯一的颜色。值都定义在 global.css 的令牌块里。
+       *
+       * **刻意不留 var(--accent)**:留着的话它会因为别处的改动"碰巧"变对,
+       * 回头分不清这是设计还是事故。`--trail-overlay` 是一个有名字、有解释的
+       * 令牌,而不是 accent 的副产品。渲染层读的是 canvas 计算后的样式,
+       * 接受任意合法 CSS 颜色,含 rgba()。
+       */
+      --trail-color: var(--trail-overlay);
+    }
+
+    /* 测试面的边界提示。空闲时是浅虚线,运行中转成实线,表示"整块都是活的"。 */
+    .frame {
+      position: fixed;
+      inset: 6px;
+      z-index: 2;
+      pointer-events: none;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s;
+    }
+
+    .frame[data-running='true'] {
+      border-style: solid;
+      /* 用 accent 而不是 accent-dim:后者是浅色 tint,压在浅灰纸面上几乎看不见,
+         "正在运行"这个提示就白给了 */
+      border-color: var(--accent);
+    }
+
+    /* 画圈时按住的是左键,很容易顺带选中文字、把链接拖起来。
+       两件事都会打断画圈的连贯性,视觉上也很吵,测试期间一律抑制。
+       用 :global 是因为 <html> 不在本组件里,拿不到 Astro 的作用域属性。 */
+    :global(html.is-testing) {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+  </style>
+
+  <script>
+    import {
+      analyzeSegments,
+      assessQuality,
+      classifyPollingRate,
+      computePeakRate,
+      computeRateWindows,
+      countAnomalies,
+      pathLength,
+      percentile,
+      type DataQuality,
+      type RateWindow,
+    } from '../lib/analysis';
+    import { detectCapabilities } from '../lib/capabilities';
+    import { createTrailRenderer, observeResize } from '../lib/renderer';
+    import { createMoveSampler } from '../lib/sampler';
+    import {
+      el,
+      setBadge,
+      setHint,
+      setStat,
+      setText,
+      showNotice,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    /**
+     * 分析窗口。只取缓冲区**末尾**这么多条,而不是整个会话。
+     *
+     * 一次拖动轻易几万条,每轮全量重算会造成可观的排序开销和 GC 压力——
+     * 而这份卡顿本身会被如实测成丢帧,等于自己污染自己的数据。
+     * 16384 条在 1000Hz 下是 16 秒,在 8000Hz 下是 2 秒,都远超判断档位所需。
+     */
+    const WINDOW = 16_384;
+
+    /** 界面刷新频率,与采样频率解耦。人眼不需要每秒看 1000 次数字跳动。 */
+    const UI_INTERVAL_MS = 400;
+
+    /** 分窗口的窗口时长 */
+    const RATE_WINDOW_MS = 200;
+
+    /** 至少要有这么多个窗口才谈得上“波动” */
+    const MIN_WINDOWS_FOR_STABILITY = 4;
+
+    /**
+     * 曲线图最多画这么多根柱子,超了就只显示最近的一段。
+     *
+     * 上限来自两件事的乘积:125Hz 下 16384 个采样能撑 131 秒,那是 655 个窗口;
+     * 而每 400ms 重建 655 个 DOM 节点本身就是可见的开销——**这份开销会被
+     * 如实测成掉帧,等于自己污染自己的数据**。另外横轴挤到 1 像素一根时
+     * 也读不出任何信息。所以取最近的一段,横轴起点相应标注出来。
+     */
+    const CHART_MAX_BARS = 120;
+
+    /** 速度低于实测回报率的这个倍数时,提示可能被移动速度限制 */
+    const SPEED_MARGIN = 1.2;
+
+    const canvas = document.getElementById('pad') as HTMLCanvasElement | null;
+    const hint = document.getElementById('hint');
+    const frame = document.getElementById('frame');
+    const noticeHost = document.getElementById('cap-notice');
+    const precisionHost = document.getElementById('precision-notice');
+    const qualityHost = document.getElementById('quality-note');
+    const chartHost = document.getElementById('chart');
+    const toggleButton = document.getElementById('toggle');
+    const resetButton = document.getElementById('reset');
+
+    // ---- 能力探测 ----
+
+    const caps = detectCapabilities();
+    showNotice(noticeHost, caps.warnings);
+
+    const precisionBox = document.createElement('div');
+    precisionBox.className = 'notice notice--info';
+    precisionHost?.appendChild(precisionBox);
+
+    // ---- 采样与渲染 ----
+
+    if (!canvas) {
+      throw new Error('轨迹画布缺失');
+    }
+
+    // 采样面是**整个页面**(documentElement),不是某个方框。
+    //
+    // capture 必须关掉:指针捕获会把 click 也重定向到捕获元素上,而这里的
+    // 捕获元素是整个文档——"停止测试""重置"两个按钮会当场失效。整页监听
+    // 本来就不需要捕获:指针不可能"移出"文档,除非移出浏览器窗口,那种
+    // 情况捕获也救不回来。
+    const sampler = createMoveSampler(document.documentElement, {
+      capacity: 200_000,
+      capture: false,
+    });
+    // 等用户点“开始测试”再采。否则从页面加载起就一直在收事件,
+    // 既浪费,也会把用户移向按钮的路线混进数据里。
+    sampler.stop();
+
+    const renderer = createTrailRenderer(canvas, sampler.buffer);
+    renderer.start();
+    // 画布是 inset:0 的固定定位,它的盒子就是视口盒子,所以观察画布本身
+    // 就能收到视口尺寸变化——比观察 documentElement 可靠(documentElement
+    // 的高度是内容高度,内容比视口高时,改窗口大小它根本不变)。
+    const stopObserving = observeResize(canvas, () => renderer.resize());
+
+    let running = false;
+    let lastUiUpdate = 0;
+    let rafId = 0;
+
+    function renderPrecision(): void {
+      const channel =
+        sampler.channel === 'pointerrawupdate'
+          ? 'pointerrawupdate(不等帧)'
+          : sampler.channel === 'pointermove'
+            ? 'pointermove(对齐刷新率)'
+            : '探测中';
+      setText(
+        precisionBox,
+        `${caps.crossOriginIsolated ? '已开启' : '未开启'}跨域隔离 · ` +
+          `计时精度 ${caps.timerResolution} · 采样通道 ${channel}`,
+      );
+    }
+
+    // ---- 汇总 ----
+
+    interface Snapshot {
+      hz: number | null;
+      tier: number | null;
+      quality: DataQuality | null;
+      peakHz: number | null;
+      peakHint: string;
+      stabilityPercent: number | null;
+      stabilityHint: string;
+      speed: number | null;
+      speedHint: string;
+      samples: number;
+      samplesHint: string;
+      note: string;
+    }
+
+    interface Frame {
+      snapshot: Snapshot;
+      windows: RateWindow[];
+    }
+
+    const EMPTY: Snapshot = {
+      hz: null,
+      tier: null,
+      quality: null,
+      peakHz: null,
+      peakHint: '各 200ms 窗口的最高值',
+      stabilityPercent: null,
+      stabilityHint: '各窗口速率的离散度',
+      speed: null,
+      speedHint: '越快读数越准',
+      samples: 0,
+      samplesHint: '主段样本数',
+      note: '点“开始测试”,然后按住鼠标快速画圈',
+    };
+
+    const EMPTY_FRAME: Frame = { snapshot: EMPTY, windows: [] };
+
+    /**
+     * 每轮刷新的全部计算都在这里。切段、计数法、分窗口速率都只跑一次,
+     * 结果在统计面板和曲线图之间共用。
+     */
+    function analyzeFrame(): Frame {
+      const buffer = sampler.buffer;
+      const n = buffer.n;
+      if (n < 2) return EMPTY_FRAME;
+
+      // 聚合模式(部分 Firefox):合并事件的时间戳为 0,分窗口分析做了也是白做。
+      // 好在派发事件的首尾跨度仍然覆盖整段运动,配上原始上报总数就能算出平均回报率。
+      if (sampler.timestampMode === 'aggregate') {
+        const durationMs = buffer.t[n - 1] - buffer.t[0];
+        const reported = sampler.reportedSamples;
+        if (!(durationMs > 0) || reported < 2) return EMPTY_FRAME;
+        const hz = ((reported - 1) / durationMs) * 1000;
+        return {
+          snapshot: {
+            ...EMPTY,
+            hz,
+            tier: classifyPollingRate(hz),
+            peakHint: '本浏览器不支持',
+            stabilityHint: '本浏览器不支持',
+            speedHint: '本浏览器不支持',
+            samples: reported,
+            samplesHint: '含被合并的采样',
+            note: '本浏览器只能给出平均回报率',
+          },
+          windows: [],
+        };
+      }
+
+      const start = Math.max(0, n - WINDOW);
+      const view = buffer.t.subarray(start, n);
+      const analysis = analyzeSegments(view, view.length);
+      if (!analysis) return EMPTY_FRAME;
+
+      const { segment } = analysis;
+      const anomalies = countAnomalies(sampler.buffer.flags, start, n);
+      const quality = assessQuality({
+        durationMs: analysis.durationMs,
+        // 缓冲区里只有被接受的采样,所以窗口长度就是接受数
+        acceptedSamples: view.length,
+        anomalies,
+      });
+
+      const windows = computeRateWindows(
+        view,
+        { start: segment.start, end: segment.end },
+        { windowMs: RATE_WINDOW_MS },
+      );
+
+      // 峰值和波动只在**完整**窗口上取。末尾那个窗口是段被切剩下的零头,
+      // 样本更少、噪声更大,而峰值是对一组观测取最大值——把噪声更大的
+      // 观测混进去,等于系统性地把峰值抬得更高。
+      const fullWindows = windows.filter((w) => w.full);
+      const solid = fullWindows.length > 0 ? fullWindows : windows;
+      const peak = computePeakRate(solid);
+
+      // 各窗口速率的离散度,拿半极差比中位数。用中位数而不是平均值当基准,
+      // 免得被个别长窗口带偏。
+      let stabilityPercent: number | null = null;
+      if (solid.length >= MIN_WINDOWS_FOR_STABILITY) {
+        const rates = Float64Array.from(solid, (w) => w.hz).sort();
+        const median = percentile(rates, 0.5);
+        if (median > 0) {
+          stabilityPercent = ((rates[rates.length - 1] - rates[0]) / (2 * median)) * 100;
+        }
+      }
+
+      const seconds = analysis.durationMs / 1000;
+      // 段的下标是相对 view 的,而 x/y 传的是整个缓冲区,所以要加上窗口偏移。
+      const speed =
+        seconds > 0
+          ? pathLength(buffer.x, buffer.y, {
+              start: segment.start + start,
+              end: segment.end + start,
+            }) / seconds
+          : null;
+      const extraSegments = Math.max(0, analysis.segmentCount - 1);
+
+      // 速度是不是成了瓶颈?鼠标只在产生新位移时才发报文,所以每秒报文数
+      // 不可能超过每秒的像素位移。留一点余量,避免边界上来回跳。
+      let speedHint = '越快读数越准';
+      if (speed !== null) {
+        speedHint =
+          speed < analysis.hz * SPEED_MARGIN
+            ? '偏慢,读数可能被速度限制'
+            : '速度充足';
+      }
+
+      return {
+        snapshot: {
+          hz: analysis.hz,
+          tier: classifyPollingRate(analysis.hz),
+          quality,
+          peakHz: peak ? peak.hz : null,
+          peakHint: peak ? `${peak.windows} 个窗口中最高` : '各 200ms 窗口的最高值',
+          stabilityPercent,
+          stabilityHint:
+            stabilityPercent === null
+              ? `窗口不足 ${MIN_WINDOWS_FOR_STABILITY} 个`
+              : '各窗口速率的离散度',
+          speed,
+          speedHint,
+          samples: analysis.samples,
+          samplesHint:
+            `${seconds.toFixed(1)} 秒` +
+            (extraSegments > 0 ? ` · 另有 ${extraSegments} 段` : ' · 单段'),
+          note:
+            `${seconds.toFixed(1)} 秒 · ${analysis.samples} 个采样` +
+            (extraSegments > 0 ? ` · 中途停顿 ${extraSegments} 次(已切段)` : ''),
+        },
+        windows,
+      };
+    }
+
+    const QUALITY_TEXT: Record<string, string> = {
+      good: '数据可信',
+      fair: '数据一般',
+      poor: '数据不可信',
+    };
+
+    function renderStats(snapshot: Snapshot): void {
+      setText(el('hz-main'), snapshot.hz === null ? '—' : snapshot.hz.toFixed(0));
+      setText(el('hz-note'), snapshot.note);
+
+      setBadge(
+        el('tier-badge'),
+        snapshot.tier === null ? (snapshot.hz === null ? '等待测试' : '未识别档位') : `${snapshot.tier} Hz`,
+        snapshot.tier === null ? 'idle' : 'good',
+      );
+      setBadge(
+        el('quality-badge'),
+        snapshot.quality ? QUALITY_TEXT[snapshot.quality.level] : '—',
+        snapshot.quality ? snapshot.quality.level : 'idle',
+      );
+
+      // 对照表里高亮当前档位
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-hz]')) {
+        const current = snapshot.tier !== null && Number(row.dataset.refHz) === snapshot.tier;
+        const value = current ? 'true' : 'false';
+        if (row.dataset.current !== value) row.dataset.current = value;
+      }
+
+      setStat('peak', snapshot.peakHz === null ? '—' : snapshot.peakHz.toFixed(0));
+      setHint('peak', snapshot.peakHint);
+
+      setStat(
+        'stability',
+        snapshot.stabilityPercent === null ? '—' : snapshot.stabilityPercent.toFixed(1),
+      );
+      setHint('stability', snapshot.stabilityHint);
+
+      setStat('speed', snapshot.speed === null ? '—' : snapshot.speed.toFixed(0));
+      setHint('speed', snapshot.speedHint);
+
+      setStat('samples', String(snapshot.samples));
+      setHint('samples', snapshot.samplesHint);
+
+      renderQuality(snapshot.quality);
+    }
+
+    let lastQualityKey = '';
+    function renderQuality(quality: DataQuality | null): void {
+      if (!qualityHost) return;
+      const key = quality ? `${quality.level}|${quality.issues.map((i) => i.message).join('¶')}` : '';
+      if (key === lastQualityKey) return;
+      lastQualityKey = key;
+
+      qualityHost.replaceChildren();
+      if (!quality || quality.issues.length === 0) return;
+      showNotice(
+        qualityHost,
+        quality.issues.map((i) => i.message),
+        quality.level === 'poor' ? 'warn' : 'info',
+      );
+    }
+
+    /** 曲线图:横轴是时间,纵轴是速率。以当前档位为满格,柱子在半格左右说明跑在标称值上。 */
+    function renderChart(windows: RateWindow[], tier: number | null): void {
+      if (!chartHost) return;
+
+      if (windows.length === 0) {
+        chartHost.replaceChildren();
+        setText(el('chart-left'), '—');
+        setText(el('chart-right'), '—');
+        return;
+      }
+
+      // 只画最近的一段,见 CHART_MAX_BARS
+      const shown =
+        windows.length > CHART_MAX_BARS ? windows.slice(windows.length - CHART_MAX_BARS) : windows;
+
+      let max = 0;
+      for (const w of shown) if (w.hz > max) max = w.hz;
+
+      // 满格取"标称档位"和"实测最高"里较大的那个:档位认出来了就按档位画,
+      // 这样柱子高低直接就是"有没有跑满";认不出来才退回按实测最高归一化。
+      const full = Math.max(tier ?? 0, max);
+      if (!(full > 0)) return;
+
+      // 认出了档位才有"偏低"可言。低于档位 80% 的窗口标成警示色,
+      // 让人一眼看到卡顿发生在哪一段——注意这只是**现象**,不是掉包率:
+      // 浏览器里没有能支撑"掉包"这个说法的量。
+      const lowFloor = tier === null ? 0 : tier * 0.8;
+
+      const fragment = document.createDocumentFragment();
+      for (const w of shown) {
+        const bar = document.createElement('div');
+        bar.className = w.hz < lowFloor ? 'rate-chart__bar rate-chart__bar--low' : 'rate-chart__bar';
+        // 最低留 2% 高度,否则极短的柱子会和 0 在视觉上没有区别
+        bar.style.height = `${Math.max(2, Math.min(100, (w.hz / full) * 100))}%`;
+        bar.title = `${w.hz.toFixed(0)} Hz · ${w.samples} 个采样`;
+        fragment.appendChild(bar);
+      }
+      chartHost.replaceChildren(fragment);
+
+      const from = (shown[0].offsetMs / 1000).toFixed(1);
+      const to = ((shown[shown.length - 1].offsetMs + RATE_WINDOW_MS) / 1000).toFixed(1);
+      setText(el('chart-left'), `${from}s`);
+      setText(el('chart-right'), `${to}s · 满格 ${full.toFixed(0)} Hz`);
+    }
+
+    // ---- 刷新循环 ----
+
+    function tick(now: number): void {
+      rafId = requestAnimationFrame(tick);
+
+      if (now - lastUiUpdate < UI_INTERVAL_MS) return;
+      lastUiUpdate = now;
+
+      renderPrecision();
+
+      const result = analyzeFrame();
+      renderStats(result.snapshot);
+      renderChart(result.windows, result.snapshot.tier);
+    }
+
+    rafId = requestAnimationFrame(tick);
+
+    // ---- 开始 / 停止 ----
+
+    function setRunning(next: boolean): void {
+      if (next === running) return;
+      running = next;
+      if (running) {
+        sampler.start();
+        if (hint) hint.hidden = true;
+      } else {
+        sampler.stop();
+      }
+      // 整页都是测试面,得让用户看得出"现在是活的":边框由虚转实。
+      if (frame) frame.dataset.running = running ? 'true' : 'false';
+      // 抑制画圈时的文字选中与链接拖拽
+      document.documentElement.classList.toggle('is-testing', running);
+      setText(toggleButton, running ? '停止测试' : '开始测试');
+    }
+
+    toggleButton?.addEventListener('click', () => setRunning(!running));
+
+    // 画圈时按住的是左键,划过链接或图片会触发原生拖拽,把画圈打断。
+    window.addEventListener('dragstart', (event) => {
+      if (running) event.preventDefault();
+    });
+
+    // 这一页**整个视口都是采样面**,随便一次右键拖动都会弹出菜单盖住画面,
+    // 中键更糟:自动滚动一开,采样面直接从指针底下溜走。
+    // 判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    // ---- 重置 ----
+
+    resetButton?.addEventListener('click', () => {
+      setRunning(false);
+      sampler.reset();
+      renderer.clear();
+      if (hint) hint.hidden = false;
+
+      setText(el('hz-main'), '—');
+      setText(el('hz-note'), EMPTY.note);
+      setBadge(el('tier-badge'), '等待测试', 'idle');
+      setBadge(el('quality-badge'), '—', 'idle');
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-hz]')) {
+        row.dataset.current = 'false';
+      }
+
+      for (const id of ['peak', 'stability', 'speed']) {
+        setStat(id, '—');
+      }
+      setStat('samples', '0');
+      setHint('peak', EMPTY.peakHint);
+      setHint('stability', EMPTY.stabilityHint);
+      setHint('speed', EMPTY.speedHint);
+      setHint('samples', EMPTY.samplesHint);
+
+      // 强制下一轮重建原因列表,否则 key 没变会被跳过、旧提示留在页面上
+      lastQualityKey = '';
+      qualityHost?.replaceChildren();
+
+      if (chartHost) chartHost.replaceChildren();
+      setText(el('chart-left'), '—');
+      setText(el('chart-right'), '—');
+    });
+
+    // ---- 清理 ----
+
+    window.addEventListener('pagehide', () => {
+      cancelAnimationFrame(rafId);
+      sampler.destroy();
+      renderer.destroy();
+      stopObserving();
+    });
+  </script>
+</BaseLayout>

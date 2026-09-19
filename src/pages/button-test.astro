@@ -1,0 +1,329 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+
+const tool = findTool('button-test')!;
+
+const BUTTONS = [
+  { code: 0, name: '左键', note: '主键' },
+  { code: 1, name: '中键', note: '滚轮按下' },
+  { code: 2, name: '右键', note: '副键' },
+  { code: 3, name: '侧键 4', note: '后退' },
+  { code: 4, name: '侧键 5', note: '前进' },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebApplication',
+  name: tool.name,
+  description: tool.description,
+  applicationCategory: 'UtilitiesApplication',
+  operatingSystem: 'Web',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标按键测试</h1>
+
+  <p class="prose">
+    在按键卡片上或下方的测试区域内按下鼠标的任意按键,对应的卡片会实时高亮。用来检查左键、右键、
+    中键和两个侧键是否都能正常响应,以及微动开关有没有出现需要按很重才有反应的迹象。
+    <strong>同时按多个键也可以</strong>——按住左键再按右键,两张卡片各自点亮、各自计时。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="mouse-diagram well" id="diagram">
+    {
+      BUTTONS.map((button) => (
+        <div class="mouse-button" data-button={button.code} data-active="false">
+          <div class="mouse-button__name">{button.name}</div>
+          <div class="mouse-button__code">{button.note}</div>
+          <div class="mouse-button__count" data-count={button.code}>
+            0
+          </div>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="total" label="累计点击次数" primary />
+    <StatPanel id="holding" label="当前按住" unit="ms" hint="松开后归零" />
+    <StatPanel id="last-hold" label="上次按住时长" unit="ms" />
+    <StatPanel id="unique" label="已触发的按键" hint="共 5 个" />
+  </div>
+
+  <div class="test-area well" id="area">
+    <div class="test-area__hint" id="hint">
+      在这个区域内按下鼠标的任意按键
+    </div>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="reset">重置计数</button>
+  </div>
+
+  <section class="prose">
+    <h2>怎么看结果</h2>
+    <ul>
+      <li>
+        <strong>某个键按下去不亮</strong>——微动开关或排线可能已经损坏。可以多按几次确认不是偶发。
+      </li>
+      <li>
+        <strong>需要很用力才有反应</strong>——微动弹片疲劳的典型表现,通常是失灵的前兆。
+      </li>
+      <li>
+        <strong>侧键触发的是浏览器后退/前进</strong>——侧键在浏览器里被硬绑定成「后退 / 前进」,
+        本页已拦截这个默认行为,整页生效而不是只在测试区内。如果按下去仍然跳转,
+        说明你的浏览器不允许网页拦截侧键:属于浏览器层面的限制,网页改不了,
+        只能靠鼠标厂商的驱动软件把侧键改成别的功能。
+      </li>
+      <li>
+        <strong>只按一个键却亮了多个卡片</strong>——信号串扰或微动粘连。注意要和你自己按的
+        组合键区分开:同时按下左右键、两个键都会亮,那是正常的。判断方法是<strong>抬起手指
+        逐个松开</strong>,看每张卡片是不是跟着自己的那根手指熄灭。
+      </li>
+    </ul>
+
+    <h2>组合按键</h2>
+    <p>
+      同时按下多个键是支持的:按住左键不放再按右键,两张卡片会<strong>各自独立</strong>点亮,
+      松开哪一个哪一个熄灭,按住时长也分别计算。这对判断微动是否粘连很有用——
+      真正的粘连是"你没按它,它自己亮着"。
+    </p>
+    <p>
+      实现上这里有个坑值得说明:指针事件规范规定,只有<strong>第一个</strong>按下的键会触发
+      <code>pointerdown</code>,第二个键按下时并不再派发该事件,而是通过 <code>pointermove</code>
+      更新一个按键位掩码;同理,<code>pointerup</code> 只在<strong>最后一个</strong>键松开时派发一次。
+      也就是说按键状态只能用位掩码逐个对比得出,不能靠 <code>pointerdown</code> / <code>pointerup</code>
+      里的按键编号——那样写的话,组合键基本是测不到的。
+    </p>
+
+    <h2>注意事项</h2>
+    <p>
+      中键按下时浏览器默认会启动自动滚动,右键会弹出菜单,侧键会触发前进后退——本页都已拦截
+      (页面上的链接和按钮除外,那里右键「在新标签页中打开」是正常操作),所以可以放心逐个按过去。
+      触屏设备没有这些物理按键,请在电脑上使用。
+    </p>
+  </section>
+
+  <script>
+    import { el, mountCapabilityNotices, setStat, suppressWorkbenchDefaults } from '../lib/ui';
+    import { suppressSideButtonNavigation } from '../lib/side-buttons';
+
+    const BUTTON_COUNT = 5;
+
+    const area = el('area');
+    const diagram = el('diagram');
+    const hint = el('hint');
+    const noticeHost = el('cap-notice');
+    const resetButton = el('reset');
+
+    // ---- 能力探测与提示 ----
+
+    mountCapabilityNotices(noticeHost);
+
+    // ---- 计数状态 ----
+
+    const counts = new Array<number>(BUTTON_COUNT).fill(0);
+    const activeSince = new Array<number | null>(BUTTON_COUNT).fill(null);
+    let total = 0;
+    let lastHoldMs: number | null = null;
+
+    function renderCount(code: number): void {
+      const node = document.querySelector(`[data-count="${code}"]`);
+      if (node) node.textContent = String(counts[code]);
+    }
+
+    function renderActive(code: number, active: boolean): void {
+      const node = document.querySelector(`[data-button="${code}"]`);
+      if (node) node.setAttribute('data-active', active ? 'true' : 'false');
+    }
+
+    function renderSummary(): void {
+      setStat('total', String(total));
+      const triggered = counts.filter((c) => c > 0).length;
+      setStat('unique', `${triggered} / ${BUTTON_COUNT}`);
+      setStat('last-hold', lastHoldMs === null ? '—' : lastHoldMs.toFixed(0));
+    }
+
+    // ---- 交互 ----
+
+    /**
+     * 按键状态**只能**从 `buttons` 位掩码推,不能用 `event.button`。
+     *
+     * 指针事件规范里的"组合按键"(chorded button)模型规定:`pointerdown` 只在指针
+     * **从"没有任何键按下"进入"有键按下"**时派发一次,`pointerup` 只在**最后一个键**
+     * 松开时派发一次。中间的每一次按下和松开都走 `pointermove`。
+     *
+     * 也就是说"按住左键再按右键"这条最常见的操作,在事件流里长这样:
+     *
+     *     pointerdown  (左键, buttons=1)
+     *     pointermove  (右键按下, buttons=3)   ← 没有第二个 pointerdown
+     *     pointermove  (左键松开, buttons=2)   ← 没有对应的 pointerup
+     *     pointerup    (右键松开, buttons=0)
+     *
+     * 早先的实现读 `event.button`,于是组合键的第二次按下和第一次松开全是隐形的——
+     * 左右键一起按,一个都点不亮。`mousedown` / `mouseup` 倒是每个键都派发,
+     * 但它们捕捉不到"在窗口外按下"这类情况,位掩码才是权威来源。
+     */
+    const BIT_FOR_CODE = [0, 2, 1, 3, 4];
+
+    /** 当前认为按下的键(本站的 0–4 编号,不是 DOM 的位序)。 */
+    let downMask = 0;
+
+    /** 正在跟踪的指针。只有从工作台上按下的那一次才开始记账。 */
+    let armedPointerId: number | null = null;
+
+    /** 把 `MouseEvent.buttons` 位掩码翻译成本站的按键编号掩码。 */
+    function maskFromButtons(buttons: number): number {
+      let mask = 0;
+      for (let code = 0; code < BUTTON_COUNT; code++) {
+        if (buttons & (1 << BIT_FOR_CODE[code])) mask |= 1 << code;
+      }
+      return mask;
+    }
+
+    /**
+     * 对齐一次真实状态,把中间发生的按下/松开都补记上。
+     *
+     * 时刻统一取 `performance.now()` 而不是 `event.timeStamp`:下面按住时长的
+     * 实时刷新走的是 rAF,那边只有 `performance.now()`。两者虽然同源,但混用
+     * 一旦遇上时间原点不同源的实现,时长会算成天文数字——这里不值得为亚毫秒的
+     * 精度差去冒这个险。
+     */
+    function syncButtons(buttons: number): void {
+      const next = maskFromButtons(buttons);
+      if (next === downMask) return;
+      const now = performance.now();
+
+      for (let code = 0; code < BUTTON_COUNT; code++) {
+        const bit = 1 << code;
+        const wasDown = (downMask & bit) !== 0;
+        const isDown = (next & bit) !== 0;
+        if (wasDown === isDown) continue;
+
+        if (isDown) {
+          counts[code]++;
+          total++;
+          activeSince[code] = now;
+          renderCount(code);
+          renderActive(code, true);
+        } else {
+          const startedAt = activeSince[code];
+          if (startedAt !== null) {
+            lastHoldMs = now - startedAt;
+            activeSince[code] = null;
+          }
+          renderActive(code, false);
+        }
+      }
+
+      downMask = next;
+      renderSummary();
+    }
+
+    /** 窗口失焦:按键状态已不可信,清空但不记时长。 */
+    function clearButtons(): void {
+      if (downMask === 0) return;
+      downMask = 0;
+      armedPointerId = null;
+      activeSince.fill(null);
+      for (let code = 0; code < BUTTON_COUNT; code++) renderActive(code, false);
+      renderSummary();
+    }
+
+    // 按下必须发生在工作台(卡片或测试区)上才开始记账,否则在页面上随便点一下
+    // 也会计数。松开则要在窗口上收——指针很可能已经拖出去了。
+    function onWorkbenchPointerDown(event: PointerEvent): void {
+      if (hint) hint.hidden = true;
+      armedPointerId = event.pointerId;
+      syncButtons(event.buttons);
+    }
+
+    function onWindowPointerMove(event: PointerEvent): void {
+      if (event.pointerId !== armedPointerId) return;
+      // 组合键的按下和松开都藏在这里,见上面 syncButtons 的注释
+      syncButtons(event.buttons);
+    }
+
+    function onWindowPointerUp(event: PointerEvent): void {
+      if (event.pointerId !== armedPointerId) return;
+      syncButtons(event.buttons);
+      // 最后一个键也松开了,这一轮结束
+      if (event.buttons === 0) armedPointerId = null;
+    }
+
+    // 侧键的后退/前进是浏览器级的默认行为,拦不住就会把用户弹回上一页,
+    // 计数全部清零。必须整页拦,和指针停在哪个元素上无关。
+    const restoreSideButtons = suppressSideButtonNavigation();
+
+    // 右键菜单、中键自动滚动、中键 auxclick。判据是"落点是不是控件",
+    // 实现和理由都在 ui.ts —— 和其余几个有手势的页面共用同一份。
+    suppressWorkbenchDefaults();
+
+    // 按键卡片本身也要能按。用户盯着卡片看的时候,指针就停在卡片上——
+    // 只有测试区响应的话,按下去什么反应都没有,而那正是这个页面要测的东西。
+    if (area) area.addEventListener('pointerdown', onWorkbenchPointerDown);
+    diagram?.addEventListener('pointerdown', onWorkbenchPointerDown);
+
+    // 后续一律在窗口上收:指针按下之后移出工作台是常事。
+    //
+    // `pointermove` 不是可选项——组合键的按下和松开都在它里面(见 syncButtons)。
+    // 好在 syncButtons 开头就是一次整数比较,普通移动会被立刻挡掉,不会因为
+    // 每秒上千次的 mousemove 拖慢页面。
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerUp);
+
+    // 窗口失焦时按键状态不再可信——用户在别处松开鼠标,这里收不到 pointerup,
+    // 卡片会一直亮着。清掉,但不记时长。
+    window.addEventListener('blur', clearButtons);
+
+    // ---- 按住时长的实时刷新 ----
+
+    let rafId = 0;
+
+    function tick(): void {
+      rafId = requestAnimationFrame(tick);
+
+      let earliest: number | null = null;
+      for (const startedAt of activeSince) {
+        if (startedAt !== null && (earliest === null || startedAt < earliest)) {
+          earliest = startedAt;
+        }
+      }
+
+      setStat('holding', earliest === null ? '0' : (performance.now() - earliest).toFixed(0));
+    }
+
+    rafId = requestAnimationFrame(tick);
+
+    resetButton?.addEventListener('click', () => {
+      counts.fill(0);
+      activeSince.fill(null);
+      total = 0;
+      lastHoldMs = null;
+      for (let code = 0; code < BUTTON_COUNT; code++) {
+        renderCount(code);
+        renderActive(code, false);
+      }
+      renderSummary();
+      if (hint) hint.hidden = false;
+    });
+
+    // 页面离开前停止动画循环、恢复侧键
+    window.addEventListener('pagehide', () => {
+      cancelAnimationFrame(rafId);
+      restoreSideButtons();
+    });
+  </script>
+</BaseLayout>

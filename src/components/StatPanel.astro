@@ -1,0 +1,21 @@
+---
+interface Props {
+  /** 供脚本更新数值用的标识,渲染成 data-stat 属性 */
+  id: string;
+  label: string;
+  unit?: string;
+  hint?: string;
+  /** 主指标,用强调色显示 */
+  primary?: boolean;
+}
+
+const { id, label, unit, hint, primary = false } = Astro.props;
+---
+
+<div class:list={['stat', primary && 'stat--primary']}>
+  <div class="stat__label">{label}</div>
+  <div class="stat__value">
+    <span data-stat={id}>—</span>{unit && <span class="stat__unit">{unit}</span>}
+  </div>
+  {hint && <div class="stat__hint" data-hint={id}>{hint}</div>}
+</div>
