@@ -46,6 +46,7 @@ import {
   computeCps,
   detectTrailJumps,
   longestSegment,
+  markScrollGlitches,
   normalizeWheelDelta,
   segmentTimestamps,
   summarizeScroll,
@@ -60,6 +61,9 @@ import { createTicker, format, setText } from './ui';
 
 export type Phase = 'idle' | 'running' | 'done';
 
+/** 方向带上的一格。`down` 沉到底,`up` 升到顶。 */
+export type TraceMark = 'up' | 'down';
+
 export interface MiniContext {
   /** 卡里那块装置面。探针已经挂在它上面了,工厂可以继续用 */
   readonly surface: HTMLElement;
@@ -67,6 +71,17 @@ export interface MiniContext {
   readonly live: HTMLElement;
   /** 写一个读数槽。槽是按 `MiniCard.readouts[].key` 找的 */
   write(key: string, value: string): void;
+  /**
+   * 往一条**方向带**上推一格。`key` 指向 `MiniCard.readouts` 里
+   * `kind: 'trace'` 的那一条。
+   *
+   * 每格一次滚动:向下沉到底、向上升顶。孤立反向的那一格标红(毛刺)——
+   * 判据是 `analysis.ts` 的 `markScrollGlitches`,和滚轮页的 `glitches`
+   * **是同一条**,不另起一套。
+   *
+   * 带子画在**读数区**(纸面),不在装置面里:它是读数,和 `方向` / `格数` 并排。
+   */
+  push(key: string, mark: TraceMark): void;
   /**
    * 挂一个监听,**返回时自动摘掉**(随 `finish()` 或下一次开测)。
    * 工厂里不要自己 `addEventListener`。
@@ -423,18 +438,21 @@ const wheelMini: MiniFactory = (ctx, seed) => {
     // 记的是同一件事,在卡片上是纯污染。所以要 `passive: false`。
     event.preventDefault();
 
-    notches.push({
-      notches: normalizeWheelDelta(event.deltaY, event.deltaMode),
-      raw: event.deltaY,
-      deltaMode: event.deltaMode,
-    });
+    const step = normalizeWheelDelta(event.deltaY, event.deltaMode);
+    notches.push({ notches: step, raw: event.deltaY, deltaMode: event.deltaMode });
 
     const stats = summarizeScroll(notches);
     const net = stats.netNotches;
     big.textContent = net > 0 ? '↓' : net < 0 ? '↑' : '—';
     captionNode.textContent = net > 0 ? '向下' : net < 0 ? '向上' : '方向待定';
-    ctx.write('direction', net > 0 ? '向下' : net < 0 ? '向上' : '—');
+    // 方向给**箭头朝向**而不是「向下」两个字:它和装置面里那个大箭头是同一件事,
+    // 说两遍不如长得一样,顺带把读数行让给右边那条方向带。
+    ctx.write('direction', net > 0 ? '↓' : net < 0 ? '↑' : '—');
     ctx.write('notches', format(Math.abs(net), 0));
+
+    // 零位移的那一次没有方向,不进带子 —— 进去就是凭空多一格。
+    // (`summarizeScroll` 本来也跳过它,两个口径一致。)
+    if (step !== 0) ctx.push('recent', step > 0 ? 'down' : 'up');
 
     ctx.settleAfter(IDLE_DONE_MS);
   }
@@ -570,6 +588,49 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
     if (node) outputs.set(readout.key, node);
   }
 
+  /**
+   * 方向带。格子由 `index.astro` 按 `readout.slots` 渲染好,这里只往上刷 `data-*`
+   * —— 和读数槽一样按 `slug:key` 挂钩。
+   */
+  const traces = new Map<string, { host: HTMLElement; marks: TraceMark[] }>();
+  for (const readout of spec.readouts) {
+    if (readout.kind !== 'trace') continue;
+    const host = card.querySelector<HTMLElement>(`[data-mini-trace="${spec.slug}:${readout.key}"]`);
+    if (host) traces.set(readout.key, { host, marks: [] });
+  }
+
+  /**
+   * 把一整段方向刷到带子上。**窗口取最右边那几格**,越靠右越新。
+   *
+   * 毛刺判据跑在**整段历史**上,不是跑在窗口里:窗口最右那一格在窗口内没有右邻,
+   * 拿窗口算的话它永远标不上红。跑整段,一格被标红之后往左滚出窗口也不会变。
+   */
+  function paintTrace(trace: { host: HTMLElement; marks: TraceMark[] }): void {
+    const cells = [...trace.host.children] as HTMLElement[];
+    const flags = markScrollGlitches(trace.marks);
+    // 负数表示左边还有几格是空的 —— 一开始整条都是空的
+    const first = trace.marks.length - cells.length;
+    cells.forEach((cell, index) => {
+      const at = first + index;
+      if (at < 0) {
+        delete cell.dataset.mark;
+        delete cell.dataset.glitch;
+        return;
+      }
+      cell.dataset.mark = trace.marks[at];
+      if (flags[at]) cell.dataset.glitch = 'true';
+      else delete cell.dataset.glitch;
+    });
+  }
+
+  /** 和 `write()` 一样:签错了名就静默不画。所以单测把 push 的键也一起扫。 */
+  function pushMark(key: string, mark: TraceMark): void {
+    const trace = traces.get(key);
+    if (!trace) return;
+    trace.marks.push(mark);
+    paintTrace(trace);
+  }
+
   let phase: Phase = 'idle';
   let cleanups: Array<() => void> = [];
   let settleTimer = 0;
@@ -615,6 +676,9 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
       write(key, value) {
         setText(outputs.get(key) ?? null, value);
       },
+      push(key, mark) {
+        pushMark(key, mark);
+      },
       on(target, type, fn, options) {
         /*
          * **seed 那个事件对象一律滤掉。** 工厂是拿 seed 显式处理的(见
@@ -649,6 +713,11 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
     settleTimer = 0;
 
     for (const key of outputs.keys()) setText(outputs.get(key) ?? null, '—');
+
+    for (const trace of traces.values()) {
+      trace.marks.length = 0;
+      paintTrace(trace);
+    }
 
     live = div('mini-live');
     // 空态那句话连同它的虚线框一起让位。装置自己的画面接上来

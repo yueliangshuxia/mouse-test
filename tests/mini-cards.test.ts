@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CONFIDENCE_NOTE, MINI_CARDS } from '../src/lib/mini-cards';
+import { CONFIDENCE_NOTE, DEFAULT_TRACE_SLOTS, MINI_CARDS } from '../src/lib/mini-cards';
 import { CONFIDENCE_LABEL, READY_TOOLS } from '../src/lib/tools';
 
 /*
@@ -58,6 +58,21 @@ describe('mini-cards', () => {
     }
   });
 
+  it('方向带的格数是正整数 —— 它决定页面渲染几个格子', () => {
+    // 格数漏了、或者写成 0 和负数,带子就只剩底下那条基线:页面上不报错,
+    // 只是永远不出东西。和线接错了是同一类静默失败,所以钉在这里。
+    for (const card of MINI_CARDS) {
+      for (const readout of card.readouts) {
+        if (readout.kind !== 'trace') continue;
+        const slots = readout.slots ?? DEFAULT_TRACE_SLOTS;
+        expect(
+          Number.isInteger(slots) && slots > 0,
+          `${card.slug} 的 ${readout.key} 格数不合法:${slots}`,
+        ).toBe(true);
+      }
+    }
+  });
+
   /*
    * 装置那边 `ctx.write('presses')` 的名字必须真的落在某个读数槽上。
    *
@@ -70,9 +85,18 @@ describe('mini-cards', () => {
    * 字母的键不会出现在任何一张卡里,这条判据抓得住。
    */
   it('装置写入的每一个 key 都能找到对应的读数槽', () => {
-    const source = readFileSync(new URL('../src/lib/mini-devices.ts', import.meta.url), 'utf8');
+    /*
+     * **先把注释剥掉再扫。** 注释里举的例子(「签错名写成了 push 加一个字面量」
+     * 这种)会被当成真的键读进来 —— 那不是代码在写,却会让这条用例报一个假故障。
+     * 这条踩过一次:一段说明文字让用例红了,而它指的那个键根本不存在。
+     */
+    const source = readFileSync(new URL('../src/lib/mini-devices.ts', import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '');
+
+    // `.push(` 一起扫:方向带也按 key 挂钩,签错名同样是**静默不画**。
     const written = new Set(
-      [...source.matchAll(/\.write\(\s*'([^']+)'/g)].map((match) => match[1]),
+      [...source.matchAll(/\.(?:write|push)\(\s*'([^']+)'/g)].map((match) => match[1]),
     );
     const declared = new Set(MINI_CARDS.flatMap((card) => card.readouts.map((r) => r.key)));
 

@@ -309,12 +309,28 @@ const jsonLd = {
       flex: none;
     }
 
-    /* 按过的键:留一个"已触发"的底色,这样不必盯着看也能事后回溯 */
+    /*
+     * 按过的键:字母/数字变成**磷光绿**。
+     *
+     * 原来是 `color: var(--text)` —— 井里 `--text` 是 `#dce5ec`,也就是**白字**。
+     * 用户报的正是这个:「按过之后字母、数字上显示白色」。
+     *
+     * 绿在这里不是"新开一个颜色":键帽本来就长在 `.well` 里(见上面
+     * `class="keyboard well"`),而井里的 `--accent` 就是磷光绿 `#5ed69b`。
+     * 所以这一档**既不新增令牌、也不碰主题** —— 浅色深色下都自动是绿的。
+     */
     .kb-key[data-tested='true'] {
-      color: var(--text);
+      color: var(--accent);
       border-color: var(--border-strong);
     }
 
+    /*
+     * 正按着的键:深绿底 + 绿字 + 绿框。**这一档是原来的长相,没动过。**
+     *
+     * 两档必须分得开,`data-tested` 只染字、`data-held` 连底带框一起变。
+     * 两条规则特异度相同(0,2,0),**靠源码顺序分胜负** —— held 必须写在后面。
+     * (held 一定同时是 tested,见 `renderKey()`,所以顺序反了就两档全塌成 tested。)
+     */
     .kb-key[data-held='true'] {
       background: var(--accent-dim);
       border-color: var(--accent);

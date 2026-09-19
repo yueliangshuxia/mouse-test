@@ -20,6 +20,7 @@ import {
   detectTrailJumps,
   estimateDpi,
   longestSegment,
+  markScrollGlitches,
   measureDrift,
   normalizeWheelDelta,
   pathLength,
@@ -753,6 +754,52 @@ describe('summarizeScroll', () => {
       { notches: 1, raw: 120, deltaMode: 0 },
     ]);
     expect(stats.typicalDelta).toBe(100);
+  });
+});
+
+describe('markScrollGlitches', () => {
+  /*
+   * 首页滚轮卡那条方向带靠它决定**哪一格标红**。它和 `summarizeScroll` 的
+   * `glitches` 是同一条判据的两个出口,所以这两个 describe 的用例形状故意
+   * 对得上 —— 哪天一边改了另一边没改,这两组就会互相咬住。
+   */
+  it('一直朝一个方向滚:一格都不标', () => {
+    expect(markScrollGlitches(['down', 'down', 'down', 'down'])).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it('持续下滚时插进一个反向 —— 只有那一格标红', () => {
+    expect(markScrollGlitches(['down', 'down', 'up', 'down', 'down'])).toEqual([
+      false,
+      false,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it('用户自己换方向不算毛刺 —— 换过去就不再回来', () => {
+    expect(markScrollGlitches(['down', 'down', 'up', 'up', 'up'])).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it('首尾两格不参与判断 —— 最新那一格要等下一次滚动才判得出来', () => {
+    // 末尾那个 up 单看像毛刺,但它右边还没有事件可比,所以先不标
+    expect(markScrollGlitches(['down', 'down', 'up'])).toEqual([false, false, false]);
+  });
+
+  it('长度 0 和 1 都安全', () => {
+    expect(markScrollGlitches([])).toEqual([]);
+    expect(markScrollGlitches(['up'])).toEqual([false]);
   });
 });
 

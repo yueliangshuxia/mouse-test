@@ -976,6 +976,9 @@ export function normalizeWheelDelta(deltaY: number, deltaMode: number): number {
   return deltaY / WHEEL_PIXELS_PER_NOTCH;
 }
 
+/** 一次滚动的方向。和 `deltaY` 同号:正数向下。 */
+export type ScrollDir = 'up' | 'down';
+
 export interface ScrollNotch {
   /** 归一化后的格数 */
   notches: number;
@@ -1008,6 +1011,24 @@ export interface ScrollStats {
   maxNotch: number;
   /** 原始 deltaY 的众数绝对值,用来告诉用户"你这里一格是多少" */
   typicalDelta: number | null;
+}
+
+/**
+ * 一串方向里,**哪几格是孤立的反向**(毛刺)。
+ *
+ * 判据和 `summarizeScroll` 的 `glitches` 是同一条 —— 自己反向、前后同向。
+ * 单独成一个函数是因为首页滚轮卡要把最近若干次画成一条带,得知道**是哪一格**,
+ * 光有总数画不出来。`summarizeScroll` 也改走这里,免得两处判据日后各漂各的。
+ *
+ * **首尾两格恒为 `false`**:没有两侧可比。所以最新那一格永远不是毛刺,要等下一次
+ * 滚动到了才判得出来 —— 这不是缺陷,孤立与否本来就要看右邻。
+ */
+export function markScrollGlitches(dirs: readonly ScrollDir[]): boolean[] {
+  const flags = dirs.map(() => false);
+  for (let i = 1; i < dirs.length - 1; i++) {
+    if (dirs[i] !== dirs[i - 1] && dirs[i + 1] === dirs[i - 1]) flags[i] = true;
+  }
+  return flags;
 }
 
 /**
@@ -1054,10 +1075,10 @@ export function summarizeScroll(events: readonly ScrollNotch[]): ScrollStats {
   for (let i = 1; i < signs.length; i++) {
     if (signs[i] !== signs[i - 1]) stats.reversals++;
   }
-  // 孤立的反向:前后同向、自己反向。首尾两个事件没有两侧可比,不参与判断。
-  for (let i = 1; i < signs.length - 1; i++) {
-    if (signs[i] !== signs[i - 1] && signs[i + 1] === signs[i - 1]) stats.glitches++;
-  }
+  // 孤立的反向:前后同向、自己反向。判据和首页那条方向带**共用同一个函数** ——
+  // 否则"毛刺几次"和"哪几格标红"迟早会漂成两套说法。
+  const dirs = signs.map((sign): ScrollDir => (sign > 0 ? 'down' : 'up'));
+  stats.glitches = markScrollGlitches(dirs).filter(Boolean).length;
 
   let bestCount = 0;
   for (const [delta, count] of deltaCounts) {

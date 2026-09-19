@@ -31,8 +31,8 @@ export default defineConfig({
   //
   // 这里配置它是为了**本地开发时就能拿到跨域隔离**,从而验证 8000Hz 那条
   // 高精度路径——否则本地计时精度永远是 100µs,那段代码没法测。
-  // 上线时的响应头必须由托管方发出(见 CLAUDE.md / 计划文件:国内平台不认
-  // public/_headers,需用 Nginx add_header 或平台的响应头配置)。
+  // 上线时的响应头必须由托管方发出(见 CLAUDE.md「这个托管方的已知短板」:
+  // 国内平台不认 public/_headers,需用 Nginx add_header 或平台的响应头配置)。
   server: {
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',

@@ -2,7 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { CONFIDENCE_LABEL, PLANNED_TOOLS, READY_TOOLS } from '../lib/tools';
 import type { Confidence } from '../lib/tools';
-import { CONFIDENCE_NOTE, findMiniCard } from '../lib/mini-cards';
+import { CONFIDENCE_NOTE, DEFAULT_TRACE_SLOTS, findMiniCard } from '../lib/mini-cards';
 import { href } from '../lib/url';
 
 const title = '鼠标测试 - 在线检测鼠标按键、回报率与传感器性能';
@@ -81,15 +81,38 @@ const cards = READY_TOOLS.map((tool) => ({ tool, spec: findMiniCard(tool.slug)! 
 
           {spec.readouts.length > 0 && (
             <div class="mini-read">
-              {spec.readouts.map((readout) => (
-                <div class="mini-read__item">
-                  <span class="mini-read__label">{readout.label}</span>
-                  <span class="mini-read__num">
-                    <span class="mini-read__value" data-mini-out={`${tool.slug}:${readout.key}`}>—</span>
-                    {readout.unit && <span class="mini-read__unit">{readout.unit}</span>}
-                  </span>
-                </div>
-              ))}
+              {spec.readouts.map((readout) =>
+                readout.kind === 'trace' ? (
+                  /*
+                   * 方向带。**格子在这里渲染**,驱动只往上刷 `data-mark` /
+                   * `data-glitch` —— 和读数槽同一套分工:页面管结构,驱动管值。
+                   * 格数读 `readout.slots`,和 `mini-cards.ts` 是同一份声明。
+                   *
+                   * `aria-hidden`:格子是空的 `<i>`,不藏起来读屏会念十个空元素;
+                   * 它表达的事(红格 = 反向毛刺)在卡底那行小注里有文字。
+                   */
+                  <div class="mini-read__item mini-read__item--trace">
+                    <span class="mini-read__label">{readout.label}</span>
+                    <span
+                      class="mini-trace"
+                      data-mini-trace={`${tool.slug}:${readout.key}`}
+                      aria-hidden="true"
+                    >
+                      {Array.from({ length: readout.slots ?? DEFAULT_TRACE_SLOTS }).map(() => (
+                        <i class="mini-trace__cell" />
+                      ))}
+                    </span>
+                  </div>
+                ) : (
+                  <div class="mini-read__item">
+                    <span class="mini-read__label">{readout.label}</span>
+                    <span class="mini-read__num">
+                      <span class="mini-read__value" data-mini-out={`${tool.slug}:${readout.key}`}>—</span>
+                      {readout.unit && <span class="mini-read__unit">{readout.unit}</span>}
+                    </span>
+                  </div>
+                ),
+              )}
             </div>
           )}
 

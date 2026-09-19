@@ -34,6 +34,9 @@ export type MiniKind =
   | 'polling'
   | null;
 
+/** 方向带默认保留几格。页面和驱动都读这一个,别各写一个 10。 */
+export const DEFAULT_TRACE_SLOTS = 10;
+
 /** 卡片里的一个读数槽。`key` 是驱动 `write()` 时用的名字。 */
 export interface MiniReadout {
   key: string;
@@ -43,6 +46,16 @@ export interface MiniReadout {
    * 和工具页的 `StatPanel` 一个待遇,不另起一套。
    */
   unit?: string;
+  /**
+   * `value`(默认)是一个数值槽;`trace` 是一条**方向带**。
+   *
+   * 方向带每格一次滚动:向下沉到底、向上升顶,孤立反向的那一格标红。
+   * 它由 `MiniContext.push()` 一格一格推进,**不走 `write()`** ——
+   * 它记的是一串值,不是最后一个值。
+   */
+  kind?: 'value' | 'trace';
+  /** `kind: 'trace'` 时保留几格。默认 {@link DEFAULT_TRACE_SLOTS}。 */
+  slots?: number;
 }
 
 export interface MiniCard {
@@ -63,8 +76,10 @@ export interface MiniCard {
   /**
    * 这一项**特有**的那句限制。
    *
-   * 只写这一项独有的部分,通用的那半句由 `CONFIDENCE_NOTE` 按 `confidence`
-   * 出 —— 六个「直接测得」的卡片各抄一遍同一句话,迟早有一份漂掉。
+   * 只写这一项独有的部分:通用那半句(`CONFIDENCE_NOTE` 按 `confidence` 出的)
+   * **不在卡片里** —— 它只在网格下面那份 `<dl class="confidence-key">` 里渲染
+   * 一次。这里不抄它,是因为六个「直接测得」的卡片各抄一遍同一句话,迟早有一份
+   * 漂掉。改「四档各是什么意思」请改那份 `<dl>`,不是改这里。
    */
   note: string;
   /** `kind === null` 时,装置槽里改放的说明。 */
@@ -124,8 +139,9 @@ export const MINI_CARDS: MiniCard[] = [
     readouts: [
       { key: 'direction', label: '方向' },
       { key: 'notches', label: '格数' },
+      { key: 'recent', label: '最近 10 次', kind: 'trace', slots: DEFAULT_TRACE_SLOTS },
     ],
-    note: '格数是估算:浏览器从不说"一格是多少"。方向不需要换算,是可靠的。',
+    note: '格数是估算,浏览器从不说"一格是多少"。方向带每格一次滚动:向下沉底、向上升顶,红格是反向毛刺。',
   },
   {
     slug: 'cps-test',

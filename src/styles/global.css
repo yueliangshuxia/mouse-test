@@ -469,7 +469,7 @@ p {
  *
  * 这里原来是两行(第一行品牌 + 开关,第二行整条留给索引)。当时排不下是因为
  * 十个工具名全写出来要 1142px,而这一栏只有 1060px。现在索引改用短名
- * (见 `tools.ts` 的 `navLabel`),十项合计 509px —— 一行放得下,报头也回到一行,
+ * (见 `tools.ts` 的 `navLabel`),十项自身合计 549px、含间距共占 693px —— 一行放得下,报头也回到一行,
  * 高度从约 122px 收到约 60px。
  *
  * **排不下时不再折行,而是折叠**:尾部几项进「更多」下拉,收哪几个由
@@ -540,10 +540,10 @@ p {
   display: flex;
   align-items: center;
   /*
-   * 16px 是**量出来的下限,不是审美选择**。十个短名加起来约 700px,
-   * 而 1000px 视口下导航列只有约 724px —— 20px 间距时余量不到 10px,
-   * 换一个中文字体(各平台字宽不同)就会翻成折叠态。
-   * 缩到 16px 把余量拉到 40px 上下,1024 及以上的机器才稳。
+   * 16px 是**量出来的下限,不是审美选择**。十项本身合计 549px,含 9 个间距
+   * 共占 693px,而 1000px 视口下导航列约 725px —— 20px 间距时是 729px,
+   * **已经溢出了**。换一个中文字体(各平台字宽不同)就会翻成折叠态。
+   * 缩到 16px 把余量拉到 30px 出头,1024 及以上的机器才稳。
    */
   column-gap: 16px;
 
@@ -1558,6 +1558,67 @@ select {
   margin-left: 2px;
   color: var(--text-faint);
   font-size: 0.72rem;
+}
+
+/* 方向带那一条按底对齐 —— 它底下有一条基线,标签就落在基线那一行上 */
+.mini-read__item--trace {
+  align-items: flex-end;
+}
+
+/*
+ * 滚轮卡那条**方向带**:最近若干次滚动的方向,一格一次。
+ *
+ * 向下沉到底、向上升顶 —— 一排小柱的起伏就是手的节奏,比「向下」两个字更经得起
+ * 扫一眼。**孤立反向的那一格标红**(`--danger`),也就是"一直朝一个方向滚,它却
+ * 单独跳了一下"的毛刺;判据在 `analysis.ts` 的 `markScrollGlitches`,和滚轮页
+ * 的 `glitches` 是同一条。
+ *
+ * 红色在这里是**语义色**、不是装饰:纸面本是无彩色的,而"这一格不对劲"正落在
+ * 三处允许有颜色的地方之一(故障朱砂)。
+ *
+ * **没滚过的格子不画。** 没数据时不画空槽是本站既成规矩(见 `.rate-chart:empty`),
+ * 十个空框会被读成"组件没加载出来"。所以格子默认完全透明,只在有方向的格上长出
+ * 小柱;底下留一条基线,让这条带子在空的时候也有个着落 —— `.rate-chart:empty`
+ * 收成一条基线,是同一个处理。
+ */
+.mini-trace {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mini-trace__cell {
+  position: relative;
+  width: 5px;
+}
+
+.mini-trace__cell::after {
+  content: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/* 向下:沉到底 */
+.mini-trace__cell[data-mark='down']::after {
+  content: '';
+  bottom: 0;
+}
+
+/* 向上:顶到顶 */
+.mini-trace__cell[data-mark='up']::after {
+  content: '';
+  top: 0;
+}
+
+/* 反向毛刺:同一根小柱,换成故障朱砂 */
+.mini-trace__cell[data-glitch='true']::after {
+  background: var(--danger);
 }
 
 /*

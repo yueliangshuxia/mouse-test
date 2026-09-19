@@ -45,6 +45,8 @@ npx vitest run tests/analysis.test.ts
 
 截图:headless Chrome 开 `--remote-debugging-port=9222`,配合 `astro dev` 的 4321;整页用 `Page.captureScreenshot` 的 `captureBeyondViewport`,深色用 `Emulation.setEmulatedMedia` 模拟 `prefers-color-scheme`。每轮至少覆盖**桌面 1440 / 窄屏 420 × 浅色 / 深色**——**深色必须单独看**,漏一个令牌在浅色下完全看不出来。
 
+**探针脚本(`probe-*.mjs`)不进仓库** —— 仓库是公开的,它们只是一次性的验证脚手架。所以下文凡是「实测(`probe-xxx.mjs`,…)」,都是在说**当时跑过什么、结论是什么**,那个文件你找不到;要复现就照那句话的描述自己重写一个。
+
 `astro.config.mjs` 里的 `devToolbar: { enabled: false }` 关掉了 Astro 自带的开发工具栏:它和站点自己的底部悬浮条(`.site-dock`)会叠在视口底部正中央的同一个位置,开着的话开发时分不清哪个是哪个。**只影响 `astro dev`,对 `dist/` 无影响。** 改这条要**重启**才生效,它不热重载。
 
 npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本要求写在 `package.json` 的 `engines`(≥22.12),CI 也钉在 22。
@@ -64,10 +66,11 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 | `src/lib/ruler.ts` | **"沿尺子推一段固定距离"的手势流程**,DPI 测试与加速度测试共用 | 真机手测 |
 | `src/lib/keyboard-layout.ts` | 键位布局数据,键盘页的 frontmatter(画键帽)和 `<script>`(`code` → 标签)共用 | — |
 | `src/lib/theme.ts` | 主题常量。同上,**被两个世界同时消费**:`<head>` 里那个阻塞脚本(不能 `import`)和 `ui.ts` 的开关 | — |
-| `src/lib/ui.ts` | 页面脚本共用的 DOM 工具。`setText` 那条"写入前比较"的约定就靠它统一 | — |
+| `src/lib/ui.ts` | 页面脚本共用的 DOM 工具。`setText` 那条"写入前比较"的约定就靠它统一。另外**能力告警是它渲染的**(`mountCapabilityNotices`,十个工具页都调),`capabilities.ts` 只负责探测 | — |
 | `src/lib/url.ts` | `href()` —— 站内链接唯一该走的拼接口。**写根路径构建不报错、上线才 404**,见「部署」 | — |
 | `src/lib/faq.ts` | FAQ 答案里 `**强调**` 的两个出口:渲染用 `faqHtml`、JSON-LD 用 `faqText`。见「页面约定」 | — |
 | `src/components/*.astro` | `ToolNav`(全站导航)、`StatPanel`(`data-stat` 契约的产出方,配 `ui.ts` 的 `setStat`) | — |
+| `src/layouts/BaseLayout.astro` | **壳**。文档描述的三件事都住在这里,而文件本身一直没进过这张表:`<head>` 里那个阻塞的主题脚本、COI service worker 的注册脚本、导航与主题开关的挂载(还有 `.site-dock`) | 真机手测 |
 | `src/lib/tools.ts` | 工具注册表 —— 导航、首页索引、结构化数据的唯一事实来源。`slug` **同时是页面文件名**,`navLabel` 是报头里那个短名 | — |
 | `src/lib/nav-overflow.ts` | 报头菜单的**溢出折叠**:量轨道宽度,把放不下的项搬进下拉面板。见「首页与报头」 | 真机手测 |
 | `src/lib/mini-cards.ts` | 首页卡片的**说明书**(纯数据):每张卡放哪种装置、给哪几个读数、卡底那句限制写什么 | `tests/mini-cards.test.ts` |
@@ -79,7 +82,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 
 采样层必须这么薄的原因:1000Hz 下回调每秒跑 1000 次,里面放任何 DOM 操作都会直接拖垮测量精度——**我们要测的东西会被自己的代码污染**。缓冲区用 TypedArray 而非对象数组同理:后者产生的短命对象会引发 GC 停顿,而那几毫秒会被如实记录成"丢帧"。
 
-上表里 `ui.ts` 那一行**说窄了**:它不止是 `setText`。工作台默认行为的拦截、主题开关、刷新循环(`createTicker`)、最好成绩的读写、以及全站共用的 `format()` 都在它里面。页面脚本要用什么零碎的 DOM 工具,**先去这里找一遍**,别在页面里另起一份。
+上表里 `ui.ts` 那一行**说窄了**:它不止是 `setText`。工作台默认行为的拦截、主题开关、刷新循环(`createTicker`)、最好成绩的读写、以及全站共用的 `format()` 都在它里面;最容易漏掉的是 `mountCapabilityNotices`(渲染能力告警,见上)、`setHint` / `showNotice`(页面上那两类非读数的提示)、`applyTheme`,以及取节点的 `el()` / `statNode()`。页面脚本要用什么零碎的 DOM 工具,**先去这里找一遍**,别在页面里另起一份。
 
 **贯穿全站的原则:测不准就明说,不要给一个看起来精确的假数字。** 这是这类工具站的信誉所在。
 
@@ -101,7 +104,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 **两档(浅色 / 深色)**,开关上就这两个按钮。`localStorage` 里存的和写到 `<html data-theme>` 上的**永远是同一个值** —— 没有需要解析的中间态。机制在 `theme.ts` 的文件头。
 
 - **没存过就跟系统**,而不是首次访问把系统值写死存起来。用户在页面上按过开关才算表了态,存的就是那一次的选择;此后系统再变也不跟随,页面不会在用户眼皮底下自己换色。另一条路(首次就写死)的代价写在 `theme.ts` 的文件头,要改先读那段。
-- 系统偏好只在**一个地方**被读取:`BaseLayout.astro` 的 `<head>` 里那个阻塞脚本。`ui.ts` 的 `readTheme()` 读不到存储时也走一次 `systemTheme()`,两处判据一致。
+- 系统偏好在**两处**被读(首帧那一次在 `BaseLayout.astro` 的 `<head>` 阻塞脚本里,兜底那一次在 `ui.ts` 的 `readTheme()` 读不到存储时),但**判据只有一条**:两处都走 `systemTheme()`,所以不会漂。注意这个函数**定义在 `theme.ts`,不在 `ui.ts`** —— `ui.ts` 只是 import 它。
 - **「跟随系统」曾经是第三档,现在没有了。** 要加回来注意:它是一个**持续的第三状态**,不是加个按钮就完事 —— 得让存储回到三值、补一个 `matchMedia` 的 change 监听(现在刻意没有,就是为了不让页面自己变色)、并且再想清楚 CSS 那边要不要写第二份 `@media` 令牌块。
 
 所以 CSS 里只有**一个**深色选择器 `:root[data-theme='dark']`(0,2,0,直接压过 `:root`,不依赖源码顺序),**刻意没有** `@media (prefers-color-scheme: dark)` 的令牌块——写两份迟早漂移,而且会让系统偏好变成 CSS 里一个**不存在于 DOM 的状态**,以后加令牌必然漏一份。
@@ -123,13 +126,20 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - 放得进:按键 / 长按拖拽 / 双击 / 滚轮 / CPS / 轨迹 / 回报率。
 - 放不进:**DPI、加速度**(要沿尺子推固定物理距离,卡片里没有那把尺子)、**键盘**(首页的按键会滚动页面、撞浏览器快捷键)。这三张卡的装置槽里放的是一段**说明**,不是空框 —— 说清楚为什么放不进来,再指向那一页。
 - 回报率那张的读数**只能当下限**:每秒报文数 = 每秒移动的英寸数 × DPI,小框里推不开。卡片说明和正文都照实写了。
-- **卡底那行小注是折进来的「关于测量精度」**,是**真实可见的正文**,不是 tooltip、不是折叠面板。收起来等于把全站的主张从首页删掉。它的骨架按 `confidence` 四档出(`CONFIDENCE_NOTE`),再叠加每张卡自己的 `note`。
+- **卡底那行小注是折进来的「关于测量精度」**,是**真实可见的正文**,不是 tooltip、不是折叠面板。收起来等于把全站的主张从首页删掉。**这两层文字不在同一个地方渲染,别找错文件**:卡片里只渲染 `spec.note`(这一项特有的那一句,`index.astro` 的 `.mini-card__note`);`CONFIDENCE_NOTE` 那四档骨架**只在网格下面渲染一次**,是一份 `<dl class="confidence-key">`,靠可信度徽章和上面十张卡对上。改「四档各是什么意思」改那份 `<dl>`,改「这一项有什么限制」改 `mini-cards.ts` 的 `note` —— **卡里没有骨架**,按老描述去卡里找会扑空。
 
 三条与"能测"直接相关的机制:
 
 - **`mini-cards.ts` 是"两个世界共用值"的又一个实例**(同 `keyboard-layout.ts` / `theme.ts`):frontmatter 画卡片、`<script>` 接线,而 frontmatter 变量在 `<script>` 里不存在,两边靠 `slug` 挂钩。`tests/mini-cards.test.ts` 钉住它与 `READY_TOOLS` 一一对应,并钉住"装置写入的 key 必须真的有读数槽" —— 写错一个字母是**静默失败**(`setText(null)` 是空操作,那一格永远是破折号)。
 - **装置是惰性的**:装载时一个采样器都不建。`DEVICES[kind].wake` 声明"哪种事件算开始用",用户碰到装置面才调工厂。**不能一律三种事件都收** —— 一律收 `pointermove` 的话,鼠标从页面上扫过就挂起一串采样器和画布。采样时 `capacity` 要传 `20000`(默认 120000 ≈ 2MB 一份),`capture` 保持 `true`。
 - **`.well` 只出现在 `running`。** `idle` / `done` 都留在纸面:测量结束了还亮着就是在说"这里还在出数",而那句话一旦不成立,「扫一眼就知道哪里是活的」整套就失效了。
+- **读数槽有两档:`value` 和 `trace`。** `MiniReadout.kind` 默认 `value`(一个数,走 `ctx.write()`);`trace` 是一条**方向带**(滚轮卡那 10 个格子),走 `ctx.push()`。分成两档是因为 `write()` **只保留末值** —— 它记的是"现在是什么",而带子记的是"这一串发生过什么",塞进 `write` 那条路只会剩最后一个。`push` 的键和 `write` 一样是**静默失败**(签错名那一格永远空着),所以 `tests/mini-cards.test.ts` 的源码扫描把 `push(` 和 `write(` 放进同一个正则。**那条扫描会先把注释剥掉再扫** —— 注释里举的例会被当成真的键读进来,不是代码在写却让用例报假故障,踩过一次。格子由**页面**渲染(`index.astro` 读 `readout.slots`),驱动只往上刷 `data-mark` / `data-glitch`,和读数槽同一套"页面管结构、驱动管值"的分工。
+- **方向带是零高度成本的,但那是量出来的,不是设计出来的。** 它挂在**已经存在的那一行读数**里(`.mini-read` 的第三个 `__item`),而那一行本来就比 18px 的带子高,所以首页总高**一格没涨**:加带子前后实测同为 1440 下 2142px、420 下 3622px(逐字节相同)。**要再往读数行里塞东西,先想清楚会不会把这行顶高** —— 顶高了是十张卡一起涨。带子本身 68px = 10 格 × 5px + 9 个间距 × 2px。
+
+**装置槽那格 CSS 有两个坑,都是"读代码看不出来"的那类:**
+
+- **`.mini-device--running` 必须显式写 `border: 1px solid var(--well-border)`,不能图省事只写 `border-style: solid` 让 `.well` 去管颜色。** `.mini-device` 自带一条 `border` **简写**(1px dashed),而它在源码里排在 `.well` **后面** —— 同优先级下后写的赢,边框色会落到重映射后的 `--border-strong`(即 `--well-border-strong` `#454b52`),比井自己的线重一档。而深色里井和纸面靠填充只有 1.03:1(见「样式:两个寄存器」),这条线是**唯一**说出"这里有一口井"的东西 —— 重一档就等于把仪器窗的边界说错了。
+- **窄屏不是把 120px 缩成 88px,是两段。** 760px 那个**既有**断点里写的是:空态 `height: auto; min-height: 0; padding: 10px`(收成行高,约 42px),**只有 `.mini-device--running` 才给回 88px**。也就是说收掉的只是"还没测"那块空面积,测量面板一开测就长回去 —— 十张卡省下的那几百像素全在这里。**别把它"还原"成窄屏统一 88px 或 120px**:空态一旦占住高度,窄屏首页的高度预算立刻崩。这里**不新增断点**,用的就是那一个。
 
 **接线时踩过的一个坑,写得明明白白:装置是在"第一次交互"那个事件的派发过程中挂载的,而工厂的监听也只能在那期间才装上。** DOM 规范说派发期间新增的监听收不到这一次事件,**实测 Chrome 会收到**。信规范就丢第一次点击,信 Chrome 就把第一次点击数两遍(实测:两次双击报 3 次、四次连点报 5 次、三个滚轮事件报 4 格)。解法是两边都不靠 —— 驱动把 seed **显式**交给工厂,同时保证工厂的监听**永远看不到这个事件对象**(`mountMiniCard` 里那个 `seeding` 比对)。改这段之前先读 `mini-devices.ts` 里 `MiniFactory` 那段注释。
 
@@ -147,7 +157,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 
 **报头:一条单行的菜单。**
 
-- 菜单文字用 `Tool.navLabel`(短名:按键 / 长按拖拽 / 双击 / 滚轮 / CPS / 轨迹 / 回报率 / DPI / 加速度 / 键盘),`title` 才是全名。**十个短名实测 693px**(`column-gap: 16px` 时),而导航列在 1000px 视口下约 724px —— 余量只有 30px。间距从 20px 收到 16px 就是为了这个:20px 时十项要 729px,**已经超过那 724px 了**。换一个中文字体宽度就会翻成折叠态,所以这一条要按量出来的数看。**加工具、改文案之后必须重新量**,不要按字数估算 —— 中文字宽估不准,这里估错过一次。
+- 菜单文字用 `Tool.navLabel`(短名:按键 / 长按拖拽 / 双击 / 滚轮 / CPS / 轨迹 / 回报率 / DPI / 加速度 / 键盘),`title` 才是全名。**量这个数的时候先分清是哪两个量 —— 十项自身合计 549px,含 9 个间距的总占宽才是 693px**(`column-gap: 16px`);导航列在 1000px 视口下约 725px,余量只剩 30px 出头。间距从 20px 收到 16px 就是为了这个:20px 时总占宽 729px,**已经超过那 725px 了**。(`tools.ts` 的 `navLabel` 注释和 `global.css` 里 `.site-nav__track` 的注释都写着 `509px`,那是过时数,别再照抄。)换一个中文字体宽度就会翻成折叠态,所以这一条要按量出来的数看。**加工具、改文案之后必须重新量**,不要按字数估算 —— 中文字宽估不准,这里估错过一次。
 - 折叠由 `nav-overflow.ts` 做,不在 CSS 里:收哪几个取决于每项的实际像素宽度和容器当前的实际宽度,两者都是渲染之后才有的事实。结构分两层 —— `__track`(`overflow: hidden`,排菜单)和它**兄弟** `__more`(绝对定位的下拉面板)。面板必须待在轨道的裁剪范围**之外**,否则一展开就被切掉。轨道那层同时保证了**脚本还没跑起来**的一两帧里,放不下的项是被裁掉而不是把整页撑宽。
 - `.site-nav__item` 上的 `flex: none` **不是可选项**:允许收缩的话窗口一窄每项就各被压扁一点,而"量出来的宽度"正是折叠判据的输入。网格列上的 `minmax(0, 1fr)` 同理 —— 没有它导航列不会收缩到内容宽度以下,折叠永远不会触发。
 
@@ -169,9 +179,11 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - **CPS 平均值的尾部空闲必须由计时器显式提供。** 点击后停手不产生任何事件,"那一段空了多久"在时间戳里根本不存在。从时间戳推出来的 duration 会让"突发 20 次然后停 5 秒"平均出 20 CPS。所以 `computeCps` 收一个 `durationMs`,由页面上的计时器给。
 - **CPS 页"点一下就开局"必须配一道结算冷却**(`RESTART_LOCK_MS`)。测试面不再需要先按开始,代价是结算那一刻手还在惯性连点——实测一台 20 CPS 的机器从结算起不停按,会在 **872ms** 后把刚出的成绩直接抹掉、原地开第二轮。而人自己收手只多出 1–3 下(约 50–150ms),所以 900ms 锁对人是六倍余量。改小这个数之前先想清楚:它保护的不是"好看",是**成绩还读不读得到**。`重置` 会清掉锁,按了就得立刻能开局。
 - **滚轮只有方向可靠。** `deltaMode` 只说"像素/行/页",从不说"一格是多少"。`normalizeWheelDelta` 的换算是**启发式**,页面上给的格数是估算值;`typicalDelta`(原始 deltaY 的众数)比任何换算后的数都诚实。
+- **"反向毛刺"只有一个判据:`markScrollGlitches()`**(`analysis.ts`),定义是"这一格的方向与前一格不同、**且后一格又回到了前一格的方向**"——左右两个邻居都要看,首尾不参与。`summarizeScroll` 的 `glitches` 计数就是它的 `.filter(Boolean).length`,**两处共用同一份实现**,首页那条方向带的红格也直接读它,**不要在页面里另写一遍**。它和"用户真的换了方向"不是一回事:一连串 `down` 之后持续 `up` 不算毛刺,只有**单独跳一下又立刻回去**才算 —— 那正是滚轮编码器跳格的样子。顺带:带子按**事件**一格一格记,不是按估算的"格" —— `normalizeWheelDelta` 是启发式而方向是可靠的,按事件记正好让红格和 `glitches` 一一对上,所以卡上写的是「最近 10 **次**」不是「最近 10 格」。零位移的那一次不进带子(`step === 0`),否则等于凭空多一格,口径与 `summarizeScroll` 跳过它一致。
 - **轨迹跳变 ≠ 丢帧。** 传感器漏点和你手甩快了在数据上是同一个样子,浏览器拿不到报文序列号,区分不了。判读看**形态**:一串均匀小间距里冒出的**孤立尖峰**才是丢帧,连续一串变大是手快。所以 `detectTrailJumps` 同时给两个数——`jumps`(超线间隔总数,含连着出现的)和 `isolated`(自己超线、左右**两个**邻居都没超,首尾不参与)。**标题栏必须是 `isolated`**:`jumps` 里混着"手甩快了"的连续隆起,把它当结论端出去,就等于一边讲"跳变不等于丢帧"一边给一个分不清两者的数。
 - **拖拽瞬断只能叫"疑似"。** 中途断一下就是一次 `pointerup` 加一次 `pointerdown`,和真的松开再按完全一样。只能用行为特征反推(见 `REPRESS_WINDOW_MS` / `REPRESS_RADIUS_PX`),而行为特征不是铁证。这一页现在**五个键都能测**(按住哪个键就记在哪个键名下),但判据一个字没放宽——分组逻辑在 `analyzeDragEpisodesByButton`,它把**按键是状态而非边沿**这件事推到了极致:事件只带 `buttonMask`(那一刻按着哪些键),每个键自己的 down / up 靠**前后两条事件的掩码比对**推出来。这么绕是因为组合键下浏览器**根本不会**为第二个键的按下派发 `pointerdown`(见下面「组合按键」),松开一个键时另一个还按着也**不会**有 `pointerup`。推导放在这个纯模块里而不是页面里,就是为了能被单测覆盖。**没有收到过事件的键不进结果表**——"未测"和"0 次"是两件事,页面必须显示破折号。
 - **键盘一律用 `KeyboardEvent.code`** 定位,不用 `key`——后者随修饰键和输入法变。另外失焦时要**补发合成的松开事件**(`keyboard-test.astro` 的 `clearHeld()`),只清 DOM 高亮的话统计量会一直挂着一个不存在的故障。
+- **键帽的两档状态色是"绿字"和"绿底",都靠 `.well` 的令牌重映射自动成立,不要写死颜色。** 键帽长在 `.well` 里(`.keyboard.well`),所以井里的 `--accent` 就是磷光绿 `#5ed69b`:「按过」是 `color: var(--accent)`(**只染字**),「正按着」是 `background: var(--accent-dim)` + 绿字绿框。实测两档在浅色/深色下取到的是同一组值(idle `#94a3b0` → tested `#5ed69b` → held 底 `#13301d`),因为井的前景色令牌本来就是两个主题共用一份。**两条规则特异度相同(0,2,0),`data-held` 必须写在 `data-tested` 后面靠源码顺序取胜** —— 而 `renderKey()` 让 held 必然同时是 tested,顺序反了两档会一起塌成 tested。曾经把「正按着」改成过 `--danger` 实心红,已撤掉:用户要的是**按过之后字变色**,不是按下瞬间整块变红。
 - **静止漂移测试里"采样数为 0"是最好的结果,不是"没有数据"。** `measureDrift` 对空区间返回 `null`(表示样本不足),照搬会把结论说反,所以 `trail-test.astro` 对 `n === 0` 单独处理。
 - **但"0 个采样"必须先被证明是有意义的。** 指针不在窗口里、鼠标没接上,页面同样一个事件都收不到——和"鼠标很安静"在数据上完全一样,结论却相反。所以漂移测试分三段(`DriftPhase`):`arming` 先等**第一个**采样到来,证明这个装置是活的;`settling` 等采样数不再增长,确认用户停手;`measuring` 才 `reset()` 开真正的 5 秒窗口。`arming` 超时(`ARM_TIMEOUT_MS`)就如实报"没收到信号",**不能**悄悄判成静止。同理,漂移的采样面必须是**整个文档**而不是测试区:用户把手从鼠标上拿开时,指针正停在"开始"按钮上,而那个按钮在测试区外面——采样面只取测试区的话,缓冲区永远是空的,一只坏鼠标也会拿满分。
 
@@ -210,7 +222,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - Astro 的 frontmatter 变量在 `<script>` 里**不存在**(脚本被单独打包成外链模块)。两边都要用的常量要么从一个模块导入(`keyboard-layout.ts`、`theme.ts` 就是这么来的),要么在脚本里重算一遍并写明原因。
 - **FAQ 答案里的 `**强调**` 必须走 `faq.ts` 的两个函数**,不能直接 `{item.a}`。答案在 frontmatter 里是普通字符串,而 `{...}` 是**转义输出**、不是 markdown——直接插值的话 `**` 会原样显示成星号(六个页面都中过招,装了才发现)。渲染用 `faqHtml`(配 `set:html`),JSON-LD 用 `faqText`(去掉标记),两处都从同一份原文出发,不会漂。
 - 页面 `<style>` 的规则会被加上 `data-astro-cid-*` —— **是选择器带 cid,元素不带**。所以 `global.css` 里写 `.cps-live { … }` 照样命中那些元素,四页共用的实时读数定位才能收在一处。反过来,**没有 `<style>` 块的页面**(如 `button-test.astro`)**一条本页规则都没有**,它全部长相都只能在 `global.css` 里改;而 `ui.ts` 在运行期拼出来的节点(`.notice`)连页面 `<style>` 都够不着。
-- **工作台是并排的:测试区在左、读数在右**,由 `global.css` 的 `.workbench`(`__stage` / `__readout`)承担。比例语言沿用 `.keyboard` 那套 `flex-basis` 决定"够宽并排、不够宽自动堆叠",**不写媒体查询**;读数在下是换行顺序的自然结果,不要靠 `order` 去扳。十个页面里**只有 `polling-rate-test` 不套**——它的采样面是整个视口(`#pad` 是 `position: fixed`),左边没有盒子可放。
+- **工作台是并排的:测试区在左、读数在右**,由 `global.css` 的 `.workbench`(`__stage` / `__readout`)承担。比例语言沿用 `.keyboard` 那套 `flex-basis`:够宽并排、不够宽自动堆叠,**工作台自己一条媒体查询都不写**。**但别把这句读成"`.keyboard` 不写媒体查询"** —— 它写:`keyboard-test.astro` 里有一条 `@media (max-width: 720px)` 把 `.keyboard__main` 推成 `flex-basis: 100%`,键帽也跟着缩。工作台不用写,是因为它靠换行就够了,不是因为这套语言天生不需要断点。读数在下是换行顺序的自然结果,不要靠 `order` 去扳。十个页面里**只有 `polling-rate-test` 不套**——它的采样面是整个视口(`#pad` 是 `position: fixed`),左边没有盒子可放。
   三条约束都是踩了会**静默出错**的那一类:
   1. **读数块只能是测试区的兄弟,绝不能塞进 `.test-area` 里。** `.test-area` 不只是盒子,它**就是采样面**:`hold-drag-test` 靠 `area.contains(event.target)` 决定该不该开始记账,`trail-test` 把采样器挂在 `#area` 上,`scroll-test` 的 `wheel` 也只派发给指针所在元素。塞进去 = 鼠标划过读数区被当成在测试。
   2. **`.test-area` 自己不能加 `padding`。** `renderer.ts` 用**外框** `getBoundingClientRect()` 定 `canvas.width/height` 和 `originX/originY`,加了 padding 原点就偏一个 padding、轨迹整体错位。要间距只能用外层容器 + `gap`。
@@ -223,7 +235,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 **当前部署在 GitHub Pages 的「项目站」上**:https://yueliangshuxia.github.io/mouse-test/
 (仓库 `yueliangshuxia/mouse-test`,公开)。
 
-站点因此**落在子路径上**,不是域名根。这就是 `astro.config.mjs` 里 `base: '/mouse-test'` 的由来,也是 `src/lib/url.ts` 存在的理由——站内链接**必须**走 `href()`,写根路径(`/cps-test/`)会 404 且**构建不报错**。以后换备案域名(落在域名根)时,把 `base` 去掉即可,页面代码一行都不用动。
+站点因此**落在子路径上**,不是域名根。这就是 `astro.config.mjs` 里 `base: '/mouse-test'` 的由来,也是 `src/lib/url.ts` 存在的理由——站内链接**必须**走 `href()`,写根路径(`/cps-test/`)会 404 且**构建不报错**。以后换备案域名(落在域名根)时,**页面代码一行都不用动,但有三处要一起改**:`base`(去掉)、`astro.config.mjs` 的 `site`,以及 `public/robots.txt` 里那行 `Sitemap:` —— 它**硬写着 `github.io` 的子路径**。漏掉第三处不会报任何错,只会让搜索引擎一直去抓旧地址。
 
 - **push 到 `main` 即自动构建并发布**(也可在 Actions 页面手动触发),走 `.github/workflows/deploy.yml`,**不经过 Jekyll**。不能改用「从分支发布」:`dist/_astro/` 以**下划线开头**,Jekyll 默认忽略这类目录,结果是 CSS/JS 全部 404、页面裸奔。(`public/.nojekyll` 是兜底。)
 - `dist/` 不入库,由 CI 现构建。CI 里**顺带跑了 typecheck 和单测**。
