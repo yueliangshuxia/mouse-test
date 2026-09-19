@@ -1,17 +1,25 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { CONFIDENCE_LABEL, PLANNED_TOOLS, READY_TOOLS } from '../lib/tools';
+import { href } from '../lib/url';
 
 const title = '鼠标测试 - 在线检测鼠标按键、回报率与传感器性能';
 const description =
   '免费在线鼠标测试工具。检测鼠标按键失灵、回报率(轮询率)、双击连击、滚轮、轨迹丢帧与传感器性能。基于浏览器原生接口,无需安装任何软件,数据全部在本地计算。';
+
+/*
+ * 站点根的绝对地址,**由 `site` + `base` 推出来**,不手写。
+ * 手写的话换域名/换子路径时必然漏改一处,而结构化数据里给错 URL
+ * 搜索引擎不会报错,只会静默地把首页认到别处去。
+ */
+const siteUrl = new URL(import.meta.env.BASE_URL, Astro.site).href;
 
 const jsonLd = {
   '@context': 'https://schema.org',
   '@type': 'WebSite',
   name: '鼠标测试',
   description,
-  url: 'https://example.com/',
+  url: siteUrl,
 };
 ---
 
@@ -34,7 +42,7 @@ const jsonLd = {
     {
       READY_TOOLS.map((tool) => (
         <li class="tool-item">
-          <a class="tool-item__link" href={`/${tool.slug}/`}>
+          <a class="tool-item__link" href={href(`${tool.slug}/`)}>
             <span class="tool-item__name">{tool.name}</span>
             <p class="tool-item__desc">{tool.description}</p>
             <span class={`confidence confidence--${tool.confidence}`}>

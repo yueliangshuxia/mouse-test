@@ -1,0 +1,67 @@
+# 构建静态产物并发布到 GitHub Pages。
+#
+# 走的是 Actions 部署(而不是「从分支发布」),原因是本站的产物里有 `_astro/`
+# 目录 —— 以**下划线开头**。分支发布那条路 GitHub 会套一层 Jekyll,而 Jekyll
+# 默认会**忽略下划线开头的目录**,结果就是所有 CSS/JS 全部 404、页面裸奔。
+# Actions 部署不经过 Jekyll,没这个问题(另外还留了个 `public/.nojekyll` 兜底)。
+#
+# `dist/` 是构建产物、在 .gitignore 里,所以**不入库** —— 每次由 CI 现构建。
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # 允许在 Actions 页面手动触发一次
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同时只跑一个部署;新的推上来时取消排队中的旧任务,但不打断正在发布的那次
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 类型检查和单测在 CI 里也跑一遍:构建通过不代表没坏,
+      # 而这两种失败在本地是最容易「忘了跑」的
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 单元测试
+        run: npm test
+
+      - name: 构建
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

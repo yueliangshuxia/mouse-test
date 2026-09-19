@@ -1,5 +1,6 @@
 ---
 import { READY_TOOLS } from '../lib/tools';
+import { href } from '../lib/url';
 
 interface Props {
   /** 当前页面的 slug,用于高亮 */
@@ -13,7 +14,7 @@ const { current } = Astro.props;
   {
     READY_TOOLS.map((tool) => (
       <a
-        href={`/${tool.slug}/`}
+        href={href(`${tool.slug}/`)}
         aria-current={current === tool.slug ? 'page' : undefined}
       >
         {tool.name}

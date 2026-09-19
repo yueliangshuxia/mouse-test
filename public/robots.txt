@@ -1,5 +1,5 @@
 User-agent: *
 Allow: /
 
-# TODO: 上线时替换为备案通过的正式域名
-Sitemap: https://example.com/sitemap-index.xml
+# 换备案域名时这里要跟着 astro.config.mjs 的 site + base 一起改
+Sitemap: https://yueliangshuxia.github.io/mouse-test/sitemap-index.xml

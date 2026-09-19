@@ -4,8 +4,20 @@ import sitemap from '@astrojs/sitemap';
 
 // https://astro.build/config
 export default defineConfig({
-  // TODO: 上线前替换为备案通过的正式域名(备案约 2–3 周,与开发并行)
-  site: 'https://example.com',
+  /*
+   * 当前部署目标:GitHub Pages 的**项目站**,所以址是
+   * `https://<用户>.github.io/<仓库名>/` —— 站点不在域名根上,而在子路径上。
+   *
+   * `base` 就是为此而设。它一改,`import.meta.env.BASE_URL` 跟着变,全站
+   * 站内链接由 `src/lib/url.ts` 的 `href()` 统一拼出来(那儿的文件头写了
+   * 为什么不能写根路径)。
+   *
+   * ⚠️ 以后换成**备案域名**(站点落在域名根)时,把 `base` 去掉或改成 `'/'` 即可,
+   * 页面代码一行都不用动 —— 这正是把拼接收进 `href()` 的原因。同时记得改
+   * `site` 和 `public/robots.txt` 里的 Sitemap 行。
+   */
+  site: 'https://yueliangshuxia.github.io',
+  base: '/mouse-test',
 
   integrations: [sitemap()],
 

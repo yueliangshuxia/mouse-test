@@ -2,6 +2,7 @@
 import '../styles/global.css';
 import ToolNav from '../components/ToolNav.astro';
 import { THEME_COLORS, THEME_KEY } from '../lib/theme';
+import { href } from '../lib/url';
 
 interface Props {
   /** 页面 <title>,每页独立 */
@@ -26,7 +27,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical.href} />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href={href('favicon.svg')} />
     <meta name="theme-color" content={THEME_COLORS.light} />
 
     <!--
@@ -81,7 +82,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
   <body>
     <header class="site-header">
       <div class="wrap">
-        <a class="brand" href="/">鼠标测试</a>
+        <a class="brand" href={href()}>鼠标测试</a>
         <ToolNav current={current} />
         <!-- 按钮由 ui.ts 的 mountThemeToggle 建出来(文案取 THEME_LABELS) -->
         <div class="theme-switch" id="theme-switch" role="group" aria-label="外观主题"></div>
