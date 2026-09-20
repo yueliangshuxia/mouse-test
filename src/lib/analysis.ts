@@ -1038,7 +1038,7 @@ export interface ScrollStats {
  * 一串方向里,**哪几格是孤立的反向**(毛刺)。
  *
  * 判据和 `summarizeScroll` 的 `glitches` 是同一条 —— 自己反向、前后同向。
- * 单独成一个函数是因为首页滚轮卡要把最近若干次画成一条带,得知道**是哪一格**,
+ * 单独成一个函数是因为首页合并卡要把最近若干次画成一条带,得知道**是哪一格**,
  * 光有总数画不出来。`summarizeScroll` 也改走这里,免得两处判据日后各漂各的。
  *
  * **首尾两格恒为 `false`**:没有两侧可比。所以最新那一格永远不是毛刺,要等下一次
@@ -2194,4 +2194,76 @@ export function aimBestKey(
   durationMs: number,
 ): string {
   return `mouse-test:aim-best:${mode}:${difficulty}:${durationMs}`;
+}
+
+// ---------- 帧节奏 ----------
+
+/**
+ * 一次采样的间隔超过这个数(毫秒)就不算"一帧"。
+ *
+ * 页面切到后台、主线程被一段长任务占住、窗口被拖动 —— 这些都会造出几百毫秒
+ * 的间隔,它们**不是刷新率**,当帧间隔算进去会把中位数整个带偏。
+ */
+export const FRAME_GAP_MAX_MS = 100;
+
+/**
+ * 少于这么多个样本就不出数。
+ *
+ * 两三次的"中位数"什么也说明不了(和 `MIN_VALID_TRIALS` 同一条理由),
+ * 而且采样刚开始时头几个间隔往往是异常的。宁可给破折号。
+ */
+export const FRAME_CADENCE_MIN_SAMPLES = 10;
+
+export interface FrameCadence {
+  /** 由中位帧间隔换算的刷新率(Hz,取整)。样本不够时 `null`。 */
+  hz: number | null;
+  /** 中位帧间隔(毫秒)。样本不够时 `null`。 */
+  medianMs: number | null;
+  /** 真正参与计算的样本数(已剔掉超长间隔)。 */
+  samples: number;
+}
+
+/**
+ * 从一串 rAF 帧间隔里读出**实测刷新率**。
+ *
+ * ## 这个数是什么,不是什么
+ *
+ * 它量的是**浏览器 `requestAnimationFrame` 的节奏**,不是显示器的物理刷新率。
+ * 两者在正常情况下一致,但合成器掉帧、省电模式降频、浏览器在后台把 rAF 掐到
+ * 1Hz 都会让它变小 —— 所以它是"你这台机器此刻跑得有多顺",不是面板的规格。
+ * **反应页和刷新率目视测试都印这个数,两页必须印同一个。**
+ *
+ * ## 为什么取中位数而不是平均
+ *
+ * 平均会被少数几个长间隔(掉帧、GC 停顿)整个拖下去,而那些恰恰是
+ * "采样期间出了状况"而不是"这台机器平时就慢"。中位数说的是**典型的一帧有多长**,
+ * 正是这里要问的问题。
+ *
+ * ## 偶数个样本时取的是**上中位**
+ *
+ * `sorted[Math.floor(n / 2)]`,不是中间两个的平均。这和 `summarizeReaction`
+ * 取中位数的方式一致 —— 同一个站点里两个"中位数"用两种口径,横向对比就会
+ * 对不上,而这种差异在页面上完全看不出来。
+ *
+ * ## 为什么这个函数在这里,而不是在页面里
+ *
+ * 原来它长在 `reaction-test.astro` 的 `<script>` 里。刷新率目视测试要的是
+ * **同一个量**,而两页印的数会被用户直接对比 —— 两份实现迟早对不上,而
+ * 对不上的那天没有任何一处会报错。所以它连同"什么算一帧"的判据一起搬到这里,
+ * 由单测钉住。
+ */
+export function summarizeFrameCadence(intervals: readonly number[]): FrameCadence {
+  const usable = intervals.filter((gap) => gap > 0 && gap < FRAME_GAP_MAX_MS);
+  if (usable.length < FRAME_CADENCE_MIN_SAMPLES) {
+    return { hz: null, medianMs: null, samples: usable.length };
+  }
+
+  const sorted = [...usable].sort((a, b) => a - b);
+  const medianMs = sorted[Math.floor(sorted.length / 2)];
+
+  return {
+    hz: medianMs > 0 ? Math.round(1000 / medianMs) : null,
+    medianMs,
+    samples: usable.length,
+  };
 }

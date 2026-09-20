@@ -7,7 +7,11 @@
  * 等于自己污染自己的数据。这种约定放在十份副本里,迟早有一份被"优化"掉。
  */
 
-import { detectCapabilities, type Capabilities } from './capabilities';
+import {
+  detectCapabilities,
+  type CapabilityOptions,
+  type Capabilities,
+} from './capabilities';
 import {
   isTheme,
   systemTheme,
@@ -84,9 +88,15 @@ export function showNotice(
 /**
  * 能力探测 + 渲染告警。每个工具页开头都是同一段,所以放这里。
  * 返回探测结果,页面可以据此继续降级。
+ *
+ * `options` 原样转给 {@link detectCapabilities} —— 目前只有 `timing` 一个开关,
+ * 给"这一页不读时间戳"的页面用(理由见那边的注释)。**不传就是原行为。**
  */
-export function mountCapabilityNotices(host: Element | null): Capabilities {
-  const caps = detectCapabilities();
+export function mountCapabilityNotices(
+  host: Element | null,
+  options?: CapabilityOptions,
+): Capabilities {
+  const caps = detectCapabilities(options);
   showNotice(host, caps.warnings);
   return caps;
 }
@@ -225,7 +235,7 @@ export function suppressWorkbenchDefaults(): void {
 /**
  * 同上,但**只在"按下点落在这个元素里"时才拦**。
  *
- * 首页要的是这一版,而且**只能用这一版**。首页是一篇正文:八张卡片只是它中间
+ * 首页要的是这一版,而且**只能用这一版**。首页是一篇正文:七张卡片只是它中间
  * 的一节,其余全是文字。那里调一次全页版,右键菜单会在整篇文章上被吃掉 ——
  * 连"复制"都没了。那不是"把工作台摘干净",那是对读者耍横。
  *

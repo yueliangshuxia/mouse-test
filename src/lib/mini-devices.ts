@@ -6,7 +6,7 @@
  * 1. **惰性挂载** —— 卡片插进页面时**一个装置都不建**。装置面上挂着一组探针
  *    事件(哪种事件由 `DEVICES[kind].wake` 声明),用户第一次碰到它才调工厂。
  *    这一条不是优化:采样器的默认容量是 120000 条 × 17 字节 ≈ 2MB 一份,首页
- *    八张卡里有一半挂着采样器,全建起来就是十几 MB —— 而首页大部分人只是路过。
+ *    七张卡里有几张挂着采样器,全建起来就是十几 MB —— 而首页大部分人只是路过。
  * 2. **状态机** —— `idle → running → done`,负责 `.well` 的加减和装置内容的清空。
  * 3. **读数** —— `write()` 走 `ui.ts` 的 `setText`(写入前先比较那条约定)。
  *
@@ -97,6 +97,23 @@ export interface MiniContext {
   on(target: EventTarget, type: string, fn: EventListener, options?: AddEventListenerOptions): void;
   /** 交还定时器 / rAF / 采样器。开测时和结束时都会被调用 */
   onCleanup(fn: () => void): void;
+  /**
+   * 注册一个「把这张卡上的读数清空」的回调,卡头那枚重置按钮按下去时调用。
+   *
+   * 和 `onCleanup` 是一对,但**寿命不同**:cleanup 在 `finish()` 时就跑了,而
+   * 这张卡停在 `done` 之后按重置,要清的正是这一轮留下的痕迹(计数、画布、
+   * 大数字)—— 那时候 cleanup 早就跑完了。所以回调要活到**下一轮开局**。
+   *
+   * **分工:驱动只清读数槽(`outputs`)和方向带(`traces`),工厂必须清掉自己画进
+   * `ctx.live` 里的一切** —— 大数字、说明字、画布、鼠标图、chip 都归各工厂自己。
+   * 少清一样,那张卡重置之后就只清了一半,半截旧读数挂在那儿冒充新结果,
+   * 而**没有任何类型或运行时机制会提醒**。所以 `tests/mini-cards.test.ts` 把
+   * `MiniFactory` 的源码切段、逐段找一个 `ctx.onReset(`。
+   *
+   * 清的是**读数**,不是**物理状态**:手正按着的时候按重置,「当前按着」不该被
+   * 一起清掉(但对 `mouseButtonsMini` 来说真正的理由是边沿检测,见那里的注释)。
+   */
+  onReset(fn: () => void): void;
   /**
    * 「这么久没有新事件就算了结这次测量」。
    *
@@ -414,17 +431,31 @@ const mouseButtonsMini: MiniFactory = (ctx, seed) => {
    */
   let wheelDir: '' | 'up' | 'down' = '';
 
+  /**
+   * 这一轮收到的滚动事件。**必须逐次留下**,不能只记一个净值:
+   * `ctx.write` 只保留末值,而方向带记的是"这一串发生过什么"。
+   * 口径照抄原来的 `wheelMini`(`summarizeScroll` / `normalizeWheelDelta` 一行没改)。
+   */
+  const notches: ScrollNotch[] = [];
+
   function onWheel(event: WheelEvent): void {
     // 不拦的话页面会跟着滚,装置面从指针底下溜走 —— 和「滚轮」那一页同一条理由,
     // 那边量滚动时记的正是这件事,在卡片上是纯污染。所以要 `passive: false`。
     event.preventDefault();
 
     const step = normalizeWheelDelta(event.deltaY, event.deltaMode);
+    notches.push({ notches: step, raw: event.deltaY, deltaMode: event.deltaMode });
+
     // 零位移的那一次没有方向,不翻状态(`summarizeScroll` 也跳过它,两个口径一致)
     if (step !== 0) {
       wheelDir = step > 0 ? 'down' : 'up';
       mouse.dataset.wheel = wheelDir;
+      // 同理:零位移的那一次不进带子,否则等于凭空多一格
+      ctx.push('recent', wheelDir);
     }
+
+    // 格数取**净值**的绝对值,和原来 `wheelMini` 里那个大数字同一个口径
+    ctx.write('notches', format(Math.abs(summarizeScroll(notches).netNotches), 0));
     ctx.settleAfter(IDLE_DONE_MS, mask !== 0);
   }
 
@@ -442,6 +473,41 @@ const mouseButtonsMini: MiniFactory = (ctx, seed) => {
   ctx.write('gap', '—');
   ctx.write('held', '—');
   sync();
+
+  /*
+   * 卡头那枚重置按钮按下去时,把这台装置自己的痕迹清掉。
+   *
+   * **`mask` / `holding` / `heldSince` 一概不动,而理由是边沿检测,不是"物理事实"**
+   * (别照 `button-test.astro` 的重置去"对齐"它 —— 那一页确实会把"正按着"清掉,
+   * 但这里照做会**凭空多报一次按下**):`handle()` 是拿 `mask` 和 `event.buttons`
+   * 逐位 diff 出边沿的(`eachButtonEdge`)。手还按着的时候把 `mask` 清零,下一个
+   * `pointermove` 就会算出 `eachButtonEdge(0, next)` → `isDown === true` →
+   * 一次 `press()`。那个键根本没被重按过,而 `presses` 和 chip 都多一下。
+   *
+   * `sync()` 在这里**够用**:它从 `mask` 重新推出 `data-down` 和
+   * `mini-chip--down` 两处,所以 DOM 不可能和 `mask` 说法不一致。**别**把那两个
+   * 属性各自单独清掉 —— `sync()` 只在 `next !== mask` 时才跑,单独清的那一份会
+   * 一直挂到掩码下次变化为止。
+   *
+   * `mouse.dataset.wheel` 删掉而不是设成空串:两张箭头靠 `[data-wheel]` 选中一条,
+   * 属性整个不在 = 两条都不亮,正是"这一轮还没滚过"的样子。
+   */
+  ctx.onReset(() => {
+    presses = 0;
+    counts.clear();
+    lastByButton.clear();
+    notches.length = 0;
+    wheelDir = '';
+    delete mouse.dataset.wheel;
+    for (const entry of chips.values()) {
+      entry.count.textContent = '0'; // 真数出来的 0,不是破折号(见上面建 chip 那段)
+      entry.count.classList.remove('mini-chip__n--chatter');
+    }
+    ctx.write('gap', '—');
+    ctx.write('held', '—');
+    sync();
+    ctx.settleAfter(IDLE_DONE_MS, mask !== 0);
+  });
 
   // 唤醒它的那一次交互就是第一次,不补这一下会白丢一次。
   // seed 是两条路里的一条:按下唤起的就是第一次按下,滚轮唤起的就是第一次滚动。
@@ -481,6 +547,19 @@ const cpsMini: MiniFactory = (ctx, seed) => {
 
   let base = 0;
   let stopTick: (() => void) | null = null;
+  /**
+   * 5 秒模式下"这一轮已经被重置掉了,别再往上写数"。
+   *
+   * 重置时**不能把 ticker 停掉**:5 秒模式刻意不调 `settleAfter`,窗口只能由
+   * 它自己的 deadline 关闭,停掉 ticker 就等于把卡片永久留在 `running` 上
+   * (`.well` 亮着,而探针也拒绝重开)。所以改成一个它认的开关:窗口照旧跑到
+   * 自己到点、照旧结算成破折号,只是中间这段时间一个字都不往上写 ——
+   * 不然重置按下去看着就像坏了(倒计时会立刻把破折号盖回去)。
+   *
+   * 下一次按下会把它关掉(`press()` 里新窗口那一段),
+   * 于是那个满 5 秒的窗口重新开始显示。
+   */
+  let quiet = false;
 
   /**
    * 把当前累计摆到两个读数槽上,返回算出来的那组数。
@@ -517,6 +596,8 @@ const cpsMini: MiniFactory = (ctx, seed) => {
         settleTimed();
         return;
       }
+      // 被判成"这一轮已经重置掉了"就不再写 —— 见 `quiet` 那段
+      if (quiet) return;
       // 跑的时候大数字是**倒计时**:这是个有终点的测量,得让人看得到还剩多久
       big.textContent = left.toFixed(1);
       captionNode.textContent = `还剩 ${left.toFixed(1)} 秒`;
@@ -534,6 +615,8 @@ const cpsMini: MiniFactory = (ctx, seed) => {
     const stamp = event.timeStamp;
     if (times.length === 0) {
       base = stamp;
+      // 上一轮被重置掉的话,这一下就是新一轮的第一下:显示恢复
+      quiet = false;
       if (timed) beginTimed();
     }
     times.push(stamp - base);
@@ -548,50 +631,38 @@ const cpsMini: MiniFactory = (ctx, seed) => {
 
   ctx.on(ctx.surface, 'pointerdown', press as EventListener);
 
+  /*
+   * 卡头那枚重置按钮按下去时,把这台装置自己的痕迹清掉。
+   *
+   * 读数槽(`cps` / `clicks`)由驱动统一清,这里只管**装置面里那个大数字**
+   * 和一行的说明字 —— 它们不在 `outputs` 里,驱动够不着。
+   */
+  ctx.onReset(() => {
+    times.length = 0;
+    /*
+     * 5 秒模式的窗口还开着(`stopTick` 非空只可能是它):让窗口继续走到自己的
+     * deadline,只是**不再往上写** —— 打开 `quiet`,把大数字和说明字摆回空态。
+     *
+     * 这里**绝不能** `stopTick()/stopTick = null`:5 秒模式刻意不调 `settleAfter`,
+     * 窗口只能由 ticker 的 deadline 关闭,停掉它就等于把卡片永久留在 `running`
+     * 上,而探针又拒绝重开 —— 那是唯一一条"重置把卡片弄死"的路。理由见 `quiet`。
+     *
+     * 到点结算时 `times` 已经空了,`computeCps([])` 返回 `null`,`format` 给
+     * 破折号;下一按重开一个满 5 秒的窗口(见 `press()` 里 `times.length === 0` 那段)。
+     */
+    if (stopTick) {
+      quiet = true;
+      big.textContent = '—';
+      captionNode.textContent = '连点 5 秒';
+      return;
+    }
+    big.textContent = '—';
+    captionNode.textContent = timed ? '连点 5 秒' : '1 秒内最多几下';
+    if (!timed) ctx.settleAfter(IDLE_DONE_MS);
+  });
+
   const pointer = asPointer(seed);
   if (pointer) press(pointer);
-};
-
-/**
- * 滚轮。只给**方向**和估算的格数。
- *
- * `deltaMode` 只说单位是像素/行/页,从不说"一格是多少",所以格数是启发式换算
- * (`normalizeWheelDelta`)。方向不需要任何假设,是可靠的。
- */
-const wheelMini: MiniFactory = (ctx, seed) => {
-  const notches: ScrollNotch[] = [];
-  const big = bigNumber(ctx.live);
-  const captionNode = caption(ctx.live);
-  big.textContent = '—';
-  captionNode.textContent = '滚滚轮';
-
-  function onWheel(event: WheelEvent): void {
-    // 不拦的话页面会跟着滚,而装置面会从指针底下溜走 —— 那一页量滚动时
-    // 记的是同一件事,在卡片上是纯污染。所以要 `passive: false`。
-    event.preventDefault();
-
-    const step = normalizeWheelDelta(event.deltaY, event.deltaMode);
-    notches.push({ notches: step, raw: event.deltaY, deltaMode: event.deltaMode });
-
-    const stats = summarizeScroll(notches);
-    const net = stats.netNotches;
-    big.textContent = net > 0 ? '↓' : net < 0 ? '↑' : '—';
-    captionNode.textContent = net > 0 ? '向下' : net < 0 ? '向上' : '方向待定';
-    // 方向给**箭头朝向**而不是「向下」两个字:它和装置面里那个大箭头是同一件事,
-    // 说两遍不如长得一样,顺带把读数行让给右边那条方向带。
-    ctx.write('direction', net > 0 ? '↓' : net < 0 ? '↑' : '—');
-    ctx.write('notches', format(Math.abs(net), 0));
-
-    // 零位移的那一次没有方向,不进带子 —— 进去就是凭空多一格。
-    // (`summarizeScroll` 本来也跳过它,两个口径一致。)
-    if (step !== 0) ctx.push('recent', step > 0 ? 'down' : 'up');
-
-    ctx.settleAfter(IDLE_DONE_MS);
-  }
-
-  ctx.on(ctx.surface, 'wheel', onWheel as EventListener, { passive: false });
-
-  if (seed instanceof WheelEvent) onWheel(seed);
 };
 
 /**
@@ -633,6 +704,22 @@ const trailMini: MiniFactory = (ctx) => {
     if (now - lastGrowth > MOTION_DONE_MS) ctx.finish();
   });
   ctx.onCleanup(tick);
+
+  /*
+   * 卡头那枚重置按钮按下去时,把这台装置自己的痕迹清掉。复用现成的两个原语,
+   * 不碰缓冲区的布局:`sampler.reset()` 把 `buffer.n` 归零,`renderer.clear()`
+   * 清画布并把 `drawnUpTo` 推到 `buffer.n`。
+   *
+   * **`lastCount = 0` + `lastGrowth = now` 是关键的一步**,不能省:ticker 靠
+   * `total !== lastCount` 判断"刚有增长",不重置的话它会以为采样还在源源不断
+   * 地来,于是卡片永远不结算、也永远不显示已经清空了。
+   */
+  ctx.onReset(() => {
+    sampler.reset();
+    renderer.clear();
+    lastCount = 0;
+    lastGrowth = performance.now();
+  });
 };
 
 /**
@@ -671,6 +758,19 @@ const pollingMini: MiniFactory = (ctx) => {
     if (now - lastGrowth > MOTION_DONE_MS) ctx.finish();
   });
   ctx.onCleanup(tick);
+
+  /*
+   * 卡头那枚重置按钮按下去时,把这台装置自己的痕迹清掉。和 `trailMini` 同一条
+   * (包括 `lastCount` / `lastGrowth` 为什么必须一起重置),只是这里没有画布,
+   * 而且大数字和那行说明字都在装置面里、驱动够不着,得自己写掉。
+   */
+  ctx.onReset(() => {
+    sampler.reset();
+    lastCount = 0;
+    lastGrowth = performance.now();
+    big.textContent = '—';
+    captionNode.textContent = '在框里来回快速移动';
+  });
 };
 
 /**
@@ -681,10 +781,13 @@ const DEVICES: Record<Exclude<MiniKind, null>, MiniDevice> = {
    * 两条 wake **都要**:这张卡上滚轮也是一等公民,只挂 `pointerdown` 的话
    * 空态下滚滚轮什么都不会发生 —— 而"空态"正是它第一次被用到的样子。
    * (`wheel` 加进来的代价只有一条:卡片装置面上的滚动不再带动页面,那是想要的。)
+   *
+   * **滚轮原来有一张自己的卡、一个自己的工厂(`wheelMini`),已经并进这张了。**
+   * 方向、格数、方向带三样现在都在 `mouseButtonsMini` 的 `onWheel` 里,口径一行
+   * 没放宽。别去找 `wheelMini` —— 它没了,而 `MiniKind` 里也没有 `'wheel'` 了。
    */
   'mouse-buttons': { wake: ['pointerdown', 'wheel'], run: mouseButtonsMini },
   cps: { wake: ['pointerdown'], run: cpsMini },
-  wheel: { wake: ['wheel'], run: wheelMini },
   trail: { wake: ['pointermove'], run: trailMini },
   polling: { wake: ['pointermove'], run: pollingMini },
 };
@@ -771,6 +874,13 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
 
   let phase: Phase = 'idle';
   let cleanups: Array<() => void> = [];
+  /**
+   * 重置回调。**刻意不跟 `runCleanups()` 一起作废** —— 理由见
+   * `MiniContext.onReset`:卡停在 `done` 之后按重置,要清的正是这一轮留下的
+   * 痕迹,而那时 cleanup 早就跑完了。由 `start()` 在换新工厂之前清掉
+   * (旧回调闭包住的是上一个工厂的局部状态)。
+   */
+  let resets: Array<() => void> = [];
   let settleTimer = 0;
   let live: HTMLElement | null = null;
   /** 正在唤醒装置的那一个事件对象,见 `MiniFactory` 和 `on()` */
@@ -836,6 +946,15 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
   function resetToIdle(): void {
     if (phase === 'running') return;
     runCleanups();
+    /*
+     * 上一个工厂的重置回调到这里一并作废。**今天到不了这儿**(按钮那个
+     * `phase === 'idle'` 守卫先兜住了),但没有这一句的话,这条不变量就悬在
+     * 两处相距很远的事实上(守卫在按钮那里,清空在 `start()` 里)—— 而它一旦
+     * 破了,代价是**当前这一轮**被写:`write` / `settleAfter` 闭包住的是卡片级
+     * 的 `outputs` / `settleTimer`,不是那些已经摘掉的节点。一行换掉一整类。
+     */
+    resets = [];
+
     window.clearTimeout(settleTimer);
     settleTimer = 0;
     live = null;
@@ -880,6 +999,9 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
       onCleanup(fn) {
         cleanups.push(fn);
       },
+      onReset(fn) {
+        resets.push(fn);
+      },
       settleAfter(ms, busy = false) {
         armSettle(ms, busy);
       },
@@ -893,6 +1015,8 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
   function start(seed: Event): void {
     // 从 idle 或 done 进来都先回到干净的起点:上一次的监听、定时器、读数全部作废
     runCleanups();
+    // 上一个工厂的重置回调到这里作废 —— 它们闭包住的那份状态已经不再被用了
+    resets = [];
     seeding = seed;
     window.clearTimeout(settleTimer);
     settleTimer = 0;
@@ -963,4 +1087,40 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
       resetToIdle();
     });
   }
+
+  /*
+   * 卡头那枚重置按钮。**装在卡片上,和模式开关同一个位置**,不装在装置面上 ——
+   * 按钮在卡头里,根本不是装置面的一部分。这同时保证了它**不会顺手开局**:
+   * 探针长在装置面上,按钮是它的兄弟的兄弟,点按钮不经过探针。
+   *
+   * 它**只清读数,不拆装置**(用户定的那一档):清完卡片留在原地 —— running 就
+   * 继续跑、done 就继续停在 done。回到空态是 `resetToIdle()`,那是换模式的语义。
+   *
+   * **不隐藏、不禁用。** 一个念头是照「没数据不画空槽」在 idle 时把它收起来,
+   * 但那一条管的是**读数槽**,不是**控件** —— 收起它会变成"首页刚打开时四张卡
+   * 都没有重置按钮",恰好是最容易被当成漏做的样子。空态下按下去没有任何可见
+   * 变化,这是**诚实的**:清一个空集合就是无事发生,这个按钮从来不撒谎。
+   */
+  const resetButton = card.querySelector<HTMLButtonElement>('[data-mini-reset]');
+  resetButton?.addEventListener('click', () => {
+    /*
+     * 空态:没有"这一轮",也就没有可清的。这一条**同时兜住换模式** ——
+     * `resetToIdle()` 会把卡片打回 idle,而那时 `resets` 里还留着上一个工厂的
+     * 回调,跑它们等于去清一份已经不在用的数(那些节点也已从 DOM 摘掉)。
+     * `idle` 只能由 `resetToIdle()` 到达,而它又只能从 done / idle 进入,
+     * 所以这个守卫够用。
+     */
+    if (phase === 'idle') return;
+
+    // 人主动按的,不该再锁着 —— 和工具页同一条(`cps-test.astro` 的重置里
+    // 也有一句 `lockUntil = 0`,CLAUDE.md 记着这条规矩)。
+    lockUntil = 0;
+
+    for (const key of outputs.keys()) setText(outputs.get(key) ?? null, '—');
+    for (const trace of traces.values()) {
+      trace.marks.length = 0;
+      paintTrace(trace);
+    }
+    for (const fn of resets) fn();
+  });
 }

@@ -1,0 +1,427 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { href } from '../lib/url';
+
+const tool = findTool('doodle-test')!;
+
+/** 笔迹粗细。数字直接落进 `ctx.lineWidth`,单位是 CSS 像素 */
+const WIDTHS = [
+  { px: 3, label: '细' },
+  { px: 8, label: '中' },
+  { px: 20, label: '粗' },
+];
+
+const FAQ = [
+  {
+    q: '这个能测出鼠标有问题吗?',
+    a:
+      '**不能,而且这一页也不打算测。**它一个读数都不出。要判断鼠标有没有毛病,' +
+      '请用上面那一排诊断工具 —— 那边每一页都写清了自己的数可信到什么程度。' +
+      '这里只有一支笔和一块板。不过反过来说:如果你画出来的线有肉眼可见的断口、' +
+      '或者明明画的是直线结果抖得像锯齿,那确实值得去轨迹测试页查一查,' +
+      '**但那是你眼睛看出来的,不是这一页算出来的。**',
+  },
+  {
+    q: '画出来是绿色的,能换颜色吗?',
+    a:
+      '不能。全站的纸面是**故意没有颜色**的 —— 有颜色的地方就是在出数,' +
+      '这条分工靠"没颜色"维持。这一块板在仪器窗里(深底 + 磷光绿),' +
+      '所以笔迹取的是和轨迹测试同一支笔的颜色。要彩色涂鸦请用系统自带的画图工具,' +
+      '那一类需求这一页不跟它抢。',
+  },
+  {
+    q: '画的东西会上传或者被存下来吗?',
+    a:
+      '不会。整个板子就是一块 canvas,你的每一笔都只在这块画布里,' +
+      '关掉页面就没了。点「保存图片」是把画布转成一个 PNG **下载到你本机**,' +
+      '也走的浏览器自己的下载,和这个站没有关系。',
+  },
+  {
+    q: '触屏能画吗?',
+    a:
+      '能,而且是这一页少数在手机上体验不打折的功能 —— 手指按住就能画。' +
+      '页面在画布上关掉了触摸滚动,所以手指划过去是画线而不是翻页;' +
+      '要翻页请从画布外面划。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'EntertainmentApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标涂鸦板</h1>
+
+  <p class="prose">
+    按住左键随便画。可以换笔迹粗细、清空重来、把画好的存成 PNG。
+    <strong>这一页不出任何读数</strong>——它就是一块画板,不判断你的鼠标好不好。
+    想测鼠标,请用上面那一排诊断工具。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <span class="test-hint">笔迹</span>
+    {
+      WIDTHS.map((option, index) => (
+        <button
+          type="button"
+          class="pen"
+          data-width={option.px}
+          aria-pressed={index === 1 ? 'true' : 'false'}
+        >
+          {option.label}
+        </button>
+      ))
+    }
+    <button type="button" id="clear" disabled>清空</button>
+    <button type="button" id="save" disabled>保存图片</button>
+    <span class="test-hint" id="hint">按住左键在这里画</span>
+  </div>
+
+  <div class="doodle-frame">
+    <div class="test-area well doodle-area" id="area">
+      <canvas id="canvas" class="doodle-canvas"></canvas>
+      <div class="test-area__hint" id="overlay">按住左键,在这里画</div>
+    </div>
+  </div>
+
+  <section class="prose">
+    <h2>这块板子刻意不做的事</h2>
+    <ul>
+      <li>
+        <strong>不出读数。</strong>不统计笔画数、不量速度、不判断线条直不直。
+        本站其余的工具页都在数东西,而这一页数出来的任何东西都没有用 ——
+        画得快不快和鼠标好不好没有关系。
+      </li>
+      <li>
+        <strong>不给颜色。</strong>纸面走无彩色是全站的规矩,详见 FAQ。
+      </li>
+      <li>
+        <strong>不走采样层。</strong>轨迹测试那一套(采样器 + 渲染层)是为了
+        <em>测</em>而造的:它把每一个采样点写进定长缓冲区,再由 rAF 循环读出来画。
+        画板要的是**按下即画、松开即断**,而且线要留在屏幕上不走样 ——
+        直接把点连起来才是对的做法,套那套机器只会凭空多一帧延迟。
+      </li>
+    </ul>
+
+    <h2>画不出线怎么办</h2>
+    <ol class="steps">
+      <li>
+        <strong>确认是按住了左键。</strong>这一页只认左键,中键和右键不画。
+      </li>
+      <li>
+        <strong>确认指针在虚线框里。</strong>画布只覆盖那块测试面。
+      </li>
+      <li>
+        <strong>还是不行的话,先看看别的工具页正不正常。</strong>
+        <a href={href('button-test/')}>按键测试</a>里连左键都没反应的话,
+        那就不是这一页的问题了。
+      </li>
+    </ol>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 画布铺满测试面。**用 `position: absolute; inset: 0`**,和轨迹页同一套 ——
+     * `.test-area` 是定位祖先,画布是它的内边距盒。
+     *
+     * `touch-action: none` 是触屏能画的前提:不关掉的话,手指划过去会被浏览器
+     * 当成滚动,画出来的是空白。代价是画布上不能靠手指翻页,这是画板该有的取舍。
+     */
+    .doodle-area {
+      height: 420px;
+      cursor: crosshair;
+    }
+
+    .doodle-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    /*
+     * 画过一笔之后就把空态提示收掉。**按"有没有墨"而不是"正在不在画"** ——
+     * 后者会让提示在每次松手之后又冒出来,压在刚画好的线上。
+     */
+    .doodle-area[data-ink='true'] .test-area__hint {
+      display: none;
+    }
+
+    /*
+     * 窄屏。420 下把 420px 高的画布原样留着,一屏就只剩画布了,而上面那排
+     * 控件会被推到屏幕外。这个断点就是全站那**一个**(760px),不新增。
+     */
+    @media (max-width: 760px) {
+      .doodle-area {
+        height: 300px;
+      }
+    }
+  </style>
+
+  <script>
+    import { el, setText, suppressDefaultsWithin } from '../lib/ui';
+
+    const area = el('area');
+    const canvas = el('canvas') as HTMLCanvasElement | null;
+
+    if (!area || !canvas) throw new Error('画布未就绪');
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('浏览器不支持 Canvas 2D');
+
+    /*
+     * **刻意不调 `suppressWorkbenchDefaults()`,这一点要说清楚。**
+     *
+     * 全站的判据是"这一页的读数会不会被指针的默认行为污染"。画板确实会被污染:
+     * 右键菜单会在笔画中途弹出来盖住画面,中键自动滚动会把画布从指针底下滚走。
+     * 所以它**是**要拦的 —— 只不过该拦的是**画布这一块**,不是整页。
+     *
+     * 差别来自这一页的性质:它没有读数,整页是一篇正文加一块板。在正文上调
+     * 那个函数,等于夺走读者的"复制"和"在新标签页中打开",而对画板毫无帮助 ——
+     * 正是 ui.ts 里说的"对读者耍横"。而两个函数共用同一份判据实现,所以这里
+     * 换成 `suppressDefaultsWithin(area)`,只是把范围收到画布上。
+     * (首页对那几片网格用的也是它,同一条理由。)
+     */
+    suppressDefaultsWithin(area);
+
+    /** 笔迹粗细(CSS 像素)。默认和中键那一档一致 */
+    let penWidth = 8;
+
+    /** 这一页只用左键。`MouseEvent.button === 0` 是左键 —— 位掩码那一套这里用不上 */
+    const LEFT = 0;
+
+    let drawing = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    /**
+     * 画布上有没有墨。
+     *
+     * 它同时管三件事:空态提示收不收、`清空` / `保存图片` 能不能按。
+     * **空板上那两个按钮不该是可点的** —— 点"保存图片"下载到一张空白 PNG,
+     * 是那种"功能正常但结果没意义"的假绿灯。
+     */
+    function setInk(hasInk: boolean): void {
+      area!.setAttribute('data-ink', hasInk ? 'true' : 'false');
+      for (const id of ['clear', 'save']) {
+        const button = el(id) as HTMLButtonElement | null;
+        if (button) button.disabled = !hasInk;
+      }
+    }
+
+    /**
+     * 笔的颜色。
+     *
+     * 从 `--trail-color` 读,和轨迹页共用同一个令牌 —— 它就长在 `.well` 里,
+     * 所以取到的是仪器窗的磷光绿,**一个令牌都不用新增**。
+     *
+     * 兜底值必须和 `renderer.ts` 里那一个同值:两个都是"变量解析为空时"的
+     * 最后一道,而这个状态正是令牌改到一半。两处不一致的话,画布会在主题切换的
+     * 一瞬变成另一种颜色,看起来像渲染层坏了。
+     */
+    function ink(): string {
+      return getComputedStyle(canvas!).getPropertyValue('--trail-color').trim() || '#5ed69b';
+    }
+
+    function setPen(): void {
+      ctx!.lineWidth = penWidth;
+      ctx!.lineCap = 'round';
+      ctx!.lineJoin = 'round';
+      ctx!.strokeStyle = ink();
+    }
+
+    /**
+     * 让画布的像素尺寸跟上它现在的显示尺寸,并保住已经画出来的东西。
+     *
+     * **改 `canvas.width` 会清空画布**,所以缩放窗口一定会擦掉作品。这里先把
+     * 现有的图挪到一块临时画布上,改完尺寸再按**设备像素 1:1** 贴回左上角 ——
+     * 不缩放,所以画出来的东西位置不变,只是视口变小时可能被裁掉右边和下边。
+     * 缩放重采样会让线条糊掉,而挪位比糊掉好接受。
+     */
+    function fit(): void {
+      const rect = canvas!.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.round(rect.width * dpr);
+      const height = Math.round(rect.height * dpr);
+      if (canvas!.width === width && canvas!.height === height) return;
+
+      const kept = document.createElement('canvas');
+      kept.width = canvas!.width;
+      kept.height = canvas!.height;
+      if (canvas!.width && canvas!.height) kept.getContext('2d')?.drawImage(canvas!, 0, 0);
+
+      canvas!.width = width;
+      canvas!.height = height;
+      // 之后的绘制都按 CSS 像素给坐标,由这一层变换换算到设备像素
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      setPen();
+
+      if (kept.width && kept.height) {
+        ctx!.save();
+        ctx!.setTransform(1, 0, 0, 1, 0, 0);
+        ctx!.drawImage(kept, 0, 0);
+        ctx!.restore();
+      }
+    }
+
+    /** 画布上的 CSS 像素坐标。用 `offsetX/Y` 而不是 `clientX` 减 rect:少一次布局读取 */
+    function point(event: PointerEvent): { x: number; y: number } {
+      return { x: event.offsetX, y: event.offsetY };
+    }
+
+    canvas.addEventListener('pointerdown', (event) => {
+      if (event.button !== LEFT) return;
+      // 捕获之后指针移出画布也不会断线,画到边框外面再绕回来是连贯的
+      canvas.setPointerCapture(event.pointerId);
+      drawing = true;
+      // 空态提示和那两个按钮都由这一条属性收放(见 setInk),不用 `hidden` ——
+      // `.test-area__hint` 自己有 display,UA 的 `[hidden]` 不一定压得住它
+      setInk(true);
+
+      const { x, y } = point(event);
+      lastX = x;
+      lastY = y;
+
+      // 点一下不出笔画会显得"点坏了",所以按下就先落一个点。
+      // 用一段极短的线段而不是 arc:这样它的粗细和圆头跟后面的笔画完全一致。
+      ctx!.beginPath();
+      ctx!.moveTo(x, y);
+      ctx!.lineTo(x + 0.01, y);
+      ctx!.stroke();
+    });
+
+    canvas.addEventListener('pointermove', (event) => {
+      if (!drawing) return;
+      const { x, y } = point(event);
+      ctx!.beginPath();
+      ctx!.moveTo(lastX, lastY);
+      ctx!.lineTo(x, y);
+      ctx!.stroke();
+      lastX = x;
+      lastY = y;
+    });
+
+    /** 松手 / 取消都收笔。cancel 也要收,否则指针被系统抢走之后会一直"按着" */
+    function endStroke(): void {
+      drawing = false;
+    }
+
+    canvas.addEventListener('pointerup', endStroke);
+    canvas.addEventListener('pointercancel', endStroke);
+
+    // ---- 控件 ----
+
+    function renderWidths(): void {
+      for (const button of document.querySelectorAll<HTMLElement>('.pen')) {
+        button.setAttribute(
+          'aria-pressed',
+          Number(button.dataset.width) === penWidth ? 'true' : 'false',
+        );
+      }
+    }
+
+    for (const button of document.querySelectorAll<HTMLElement>('.pen')) {
+      button.addEventListener('click', () => {
+        penWidth = Number(button.dataset.width) || 8;
+        renderWidths();
+        // 只改这一个 longhand。写 `strokeStyle` / 别的一起重设没有害处,
+        // 但**不要**在这里调 fit() —— 那会重建画布,等于顺手把画擦掉
+        ctx!.lineWidth = penWidth;
+      });
+    }
+
+    renderWidths();
+
+    el('clear')?.addEventListener('click', () => {
+      ctx!.clearRect(0, 0, canvas.width, canvas.height);
+      // 清空之后又回到空态:提示放回来,两个按钮重新变灰
+      setInk(false);
+      setText(el('hint'), '按住左键在这里画');
+    });
+
+    el('save')?.addEventListener('click', () => {
+      /*
+       * 导出时**先把井的底色铺上**。画布本身是透明的,直接导出会得到一张
+       * 绿线浮在透明背景上的 PNG —— 在深色图片查看器里还看得见,贴到白底
+       * 文档里就几乎看不见了。铺上你现在看到的那个底色,导出的图才是
+       * "你看到的这张"。
+       */
+      const out = document.createElement('canvas');
+      out.width = canvas.width;
+      out.height = canvas.height;
+      const outCtx = out.getContext('2d');
+      if (!outCtx) return;
+
+      outCtx.fillStyle = getComputedStyle(area).backgroundColor;
+      outCtx.fillRect(0, 0, out.width, out.height);
+      outCtx.drawImage(canvas, 0, 0);
+
+      const link = document.createElement('a');
+      link.href = out.toDataURL('image/png');
+      link.download = 'mouse-doodle.png';
+      // 挂进文档再点:部分浏览器对游离节点的下载不认
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
+
+    // 尺寸变了要重算像素尺寸,否则画布会被拉伸(表现为线变粗、坐标偏移)
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => {
+            fit();
+          });
+    observer?.observe(area);
+
+    // 空板起步。标记里那两个按钮已经写了 `disabled`,这里再走一遍是为了
+    // **只有一个地方**决定"空板长什么样" —— 免得以后改了标记忘了改脚本
+    setInk(false);
+    fit();
+  </script>
+</BaseLayout>

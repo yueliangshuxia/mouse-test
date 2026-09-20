@@ -1,0 +1,555 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { href } from '../lib/url';
+
+const tool = findTool('refresh-visual-test')!;
+
+/*
+ * 方块的三档速度(像素 / 秒)。
+ *
+ * **为什么要有速度这一档,而不是"一个速度看看就行"。**因为目视判断流畅度时,
+ * 速度是那个真正决定"看不看得出来"的变量:方块慢到一定程度,**60Hz 和 240Hz
+ * 在眼睛里是一模一样的**,再怎么看也分不出来;而快到一定程度它又会糊成一条,
+ * 边缘失去参照。所以给三档不是"换个数字看看" —— 是让用户能自己找到一个
+ * "看得出差别"的速度,那正是这个测试唯一能出结论的区间。
+ */
+const SPEEDS = [
+  { px: 220, label: '慢' },
+  { px: 520, label: '中' },
+  { px: 1000, label: '快' },
+];
+
+/*
+ * 常见刷新率对照表。第二列拿 `hz` 现算,不手抄 —— 手抄的 16.7 / 8.3 迟早
+ * 和 1000/144 差出最后一位,而这张表的全部意义就是"这个数到底是多少"。
+ */
+const RATES = [60, 75, 90, 120, 144, 165, 240, 360];
+
+/** 每一档常见于哪类设备。写成 `Record<number, string>`,不然按数字下标取会是隐式 any */
+const RATE_WHERE: Record<number, string> = {
+  60: '普通办公屏与老笔记本',
+  75: '早期笔记本面板',
+  90: '部分高刷笔记本、一体机',
+  120: '游戏本、iPad Pro、电视',
+  144: '主流电竞显示器',
+  165: '电竞显示器(常见超频档)',
+  240: '高刷电竞显示器',
+  360: '旗舰电竞显示器',
+};
+
+const RATE_TABLE = RATES.map((hz) => ({
+  hz,
+  frame: (1000 / hz).toFixed(1),
+  where: RATE_WHERE[hz],
+}));
+
+const FAQ = [
+  {
+    q: '上面那个数是我显示器的刷新率吗?',
+    a:
+      '**不完全是,而且这一页不会把它当成显示器的规格。**那个数量的是**浏览器画帧的节奏**' +
+      '(`requestAnimationFrame`),不是面板的物理刷新率。两者在正常情况下一致,但省电模式降频、' +
+      '浏览器被切到后台、合成器掉帧都会让它变小 —— 它说的是"你这台机器此刻跑得有多顺"。' +
+      '想知道面板的规格,请看系统设置或显示器自己的菜单:**浏览器读不到那个数。**',
+  },
+  {
+    q: '看着卡,是这个数的问题吗?',
+    a:
+      '不一定。从"这一帧画好了"到你眼睛看到,中间还有三段:**合成器把图层合成、显卡把画面送出去、' +
+      '面板把像素转过去**。这三段浏览器都摸不到,而其中任何一段都可能造成顿挫。' +
+      '所以这一页给的是**一个目视判断加一个参照数**,不是结论 —— 同一台机器上,' +
+      '看着卡而数很漂亮(或者反过来)都是可能的,那通常说明问题在后面那三段里。',
+  },
+  {
+    q: '为什么有时候报 120 而不是 144?',
+    a:
+      '因为浏览器画的帧是**按显示器的刷新节拍走的**:144Hz 面板上,浏览器一帧没赶上,就会等到下一个' +
+      '刷新节拍,于是实际节奏掉成 72(一半)或 48(三分之一)。**报出来的数落在 144 的整除数上,' +
+      '通常说明合成器在掉帧,而不是你的显示器变了。**下面那张表只按面板规格列,' +
+      '所以量到 72 这种数时**一行都不会点亮** —— 硬凑到最近的一档等于把"没对上"说成"对上了"。',
+  },
+  {
+    q: '多少 Hz 才够?60 和 144 我真看得出来吗?',
+    a:
+      '看法很不一样,而且和"看什么"关系极大:**在静止画面上,60 和 144 完全一样**;' +
+      '看**快速横移的物体边缘**时差距最容易分出来;而看视频、玩大多数游戏时,差别又回到很小。' +
+      '还有一个常被忽略的变量:**每个人的门槛不一样**,而且长期用高刷之后再看 60 会觉得格外卡。' +
+      '所以这一页不下判断,只给你一块能横着比的板子。',
+  },
+  {
+    q: '背景那些淡格子是干什么的?',
+    a:
+      '**静止的参照物。**判断一个东西动得顺不顺,靠的是它和背景之间的相对关系 —— ' +
+      '一片没有任何参照的纯色背景上,"一顿一顿"的感觉会被明显削弱,眼睛没有东西可以对比。' +
+      '那些线故意压得很淡:它们是参照,不是图案,亮度一高就会把方块边缘抢掉。',
+  },
+  {
+    q: '为什么这个页面自己不自动开始动?',
+    a:
+      '因为一个不停横移的方块正好是"减少动态效果"这个系统设置要挡的东西 —— ' +
+      '所以这一页**不自动播放**,要动必须你自己按一次。' +
+      '系统里开了减少动态效果的用户,看到的仍然是一个静止的方块,而不是一段自动播放的动画。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>刷新率目视测试</h1>
+
+  <p class="prose">
+    按「开始」,一个方块会在下面那条带子上匀速横移。<strong>你要做的是看</strong>——
+    看它的边缘是否跟得干净、有没有一顿一顿、有没有拖影或撕裂。
+    页面同时会印出<strong>浏览器实测的帧节奏</strong>给你作参照。
+  </p>
+
+  <p class="prose">
+    说清楚这个数是什么:<strong>它是浏览器画帧的节奏,不是显示器的物理刷新率。</strong>
+    两者通常一致,但它变小的时候你分不出是"面板就这样"还是"浏览器没跟上"。
+    所以这一页给的是<strong>你的眼睛加一个参照数</strong>,它不替你下结论。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <span class="test-hint">速度</span>
+    {
+      SPEEDS.map((option, index) => (
+        <button
+          type="button"
+          class="speed"
+          data-speed={option.px}
+          aria-pressed={index === 1 ? 'true' : 'false'}
+        >
+          {option.label}
+        </button>
+      ))
+    }
+    <button type="button" id="toggle">开始</button>
+    <span class="test-hint" id="hint">看方块边缘,不要跟着它晃眼睛</span>
+  </div>
+
+  <div class="test-area well refresh-area" id="area">
+    <div class="refresh-block" id="block"></div>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel
+      id="hz"
+      label="实测帧节奏"
+      unit="Hz"
+      primary
+      hint="浏览器画帧的节奏,不是面板的物理刷新率"
+    />
+    <StatPanel id="frameMs" label="一帧" unit="ms" hint="中位数,不是平均" />
+  </div>
+
+  <p class="prose" id="readout">—</p>
+
+  <section class="prose">
+    <h2>对照表</h2>
+    <p>
+      下面按面板规格列出每一档的<strong>一整帧</strong>有多长。这些数字是算出来的
+      (1000 ÷ 刷新率),不是抄的。量到的节奏若有对应的一档,那一行会点亮 ——
+      <strong>落在两档中间就一行都不亮</strong>,那本身就是一个值得注意的结果。
+    </p>
+    <table class="ref-table ref-table--kv">
+      <thead>
+        <tr>
+          <th>刷新率</th>
+          <th>一整帧</th>
+          <th>常见于</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          RATE_TABLE.map((row) => (
+            <tr data-rate={row.hz}>
+              <td>{row.hz} Hz</td>
+              <td>{row.frame} ms</td>
+              <td>{row.where}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>怎么看才对</h2>
+    <ol class="steps">
+      <li>
+        <strong>方块要够快。</strong>慢速下任何刷新率都是流畅的 ——
+        60Hz 和 240Hz 的差别只在快速移动时才看得出来。先用「快」那一档看,
+        觉得太糊再往下降。
+      </li>
+      <li>
+        <strong>看边缘,不要用眼睛追它。</strong>让方块从视野里划过去,
+        盯住一个固定的位置 —— 追着它看会把顿挫感抹平,因为你的眼睛在跟着补偿。
+      </li>
+      <li>
+        <strong>和背景的格子比。</strong>那些淡格子是静止的参照系。
+        方块相对格子打滑、跳跃,就是没跟上。
+      </li>
+      <li>
+        <strong>别在省电模式下测。</strong>笔记本拔掉电源、系统开了省电档、
+        浏览器窗口没在前台 —— 这三样都会让刷新率降到和面板规格无关的一个数上。
+      </li>
+    </ol>
+
+    <h2>谁在拖后腿</h2>
+    <p>
+      画面从"程序说该画了"到你眼睛看到,要过四道关:
+      <strong>浏览器画帧 → 合成器合成 → 显卡输出 → 面板响应</strong>。
+      这一页的能量到的只有第一道 —— 后面三道它一个都看不到。所以:
+    </p>
+    <ul>
+      <li>
+        <strong>数漂亮但看着卡</strong> —— 问题多半在后面三道:
+        合成器掉帧、显卡驱动、线材或面板响应。换个页面或另一款浏览器再看一眼,
+        能不能复现是很有用的一条线索。
+      </li>
+      <li>
+        <strong>数也小、看着也卡</strong> —— 这台机器此刻确实没跑起来。
+        常见原因是省电模式、另一个标签页在吃 CPU、扩展程序、
+        或者把笔记本接在了一个带宽不够的外接屏上。
+      </li>
+      <li>
+        <strong>数漂亮、看着也顺</strong> —— 那这一档对你就是够用的。
+        <strong>不需要为了一个更大的数字去换硬件。</strong>
+      </li>
+    </ul>
+
+    <p>
+      顺带一句:这一页的动画<strong>由页面自己在画</strong>,
+      所以它占掉的那点时间也算在量的数里。一个完全空白的页面量到的数可能略高一点 ——
+      差别很小,但说清楚比不说好。想拿回报率、抖动这类鼠标侧的读数,
+      请去<a href={href('polling-rate-test/')}>鼠标回报率测试</a>;
+      那一页量的东西和这一页没有关系。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 那条带子。**不写高度** —— `.test-area` 自带 380px,和别页一致。
+     * 它继承 `.test-area` 的刻度栅格,而那些格子在这里正是**静止的参照物**,
+     * 是这一页需要的,不是装饰(见 FAQ 最后一条)。
+     */
+    .refresh-area {
+      cursor: default;
+    }
+
+    /*
+     * 方块。**用 `transform` 移动,不用 `left`** —— `left` 每帧都会触发一次
+     * 布局,而这一页量的正是帧节奏:让被测的页面自己去抢每一帧的时间,
+     * 量出来的数就变成"页面有多慢"而不是"这台机器有多顺"。
+     * `translate3d` 还会把它提到自己的合成层上,改它不引起重绘。
+     *
+     * 边长写在**这里**(56px),脚本里不抄第二份:它算位移时读的是
+     * `block.offsetWidth`,那才是权威值。够大才有清晰的边缘,而边缘正是
+     * 判断顿挫的参照 —— 所以别为了"秀气"把它改小。
+     */
+    .refresh-block {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      width: 56px;
+      height: 56px;
+      margin-top: -28px;
+      border-radius: var(--radius);
+      /* 在 `.well` 里,`--accent` 就是磷光绿 —— 和键帽、靶心同一支笔,一个令牌都没新增 */
+      background: var(--accent);
+      transform: translate3d(0, 0, 0);
+      will-change: transform;
+    }
+  </style>
+
+  <script>
+    import { summarizeFrameCadence } from '../lib/analysis';
+    import {
+      createTicker,
+      el,
+      format,
+      mountCapabilityNotices,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    const area = el('area');
+    const block = el('block');
+    const toggle = el('toggle') as HTMLButtonElement | null;
+
+    if (!area || !block) throw new Error('测试面未就绪');
+
+    /*
+     * 这一页**要拦默认行为**:用户正盯着一条匀速横移的方块判断流畅度,
+     * 这时候中键自动滚动会让整块测试面从指针底下滑走,右键菜单会盖住画面 ——
+     * 两样都直接打断这一页唯一的动作。判据(「这一页的读数会不会被指针的
+     * 默认行为污染」)在这里成立,所以调整页那一版。
+     */
+    suppressWorkbenchDefaults();
+
+    /*
+     * 帧节奏那几条告警在这一页是有意义的:跨域隔离影响时间戳精度、
+     * `pointerrawupdate` 影响回报率 —— 这一页都不吃,但它**确实在报一个
+     * 和刷新有关的数**,而"浏览器把 rAF 掐到什么节奏"正属于那组告警在说的
+     * 环境问题。所以照常渲染,不特殊处理。
+     */
+    mountCapabilityNotices(el('cap-notice'));
+
+    // ---------- 方块 ----------
+
+    /**
+     * 方块能走的范围(测试面的内容宽)。
+     *
+     * **缓存起来,不每帧读。**读 `clientWidth` 会强制一次布局,而这一页量的
+     * 正是每一帧剩多少时间 —— 每帧插一次强制布局,等于让被测对象自己去
+     * 污染测量。尺寸变了由下面那个 `ResizeObserver` 刷新这个缓存。
+     */
+    let track = 0;
+
+    /** 方块自己的宽度,同样只在尺寸变化时读一次 */
+    let blockWidth = 0;
+
+    /** 当前速度(像素 / 秒) */
+    let speed = 520;
+
+    let running = false;
+    let stopTicker: (() => void) | null = null;
+
+    /** 方块左边缘相对测试面的位移 */
+    let position = 0;
+
+    /** 上一帧的时间戳。0 表示"这一轮还没有上一帧" */
+    let lastFrameAt = 0;
+
+    /** 这一轮的帧间隔。**原样存,不在这里筛** —— 判据在 `summarizeFrameCadence` 里 */
+    const gaps: number[] = [];
+
+    /** 读数上一次刷新的时刻,用来把 DOM 写入压到 4 次 / 秒 */
+    let lastRenderAt = 0;
+
+    function measure(): void {
+      if (!area || !block) return;
+      track = area.clientWidth;
+      blockWidth = block.offsetWidth;
+    }
+
+    /*
+     * 一帧最多按多少毫秒算。
+     *
+     * 页面被切到后台时 rAF 会停,**回到前台的第一帧时间差是整段后台时长** ——
+     * 不夹住的话方块会凭空瞬移一大段(而那不是"卡",是"刚才根本没画")。
+     * 夹到 50ms 相当于"最坏也就是掉几帧",看起来仍是连续的。
+     */
+    const MAX_STEP_MS = 50;
+
+    function step(now: number): void {
+      const raw = lastFrameAt === 0 ? 0 : now - lastFrameAt;
+
+      /*
+       * 帧间隔**先记原样的数**:夹住只是给方块算位移用的,`raw` 那个数才是
+       * 这一帧真实的时间差。把夹过的值记进缓冲区,一次 300ms 的后台间隔
+       * 就会变成一个漂亮的 50ms,而 `summarizeFrameCadence` 正是靠
+       * "超过 100ms 的不算一帧"把这类样本剔掉的 —— 提前夹住等于把它的判据
+       * 悄悄改掉了。
+       */
+      if (lastFrameAt > 0) {
+        gaps.push(raw);
+        if (gaps.length > 240) gaps.shift();
+      }
+      lastFrameAt = now;
+
+      const dt = Math.min(raw, MAX_STEP_MS);
+
+      position += (speed * dt) / 1000;
+      // 走到头就整个移出右边、从左边重新进来:一段连续的、方向不变的运动,
+      // 比来回弹跳更容易看出顿挫 —— 掉头那一下本身就是一次显眼的变化
+      if (track > 0 && position > track) position = -blockWidth;
+
+      if (block) block.style.transform = `translate3d(${position}px, 0, 0)`;
+
+      /*
+       * 读数**最多每 250ms 写一次**。每帧写一次 `textContent` 会触发样式重算,
+       * 而这份开销会被如实记进帧间隔里 —— 又是"测量被自己污染"那条。
+       * 4 次 / 秒对读数完全够用,这里要看的也从来不是"数字跳得多快"。
+       */
+      if (now - lastRenderAt >= 250) {
+        lastRenderAt = now;
+        renderStats();
+      }
+    }
+
+    // ---------- 读数 ----------
+
+    function renderStats(): void {
+      const cadence = summarizeFrameCadence(gaps);
+      setStat('hz', format(cadence.hz));
+      setStat('frameMs', format(cadence.medianMs, 1));
+
+      highlightRate(cadence.hz);
+
+      if (cadence.hz === null) {
+        setText(
+          el('readout'),
+          '帧数还不够,再让它跑一会儿。少于十来个样本的"中位数"什么也说明不了 —— ' +
+            '所以这里先给破折号,不给一个凑出来的数。',
+        );
+        return;
+      }
+
+      setText(
+        el('readout'),
+        `这一轮的帧节奏约 ${cadence.hz} Hz(中位帧间隔 ${cadence.medianMs!.toFixed(1)} ms,` +
+          `取 ${cadence.samples} 个有效间隔的中位数)。` +
+          '这是浏览器画帧的节奏,不是显示器的物理刷新率 —— 看着卡不卡,以你的眼睛为准。',
+      );
+    }
+
+    /**
+     * 把对照表里对应的那一行点亮。
+     *
+     * **只有落在一档附近(±10%)才点亮**,落在两档中间就一行都不亮。
+     * 144Hz 面板上掉帧量到 72 是常事,而 72 离 75 只差 4% —— 按"取最近的一档"
+     * 写,它会被点亮成「75 Hz 早期笔记本面板」,把"合成器掉了一半帧"说成
+     * "你的面板是 75Hz"。宁可不亮。
+     */
+    function highlightRate(hz: number | null): void {
+      for (const row of document.querySelectorAll<HTMLElement>('tr[data-rate]')) {
+        const value = Number(row.dataset.rate);
+        const hit = hz !== null && Math.abs(value - hz) <= value * 0.1;
+        if (hit) row.setAttribute('data-current', 'true');
+        else row.removeAttribute('data-current');
+      }
+    }
+
+    // ---------- 开 / 停 ----------
+
+    function start(): void {
+      if (running) return;
+      running = true;
+
+      // 新一轮从干净的状态起:上一轮的间隔和位置都不该混进来
+      gaps.length = 0;
+      lastFrameAt = 0;
+      lastRenderAt = 0;
+      position = 0;
+      measure();
+
+      setStat('hz', '—');
+      setStat('frameMs', '—');
+      highlightRate(null);
+      setText(el('readout'), '跑起来了。盯着方块的边缘看,别用眼睛追它。');
+
+      if (toggle) toggle.textContent = '停止';
+      stopTicker = createTicker(0, step);
+    }
+
+    function stop(): void {
+      if (!running) return;
+      running = false;
+      stopTicker?.();
+      stopTicker = null;
+
+      if (toggle) toggle.textContent = '开始';
+      // 停在这一帧上再看一眼最终的数。方块留在原地不动 —— 把它弹回起点
+      // 等于在用户刚看完的那一瞬又动一下
+      renderStats();
+    }
+
+    toggle?.addEventListener('click', () => {
+      if (running) stop();
+      else start();
+    });
+
+    // 切走标签页就停下。rAF 本来就会停,但**回到前台时用户看到的还是
+    // "正在跑"的样子**,而那个数里混着一段后台时间 —— 不如如实停掉,
+    // 让用户自己决定要不要再跑一轮
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stop();
+    });
+
+    // ---------- 速度 ----------
+
+    function renderSpeeds(): void {
+      for (const button of document.querySelectorAll<HTMLElement>('.speed')) {
+        button.setAttribute(
+          'aria-pressed',
+          Number(button.dataset.speed) === speed ? 'true' : 'false',
+        );
+      }
+    }
+
+    for (const button of document.querySelectorAll<HTMLElement>('.speed')) {
+      button.addEventListener('click', () => {
+        // 速度**从 DOM 读回来**,不在脚本里抄第二份表(frontmatter 变量在
+        // `<script>` 里不存在)。同 cps-test 的 renderDurations()
+        speed = Number(button.dataset.speed) || 520;
+        renderSpeeds();
+      });
+    }
+
+    // 换速度**不重开一轮**:用户正是在两个速度之间比较"哪一个看得出差别",
+    // 中途清掉读数会把刚建立起来的对照抹掉
+    renderSpeeds();
+
+    // ---------- 尺寸 ----------
+
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => {
+        measure();
+      }).observe(area);
+    } else {
+      window.addEventListener('resize', measure);
+    }
+
+    /*
+     * 空态:读数就是两条破折号,不调 `renderStats()`。
+     * 那会印出"帧数还不够,再让它跑一会儿",而用户此刻**一次都还没跑过** ——
+     * 把"没开始"说成"跑了但样本不够",是两个不同的状态被写成同一句话。
+     */
+    setStat('hz', '—');
+    setStat('frameMs', '—');
+  </script>
+</BaseLayout>

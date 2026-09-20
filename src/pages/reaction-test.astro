@@ -330,6 +330,7 @@ const jsonLd = {
       RT_WAIT_MAX_MS,
       RT_WAIT_MIN_MS,
       TRIALS_PER_ROUND,
+      summarizeFrameCadence,
       summarizeReaction,
     } from '../lib/analysis';
     import type { ReactionTrial } from '../lib/analysis';
@@ -472,12 +473,18 @@ const jsonLd = {
 
     // ---------- 读数 ----------
 
-    /** 实测刷新率。样本不够就给 0,由调用点决定要不要显示 */
-    function estimateHz(): number {
-      if (frameGaps.length < 10) return 0;
-      const sorted = [...frameGaps].sort((a, b) => a - b);
-      const median = sorted[Math.floor(sorted.length / 2)];
-      return median > 0 ? Math.round(1000 / median) : 0;
+    /**
+     * 实测刷新率 —— **量法与刷新率目视测试共用同一份实现**
+     * (`analysis.ts` 的 `summarizeFrameCadence`)。
+     *
+     * 原来这里自己算了一遍中位数。两页印的是同一个量,而用户会拿它们互相对照,
+     * 两份实现迟早会漂;漂的那天没有任何一处会报错。所以连同"什么算一帧"
+     * (间隔 > 100ms 的采样不算)一起搬进了那个纯函数,由单测钉住。
+     *
+     * 它只是**参照**:里那个毫秒数**绝不减掉由它推算出来的任何值**。
+     */
+    function currentHz(): number | null {
+      return summarizeFrameCadence(frameGaps).hz;
     }
 
     function renderStats(): void {
@@ -488,8 +495,8 @@ const jsonLd = {
       setStat('foul', String(s.foul));
       setStat('suspect', String(s.suspect));
 
-      const hz = estimateHz();
-      setStat('hz', hz > 0 ? String(hz) : '—');
+      // `format()` 对 `null` 出破折号 —— 样本不够时就是它,不是 0
+      setStat('hz', format(currentHz()));
 
       const best = loadBest(BEST_KEY);
       setHint(
@@ -559,13 +566,18 @@ const jsonLd = {
         performance.now() + RT_WAIT_MIN_MS + Math.random() * (RT_WAIT_MAX_MS - RT_WAIT_MIN_MS);
 
       stopTicker = createTicker(0, (now) => {
-        // 顺带采一段帧间隔,结算时报一个实测刷新率
+        /*
+         * 顺带采一段帧间隔,结算时报一个实测刷新率。
+         *
+         * **这里只管往缓冲里塞原样的数,不在这里筛。** "什么算一帧"(间隔为负、
+         * 或者超过 100ms 的长停)是 `summarizeFrameCadence` 的判据 —— 筛选放在
+         * 采样那一侧,另一页就会各写一份,两份的口径迟早不一样。
+         *
+         * 只保留最近 240 个:那是**缓冲区**的大小,和判据无关。
+         */
         if (lastFrame > 0) {
-          const gap = now - lastFrame;
-          if (gap > 0 && gap < 100) {
-            frameGaps.push(gap);
-            if (frameGaps.length > 240) frameGaps.shift();
-          }
+          frameGaps.push(now - lastFrame);
+          if (frameGaps.length > 240) frameGaps.shift();
         }
         lastFrame = now;
 
@@ -601,7 +613,7 @@ const jsonLd = {
       setText(toggle, '再测一轮');
 
       const s = summarizeReaction(trials);
-      const hz = estimateHz();
+      const hz = currentHz();
 
       if (s.medianMs === null) {
         say(
@@ -617,7 +629,7 @@ const jsonLd = {
             isRecord ? '本机新纪录' : '没破本机纪录'
           }`,
         );
-        if (hz > 0) {
+        if (hz !== null) {
           setHint('hz', `实测 · 一整帧约 ${(1000 / hz).toFixed(1)}ms`);
         }
       }

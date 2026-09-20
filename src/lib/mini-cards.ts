@@ -39,7 +39,6 @@ import type { Confidence } from './tools';
 export type MiniKind =
   | 'mouse-buttons'
   | 'cps'
-  | 'wheel'
   | 'trail'
   | 'polling'
   | null;
@@ -96,29 +95,36 @@ export interface MiniCard {
   /**
    * 这张卡**还顶了**哪几个工具页。
    *
-   * 首页一张卡可以覆盖多个工具(按键 / 长按拖拽 / 双击并成一张),但**只有一个
-   * slug 能当主工具** —— `data-mini` 挂钩、卡名、卡摘要、可信度徽章全走上面那个
-   * `slug`,被顶掉的这几项在这里只贡献两个链接(见 `MiniCard.astro` 的小注)。
+   * 首页一张卡可以覆盖多个工具(按键 / 长按拖拽 / 双击 / 滚轮并成一张),但
+   * **只有一个 slug 能当主工具** —— `data-mini` 挂钩、卡名、卡摘要、可信度徽章
+   * 全走上面那个 `slug`,被顶掉的这几项在这里只贡献几个链接
+   * (见 `MiniCard.astro` 的小注末尾那行「独立页面:」)。
    *
    * 被顶掉的工具**不再有自己的 `MiniCard` 条目**。留一条空壳只为了让"一一对应"
    * 好看,代价是那条的 `readouts` / `note` 变成没人读的死数据 —— 下一眼看不出
    * 它已经作废。单测钉的是"每个诊断工具**恰好**被覆盖一次",不是形式上的对齐。
+   * `scroll-test` 并进来时就是照这一条删掉自己那条 spec 的。
    */
   covers?: string[];
   /**
    * 够宽时这张卡**跨两格**。
    *
-   * **只有"一张卡顶了几页"的那种卡该写它** —— 跨格是为了让集合体有地方摊开,
-   * 不是为了给单页卡加尺寸。`tests/mini-cards.test.ts` 因此钉住两条:"至多一张卡
-   * wide"(两张 wide 在 3 列下是 10 个格子铺 4 行、末尾空两格),以及 wide 的卡
-   * 必须真的有 `covers`。
+   * 目前两张,而理由**不是同一条**:
+   * - `button-test` —— 一张卡顶四页的**集合体**,要有地方摊开;
+   * - `trail-test` —— 单页卡,但**画布要面积**:轨迹是画形状的,
+   *   只宽不高的话形状会被压得很扁,所以它跨格之外还另有一条高度规则。
+   *
+   * 所以这里**不是**"只有集合体该写"。但也不是谁都能写:`tests/mini-cards.test.ts`
+   * 钉住的是**落位不留空** —— 跨格数与卡片数的搭配必须让 3 列下的格子正好铺满,
+   * 否则末尾或行中会空出格子,而**那是不报任何错的**:类型、构建、其余用例全不响,
+   * 只有截图看得出来。
    *
    * **这里只管"要不要",不管"什么时候"** —— 生效条件写在 `global.css` 那个
    * `@container (min-width: 932px)` 里(网格真的排得出三列),因为那是渲染之后
    * 才有的事实。别把这个判断挪进模板。
    *
-   * **也不许就地判 `kind === 'mouse-buttons'`**:那样"哪张卡跨格"就成了 `kind`
-   * 的副作用,以后再加一张放鼠标的卡会静默地跟着跨格。
+   * **也不许就地判 `kind`**:那样"哪张卡跨格"就成了 `kind` 的副作用,
+   * 以后再加一张同类装置会静默地跟着跨格。
    */
   wide?: boolean;
   /** 卡里的装置;`null` 表示放不进来,见 `fallback`。 */
@@ -175,8 +181,14 @@ export interface MiniCard {
  * 现在按可信度分档讲,再叠加每张卡自己的 `note`。事实一条没少,只是换了切法。
  *
  * 措辞必须和 `tools.ts` 的 `CONFIDENCE_LABEL` 对得上,而且**不许比它敢说的更高**。
+ *
+ * **类型里那个 `Exclude<..., 'none'>` 不是笔误,是这份骨架的边界。**
+ * `Confidence` 有第五档 `'none'`(不测量),而它**不进这份骨架** ——
+ * 这份 `<dl>` 解释的是"首页卡片上那枚徽章是什么意思",而卡片只出诊断工具
+ * (`MiniCard` 只由 `DIAGNOSTIC_TOOLS` 渲染),`'none'` 永远不会出现在卡片上。
+ * 收窄在这里,漏写一档仍然是编译错误,而多出来的那一档不会凭空长进图例。
  */
-export const CONFIDENCE_NOTE: Record<Confidence, string> = {
+export const CONFIDENCE_NOTE: Record<Exclude<Confidence, 'none'>, string> = {
   exact: '浏览器直接给出原始事件流,数出来的就是数出来的。',
   estimate: '要经过一层换算或反推,假设不成立时结果就不成立。',
   shape: '只有形状可信,它证明不了"丢了几次"这种结论。',
@@ -186,38 +198,46 @@ export const CONFIDENCE_NOTE: Record<Confidence, string> = {
 export const MINI_CARDS: MiniCard[] = [
   {
     /*
-     * 一张卡顶三页:按键 / 长按拖拽 / 双击。
+     * 一张卡顶四页:按键 / 长按拖拽 / 双击 / 滚轮。
      *
-     * 徽章取的是 `button-test` 的 `exact`,这**不是漏改**:卡上这四个数(按下次数 /
-     * 当前按着 / 双击间隔 / 按住秒数)全是原样计数与原样时间戳。它顶着的
-     * `hold-drag-test` 是 `shape`,而那个 `shape` 的结论("按住期间断没断")
-     * **刻意不上卡** —— 它要拖满一整段才判得出形状,120px 里出不来。
-     * 缺的那一半在小注里说破、并指向那一页。
+     * 徽章取的是 `button-test` 的 `exact`,这**不是漏改**:卡上那几个数全是原样
+     * 计数与原样时间戳。它顶着的 `hold-drag-test` 是 `shape`,而那个 `shape` 的
+     * 结论("按住期间断没断")**刻意不上卡** —— 它要拖满一整段才判得出形状,
+     * 卡里出不来。缺的那一半在小注里说破、并指向那一页。
      *
-     * **滚轮只上了这台装置的一半,没进 `covers`。** 卡上多的是"轮子亮起来 +
-     * 箭头上/下",而「滚轮」那一页**照旧有自己的卡**(格数、最近 10 次的带子
-     * 都在那边)。所以这里不列 `scroll-test` —— 列了就等于声称那一页也被顶掉,
-     * 而单测的"恰好覆盖一次"会当场红。卡名把滚轮写进去,是因为**这张卡真的会
-     * 响应滚动**,不是因为它顶了那一页。
+     * **滚轮是后并进来的,而且是整页并进来(`covers` 里有 `scroll-test`)。**
+     * 卡名把滚轮写进去、`covers` 也列上它 —— 这一次两者说的是同一件事。
+     * 被顶掉的「滚轮」页**照旧存在**(完整正文 / FAQ / 结构化数据是 SEO 的落点),
+     * 只是不再是首页的一张卡,入口收到小注末尾那行「独立页面:」里。
+     *
+     * 并进来时**没有**给方向单开一个读数槽:方向画在鼠标图上(轮子亮 + 箭头),
+     * 那一格留给了 `格数`。判据和 `wide` 那条同源 —— 方向不是有量纲的量,
+     * 给它一格等于把它说成一件可以比大小的东西。
      */
     slug: 'button-test',
-    covers: ['hold-drag-test', 'double-click-test'],
-    /* 一张卡顶三页,所以它该有地方摊开 —— 三列时跨两格。见 `MiniCard.wide` */
+    covers: ['hold-drag-test', 'double-click-test', 'scroll-test'],
+    /* 一张卡顶四页,所以它该有地方摊开 —— 三列时跨两格。见 `MiniCard.wide` */
     wide: true,
     kind: 'mouse-buttons',
     faceName: '按键 / 滚轮 / 长按 / 双击',
-    faceDesc: '按下哪个键、按住多久、双击间隔有多长、滚轮朝哪边 —— 都在这张卡上。',
+    faceDesc: '按下哪个键、按住多久、双击间隔有多长、滚轮朝哪边转了几格 —— 都在这张卡上。',
     prompt: '在框里按鼠标键,或滚滚轮',
     /*
      * 读数槽。`held` 这个名字有个坑:并进来之前,按键那张把 `held` 写成**按键名**、
      * 长按那张把 `held` 写成**秒数**。一张卡里一个 key 只能有一个含义,
      * 所以按键名那一条改叫 `holding` 腾出位置。
+     *
+     * 后两项是滚轮并进来时加的,顺序照「按键在前、滚轮在后」摆 ——
+     * 和卡名一致。`recent` 是 `kind: 'trace'`(走 `ctx.push`,只保留末值的
+     * `write` 留不住一串),`notches` 才是普通的数值槽。
      */
     readouts: [
       { key: 'presses', label: '按下' },
       { key: 'holding', label: '当前按着' },
       { key: 'gap', label: '双击间隔', unit: 'ms' },
       { key: 'held', label: '按住', unit: 's' },
+      { key: 'notches', label: '格数' },
+      { key: 'recent', label: '最近 10 次', kind: 'trace', slots: DEFAULT_TRACE_SLOTS },
     ],
     /*
      * 标红的那一处**不是**右上角那个 `双击间隔` 读数,是**下面那一排 chip 里
@@ -230,19 +250,9 @@ export const MINI_CARDS: MiniCard[] = [
     note:
       `双击间隔小于 ${CLICK_CHATTER_MS}ms 时,下面那个键的计数会标红 —— 那个速度人手做不出来。` +
       '按住期间断没断这张卡看不出:那要拖满一整段才判得出形状,去「长按拖拽」那一页。' +
-      '滚轮只报方向:轮子亮起来、箭头指出朝哪边。格数是估算,要看它去「滚轮」那一页。' +
+      '滚轮那两格:方向看轮子和箭头,格数是估算 —— 浏览器从不说"一格是多少"。' +
+      '方向带每格一次滚动:向下沉底、向上升顶,红格是反向毛刺。' +
       '侧键那一格是 0 只说明页面没收到,有些鼠标的侧键根本不走鼠标事件。',
-  },
-  {
-    slug: 'scroll-test',
-    kind: 'wheel',
-    prompt: '在框里滚滚轮',
-    readouts: [
-      { key: 'direction', label: '方向' },
-      { key: 'notches', label: '格数' },
-      { key: 'recent', label: '最近 10 次', kind: 'trace', slots: DEFAULT_TRACE_SLOTS },
-    ],
-    note: '格数是估算,浏览器从不说"一格是多少"。方向带每格一次滚动:向下沉底、向上升顶,红格是反向毛刺。',
   },
   {
     slug: 'cps-test',
@@ -266,6 +276,12 @@ export const MINI_CARDS: MiniCard[] = [
   },
   {
     slug: 'trail-test',
+    /*
+     * 跨两格 —— 但它**不是**集合体(只顶自己一页),理由是画布要面积:
+     * 轨迹是画形状的,只宽不高形状会被压得很扁。所以除了跨格,
+     * `global.css` 那个 `@container` 块里还给它单独抬了一条高度规则。
+     */
+    wide: true,
     kind: 'trail',
     prompt: '在框里画一笔',
     readouts: [

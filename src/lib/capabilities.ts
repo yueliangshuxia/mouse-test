@@ -59,12 +59,31 @@ export interface Capabilities {
 const COARSE_RESOLUTION_MS = 0.1;
 
 /**
+ * 这一页的告警该按什么口径给。
+ *
+ * `timing` 问的是那一句:**这一页的结论吃不吃"两个事件之间差多久"**。
+ *
+ * **默认 `true`,不传就是原来的行为** —— 全站绝大多数页面的判据都建立在
+ * 时间戳上,所以那十一个既有页面一个字都不用改。
+ *
+ * 传 `false` 的是只读坐标或只读计数的页面(手稳度只读 x/y)。它们拿到的是
+ * **同一份探测结果**,只是不再收到那四条与时间戳有关的告警:在一条根本不读
+ * 时间戳的页面上印一句"本页不报抖动和丢包率就是这个原因",那是**假的** ——
+ * 那一页不报它们,是因为它压根不测那两样。这正是全站最反对的那种话。
+ */
+export interface CapabilityOptions {
+  timing?: boolean;
+}
+
+/**
  * 探测当前环境。
  *
  * 注意:合并事件的 timestamp 是否可用**无法在这里判断**——它只有在真实收到
  * 第一个合并事件时才知道(Firefox 返回 0)。那部分由采样层动态判定并回报。
  */
-export function detectCapabilities(): Capabilities {
+export function detectCapabilities(options: CapabilityOptions = {}): Capabilities {
+  const timing = options.timing ?? true;
+
   const pointerEvents = typeof window !== 'undefined' && 'PointerEvent' in window;
   const coalescedEvents =
     pointerEvents && typeof PointerEvent.prototype.getCoalescedEvents === 'function';
@@ -92,20 +111,20 @@ export function detectCapabilities(): Capabilities {
     warnings.push('当前浏览器不支持 Pointer Events,无法运行测试。请升级浏览器。');
   }
 
-  if (!secureContext) {
+  if (timing && !secureContext) {
     // Chrome 142 起这条从"建议"变成了"硬性失败",必须放在最前面说。
     warnings.push(
       '当前页面不是安全上下文。Chrome 142 起,只有 HTTPS 页面才能读取合并事件,否则回报率测试会完全失效。请改用 HTTPS 访问。',
     );
   }
 
-  if (!coalescedEvents) {
+  if (timing && !coalescedEvents) {
     warnings.push(
       '当前浏览器不支持 getCoalescedEvents(),测得的回报率上限受屏幕刷新率限制,结果不可信。建议改用最新版 Chrome 或 Edge。',
     );
   }
 
-  if (!crossOriginIsolated) {
+  if (timing && !crossOriginIsolated) {
     warnings.push(
       // 这条经 showNotice 的 textContent 输出,所以**不能**带 markdown 标记
       // (和 FAQ 那条同一个坑:星号会原样显示)。
@@ -116,7 +135,7 @@ export function detectCapabilities(): Capabilities {
     );
   }
 
-  if (!pointerRawUpdate) {
+  if (timing && !pointerRawUpdate) {
     warnings.push(
       '当前浏览器不支持 pointerrawupdate,采样会被对齐到屏幕刷新率再派发,时间戳带有批处理延迟。结果可用,但精度不如 Chrome 或 Edge。',
     );

@@ -29,18 +29,28 @@ const SLACK_PX = 1;
 
 export function mountNavOverflow(nav: Element): void {
   const track = nav.querySelector<HTMLElement>('[data-nav-track]');
+  const group = nav.querySelector<HTMLElement>('[data-nav-group]');
   const more = nav.querySelector<HTMLElement>('[data-nav-more]');
   const trigger = nav.querySelector<HTMLElement>('[data-nav-trigger]');
   const panel = nav.querySelector<HTMLElement>('[data-nav-panel]');
-  if (!track || !more || !trigger || !panel) return;
+  if (!track || !group || !more || !trigger || !panel) return;
 
   /*
    * **在这里一次性取好,之后不再重新查询。**
    * 这些节点会被搬进搬出,而搬动只改变父子关系、不改变身份,所以同一个
    * 数组在重排之间始终有效 —— 每一次重排都照它的顺序 `appendChild` 回去,
    * 原始顺序因此不会丢。
+   *
+   * **必须从 `group` 里取,不能从 `track` 里取。** 两件事:
+   *
+   * 1. 报头里还有第二个下拉(「工具箱」),它面板里的每一项**也是**
+   *    `.site-nav__item`。从 `track` 里查会连带把那些卷进来 —— 它们会被
+   *    逐个 `appendChild` 进「更多」的面板,而那是**结构上的破坏**,不只是
+   *    折错项。(工具箱那一块住在轨道外面,所以 `track.querySelectorAll`
+   *    其实够不着它;但把范围收进 `group` 就不依赖这个巧合了。)
+   * 2. 报出去的落点就是收进来的容器:搬出去搬回来都是同一个 `group`。
    */
-  const items = Array.from(track.querySelectorAll<HTMLElement>('.site-nav__item'));
+  const items = Array.from(group.querySelectorAll<HTMLElement>('.site-nav__item'));
   if (items.length === 0) return;
 
   let open = false;
@@ -56,9 +66,38 @@ export function mountNavOverflow(nav: Element): void {
     return track!.scrollWidth <= track!.clientWidth + SLACK_PX;
   }
 
+  /*
+   * 那圈圆角边框只在**框里还有项**的时候画;框空了,连轨道一起收掉。
+   *
+   * 判据没有魔数、而且自纠正:要是连最后一项都放不下,循环会把它也搬走,
+   * 框自己就消失了。空了**整块 `display: none`,不是只把边框变透明** ——
+   * 一个 1px 的空框会被读成"这里坏了",和 `.rate-chart` 那条 110px 灰槽
+   * 是同一种罪。
+   *
+   * **折了几项之后仍然画框**(代价是窄屏下框里可能只剩一两项)是权衡过的:
+   * 折叠在 1057px 就开始了,也就是几乎每一台笔记本上 —— 收框等于在最需要
+   * 分组的地方把分组抹掉,而读者恰恰是在一行不全的时候最需要知道"这些是
+   * 一伙的,剩下的在右边那个「更多」里"。框说的是"这些属于一起",不是
+   * "这些就是全部"。
+   *
+   * **轨道也得跟着收。** 框藏起来之后轨道就是个 0 宽的盒子,而 `.site-nav`
+   * 那条 `column-gap` 是按**孩子个数**给的、不看宽度 —— 留着它会把「更多」
+   * 白往右推 12px,报头左边缘就歪了。(实测 420px:10 项全折,于是正好走到
+   * 这一支。框空了、轨道也空了,报头只剩「更多」和「工具箱」。)
+   *
+   * **必须在 `fits()` 之前调。** `fits()` 量的是轨道,而框藏起来会改变轨道
+   * 的内容宽 —— 顺序反了,最后一次判定读到的就是框还没藏起来的那个宽度。
+   */
+  function syncGroup(): void {
+    const empty = group!.childElementCount === 0;
+    group!.hidden = empty;
+    track!.hidden = empty;
+  }
+
   function layout(): void {
     // 1. 全部收回行内,顺手把下拉收掉 —— 从干净状态重来
-    for (const item of items) track!.appendChild(item);
+    for (const item of items) group!.appendChild(item);
+    syncGroup();
     more!.hidden = true;
     setOpen(false);
 
@@ -69,6 +108,7 @@ export function mountNavOverflow(nav: Element): void {
     more!.hidden = false;
     for (let i = items.length - 1; i >= 0; i -= 1) {
       panel!.insertBefore(items[i], panel!.firstChild);
+      syncGroup();
       if (fits()) break;
     }
   }

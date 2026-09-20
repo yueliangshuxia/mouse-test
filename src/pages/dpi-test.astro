@@ -260,18 +260,9 @@ const jsonLd = {
     }
 
     /* .dpi-live 的定位、[hidden]、大字和标签都在 global.css 里
-       (和 CPS / 拖拽 / 滚轮三页共用);选项按钮的选中态同理 */
-
-    .field {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .field__label {
-      color: var(--text-dim);
-      font-size: 0.9rem;
-    }
+       (和 CPS / 拖拽 / 滚轮三页共用);选项按钮的选中态同理。
+       `.field` / `.field__label` 也搬去了 global.css —— 灵敏度换算器要的是
+       同一对东西,而 `<style>` 是作用域化的,那份在这里写得进、那边用不上。 */
 
   </style>
 

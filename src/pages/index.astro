@@ -35,7 +35,16 @@ const jsonLd = {
  * **事实一条没少,只是换了切法** —— 折进卡片不等于把那节删掉。所以这段是真实
  * 可见的正文,不是 tooltip、不是折叠面板;收起来就等于把全站的主张从首页删掉。
  */
-const CONFIDENCE_ORDER: Confidence[] = ['exact', 'estimate', 'shape', 'direction'];
+/*
+ * **四档,不是五档 —— 而那个 `Exclude` 就是这句话本身。**
+ *
+ * `Confidence` 还有第五档 `'none'`(不测量),它**刻意不进这份图例**:
+ * 这份 `<dl>` 解释的是"首页卡片上那枚徽章是什么意思",而卡片只出诊断工具
+ * (`MINI_CARDS` 只由 `DIAGNOSTIC_TOOLS` 建),`'none'` 永远不会出现在卡片上。
+ * 收窄写在类型里,所以哪天有人往这份清单里加一档,`CONFIDENCE_NOTE` 那边
+ * 会立刻红 —— 而不是静默地多印一行首页上根本用不到的解释。
+ */
+const CONFIDENCE_ORDER: Exclude<Confidence, 'none'>[] = ['exact', 'estimate', 'shape', 'direction'];
 
 /*
  * 空态那句话**可以随模式变**(`MiniMode.prompt`),所以首帧就要挑对那一个 ——
@@ -117,7 +126,7 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
   <h2>更多工具</h2>
 
   <p class="prose">
-    上面的卡片都是诊断,测的是"鼠标坏没坏";下面这两页是玩,成绩同样只存在本机,
+    上面的卡片都是诊断,测的是"鼠标坏没坏";下面这些是玩,成绩同样只存在本机,
     也一样会在页面上说清楚哪些数测不准、为什么。
   </p>
 
@@ -132,6 +141,16 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
       ))
     }
   </ul>
+
+  {/*
+    通向工具箱页的那一条**不放进 `<ul>`**。放进去它就成了一枚和上面七个
+    一模一样的药丸,而它指的不是一件工具,是一扇门 —— 同一排里两种东西
+    长得一样,读者会去数"到底有几个工具"。
+    (报头里「工具箱」那一项也是靠这个理由单独描边的。)
+  */}
+  <p class="prose">
+    <a href={href('toolbox/')}>工具箱</a>里这几件都带一小块预览,一眼看得出是干什么的。
+  </p>
 
   <h2>关于这些测试</h2>
 
@@ -191,10 +210,10 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
    * 而且他会以为是鼠标坏了 —— 和按键测试页遇到的是同一件事(见 `side-buttons.ts`)。
    *
    * **一次装在整个网格上,不是每张卡各装一份。** 判据本来就是"按下点落在哪儿",
-   * 装八份只是让八份各自记一遍同一个事实。网格是这些测试面共同的外框,
+   * 装七份只是让七份各自记一遍同一个事实。网格是这些测试面共同的外框,
    * 落在卡与卡的缝里也还算在测。
    *
-   * 为什么不是整页(工具页那样):首页是一篇正文,八张卡只是它中间的一节。
+   * 为什么不是整页(工具页那样):首页是一篇正文,七张卡只是它中间的一节。
    * 整页拦会把整篇文章的右键菜单和"按侧键回上一页"一起吃掉,那是耍横不是清理。
    * 两个函数都收一个"作用域"参数,判据和工具页共用同一份实现。
    */
@@ -204,7 +223,7 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
   }
 
   /*
-   * 把八张卡里的装置接上。
+   * 把每一张卡里的装置接上。
    *
    * **走一遍 DOM 而不是把 `cards` 从 frontmatter 传进来** —— frontmatter 变量在
    * `<script>` 里不存在(脚本被单独打包成外链 module),所以两边是靠 `slug` 挂钩的,

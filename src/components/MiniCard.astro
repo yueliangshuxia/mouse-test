@@ -54,11 +54,47 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
     一张卡顶几页时 `Tool.name` / `Tool.description` 只说了一半 —— 它们是**那一页**
     的名字和 meta description,服务的是那一页的搜索结果,不是这张卡的内容。
   */}
+  {/*
+    卡头三件东西,顺序 **名字 → 重置按钮 → 徽章**(徽章仍在最右)。
+
+    按钮的有无**以 `spec.kind !== null` 为准,不新增 `MiniCard` 字段** ——
+    它就是"这台装置真的在出数"的唯一判据,再挂一个 `resettable` 是给两者
+    日后漂移留缝。三张纯说明的卡(`kind: null`)因此一个节点都不多,
+    和上面 `wide` 那条一样,条件为假时 DOM 逐字节不变。
+
+    按钮里那枚图标用**内联 SVG**,不用 `↺` 字符:字形在不同平台会落到不同的
+    字体上(甚至被当成 emoji 渲染),而这一枚要小到 14px、还要跟着
+    `currentColor` 换色。模板里写死的 `<svg>` 是**构建期**节点,不踩
+    `data-astro-cid` 那条作用域坑(踩坑的是 `document.createElement` 出来的)。
+
+    徽章从 `<span>` 换成 **`<a href>`**(不是加 click 处理器 —— 那会丢掉键盘、
+    中键、右键「在新标签页中打开」)。它和卡名指向**同一个**页面,这份冗余是
+    刻意接受的:名字那一条是正常入口,徽章这一条是"它看着能点,就让它真能点"。
+    `aria-label` 把可见文字含在里面(WCAG「标签即名称」)—— 不给的话读屏用户
+    只会听到一个叫「直接测得」的链接,不知道它去哪儿。
+  */}
   <div class="mini-card__head">
     <a class="mini-card__name" href={href(`${tool.slug}/`)}>{spec.faceName ?? tool.name}</a>
-    <span class={`confidence confidence--${tool.confidence}`}>
+    {spec.kind !== null && (
+      <button
+        type="button"
+        class="mini-card__reset"
+        data-mini-reset={tool.slug}
+        aria-label={`清空「${spec.faceName ?? tool.name}」这张卡上的读数`}
+      >
+        <svg class="mini-card__reset-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M2 8a6 6 0 1 0 6-6 6.5 6.5 0 0 0-4.49 1.83L2 5.33" />
+          <path d="M2 2v3.33h3.33" />
+        </svg>
+      </button>
+    )}
+    <a
+      class={`confidence confidence--${tool.confidence}`}
+      href={href(`${tool.slug}/`)}
+      aria-label={`${CONFIDENCE_LABEL[tool.confidence]},去「${spec.faceName ?? tool.name}」这一页`}
+    >
       {CONFIDENCE_LABEL[tool.confidence]}
-    </span>
+    </a>
   </div>
 
   <p class="mini-card__desc">{spec.faceDesc ?? tool.description}</p>

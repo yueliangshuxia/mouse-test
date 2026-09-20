@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CONFIDENCE_NOTE, DEFAULT_TRACE_SLOTS, MINI_CARDS } from '../src/lib/mini-cards';
 import { CONFIDENCE_LABEL, DIAGNOSTIC_TOOLS, FUN_TOOLS, READY_TOOLS } from '../src/lib/tools';
+import type { Confidence } from '../src/lib/tools';
 
 /*
  * 这一组用例守的是**首页那份说明书和工具注册表之间的对应关系**。
@@ -83,25 +84,48 @@ describe('mini-cards', () => {
     }
   });
   /*
-   * 跨格(`MiniCard.wide`)的两条不变量。
+   * 跨格(`MiniCard.wide`)唯一的那条不变量:**落位不留空**。
    *
-   * 跨格在 3 列下才生效,而 8 张卡 + 跨 2 格 = **9 个格子,正好铺满三行**。
-   * 多来一张 wide 就是 10 个格子铺 4 行、末尾空出两格 —— 而那正是这条改动想解决
-   * 的问题本身,只是换到了第 4 行。这个失败**不报任何错**:类型、构建、其余用例
-   * 全都不响,只有首页末尾多出一片谁也说不上为什么的空白。
+   * 旧的写法是"至多一张卡声明 wide" + "声明了的必须真有 covers",它守的其实是
+   * **当初那个数**(8 张卡、1 张跨格 = 9 格铺满三行)的代数推论,而不是那条性质
+   * 本身:它连"去掉一张 wide 之后 7 张卡铺成 2+2+1+1+1 = 三行剩两格"也拦不住,
+   * 更拦不住 `auto-fit` 的**行中空洞**(一张 wide 卡落在第 2 列时,它后面那一格
+   * 谁也填不上)。而现在轨迹卡也跨格了,而它**没有** `covers` —— 旧判据的两条
+   * 会同时红,却红在错误的地方。
+   *
+   * 所以直接算最后剩几个空格:按 `auto-fit` 的稀疏落位从头走一遍,统计"格子数
+   * 减卡片占位"。这条比旧的**更强**(一张 wide 都不该有的极端情形它同样挡住),
+   * 也不再依赖卡片的总数是几。
+   *
+   * 这个失败**不报任何错**:类型、构建、其余用例全都不响,只有首页末尾(或行中)
+   * 多出一片谁也说不上为什么的空白。
    */
-  it('至多一张卡声明 wide —— 两张跨格会把空白挪到最后一行', () => {
-    const wide = MINI_CARDS.filter((card) => card.wide);
-    expect(wide.length).toBeLessThan(2);
+  it('卡片在 3 列下的落位不留空 —— 跨格数与张数的搭配只有一种是对的', () => {
+    // 容器封顶 1060 < 四列下界 1248,所以"三列"就是最宽的那一档
+    const COLUMNS = 3;
 
-    // 跨格是给"一张卡顶几页"的集合体的。单页卡跨格等于让它独占一行,
-    // 而它自己并不会因此变好看 —— 只是把同一片空白换了位置。
-    for (const card of wide) {
-      expect(
-        (card.covers ?? []).length,
-        `${card.slug} 只顶一页,不该跨格`,
-      ).toBeGreaterThan(0);
+    let row = 0;
+    let col = 0;
+    for (const card of MINI_CARDS) {
+      const span = card.wide ? 2 : 1;
+      if (col + span > COLUMNS) {
+        row++; // 放不下就换行,前面那几格空着 —— 正是要找的洞
+        col = 0;
+      }
+      col += span;
+      if (col === COLUMNS) {
+        row++;
+        col = 0;
+      }
     }
+
+    const cells = MINI_CARDS.reduce((n, card) => n + (card.wide ? 2 : 1), 0);
+    const holes = (row + (col ? 1 : 0)) * COLUMNS - cells;
+
+    expect(
+      holes,
+      `${MINI_CARDS.length} 张卡(${MINI_CARDS.filter((c) => c.wide).length} 张跨格)在 3 列下会空出 ${holes} 格`,
+    ).toBe(0);
   });
 
   it('没有重复的 slug', () => {
@@ -109,13 +133,29 @@ describe('mini-cards', () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it('四档可信度都有一句话,而且不许比 CONFIDENCE_LABEL 敢说的更高', () => {
+  it('卡片上会出现的四档都有一句话,而且不许比 CONFIDENCE_LABEL 敢说的更高', () => {
     // 不是测措辞好不好,是测**四档齐全**:漏一档的话 `CONFIDENCE_NOTE[confidence]`
     // 在运行期是 `undefined`,卡片底部会印出「undefined」—— 而它不报错。
-    for (const level of Object.keys(CONFIDENCE_LABEL) as (keyof typeof CONFIDENCE_LABEL)[]) {
+    //
+    // 遍历的是 `CONFIDENCE_LABEL` 减去 `'none'`,不是全部五档:第五档
+    // 「不测量」**刻意不进这份骨架**,它永远不会出现在首页卡片上(见
+    // `mini-cards.ts` 的 `CONFIDENCE_NOTE` 和 `index.astro` 的 `CONFIDENCE_ORDER`)。
+    // 这里显式用 `Exclude` 收窄,所以将来再加一档,这一行是**编译错误**。
+    const cardLevels = (Object.keys(CONFIDENCE_LABEL) as Confidence[]).filter(
+      (level): level is Exclude<Confidence, 'none'> => level !== 'none',
+    );
+    expect(cardLevels.length).toBeGreaterThan(0);
+    for (const level of cardLevels) {
       expect(CONFIDENCE_NOTE[level], `缺少 ${level} 这一档`).toBeTruthy();
       expect(CONFIDENCE_NOTE[level].length).toBeGreaterThan(8);
     }
+  });
+
+  it('「不测量」不进首页图例', () => {
+    // 这是一条**反向**断言,挡的是"顺手把五档补齐"。
+    // 图例解释的是卡片上那枚徽章,而卡片只出诊断工具;给「不测量」也配一句话
+    // 会让首页多印一行永远用不到的解释 —— 而它看起来像是补全,不像出错。
+    expect(Object.keys(CONFIDENCE_NOTE)).not.toContain('none');
   });
 
   it('放得进卡片的必须有提示语和读数槽,放不进的必须给出理由', () => {
@@ -235,6 +275,66 @@ describe('mini-cards', () => {
     for (const key of compared) {
       expect(declared.has(key), `mini-devices.ts 比对了模式 "${key}",但没有任何卡片声明它`).toBe(
         true,
+      );
+    }
+  });
+
+  /*
+   * 卡头那枚重置按钮的挂钩:`data-mini-reset` 写在 `MiniCard.astro`,
+   * 读在 `mini-devices.ts` 的 `card.querySelector('[data-mini-reset]')`。
+   *
+   * **又一个字符串横跨两个文件**,而且失败得比上面两条都安静:对不上时
+   * `querySelector` 返回 `null`,`resetButton?.addEventListener` 那个 `?.` 让它
+   * 变成一句空操作 —— 按钮照旧渲染、照旧有悬停态、按下去了什么也不发生,
+   * 没有异常、没有告警、没有红。和 `write()` 签错名是同一类事故。
+   *
+   * 顺带钉住"哪些卡有按钮":判据是 `spec.kind !== null`,写错成无条件渲染的话,
+   * 三张纯说明的卡会多出一枚**按下去没有任何反应**的按钮 —— 那也是静默的。
+   */
+  it('重置按钮的挂钩在模板和驱动两边对得上,而且只给带装置的卡', () => {
+    const astro = readFileSync(new URL('../src/components/MiniCard.astro', import.meta.url), 'utf8');
+    const driver = driverSource();
+
+    const attr = astro.indexOf('data-mini-reset');
+    expect(attr, 'MiniCard.astro 里没有 data-mini-reset').toBeGreaterThan(-1);
+    // 只该有一处:复制粘贴出一份的话,`querySelector` 只会命中最先那个
+    expect(astro.indexOf('data-mini-reset', attr + 1), 'data-mini-reset 出现了不止一次').toBe(-1);
+    // 驱动那边要按同一个字面量去找
+    expect(driver, 'mini-devices.ts 没有按 [data-mini-reset] 去找').toContain("'[data-mini-reset]'");
+    // 渲染它的那个条件必须是 `kind !== null`,不能无条件
+    expect(
+      astro.slice(0, attr),
+      'data-mini-reset 前面没有 spec.kind !== null 那个守卫 —— 三张纯说明的卡会多出一枚没作用的按钮',
+    ).toContain('spec.kind !== null');
+  });
+
+  /*
+   * 四个装置工厂**每一个都注册了重置回调**。
+   *
+   * 驱动的重置只清两样东西:读数槽(`outputs`)和方向带(`traces`)。工厂画进
+   * `ctx.live` 里的一切 —— 大数字、说明字、画布、鼠标图、chip —— **都得由它
+   * 自己清**,而没有任何类型或运行时机制要求它这么做:少注册一个(`onReset`
+   * 是可选的调用,不是必实现的成员),那张卡重置之后就**只清了一半**,
+   * 剩下半截旧读数挂在那儿冒充新结果。所以按 `MiniFactory` 的声明把源码切成
+   * 四段,逐段找一个 `ctx.onReset(`。
+   *
+   * 先确认扫到了东西:一段都切不出来时下面的循环是空的,那种假绿正是这条要防的。
+   */
+  it('每一个装置工厂都注册了重置回调', () => {
+    const source = driverSource();
+    const decls = [...source.matchAll(/const\s+\w+Mini\s*:\s*MiniFactory\s*=/g)];
+    expect(decls.length, '一个 MiniFactory 都没扫到,正则或写法变了').toBeGreaterThan(0);
+
+    // 最后一段切到装置表为止,免得把驱动自己的代码也算进某个工厂里
+    const table = source.indexOf('const DEVICES');
+    expect(table, '找不到 const DEVICES —— 切分边界变了').toBeGreaterThan(-1);
+
+    for (let i = 0; i < decls.length; i++) {
+      const start = decls[i].index ?? 0;
+      const end = i + 1 < decls.length ? (decls[i + 1].index ?? source.length) : table;
+      const name = source.slice(start, start + 40).replace(/\s+/g, ' ');
+      expect(source.slice(start, end), `${name} 没有注册 ctx.onReset —— 重置只会清掉一半`).toContain(
+        'ctx.onReset(',
       );
     }
   });

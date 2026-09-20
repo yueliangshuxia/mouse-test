@@ -1,0 +1,609 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+
+const tool = findTool('steadiness-test')!;
+
+/** 保持多久。写在 frontmatter 里,正文和 FAQ 都从这里取,不手抄 */
+const HOLD_MS = 5000;
+
+const FAQ = [
+  {
+    q: '这个数越小越好吗?多少算好?',
+    a:
+      '**越小越稳,但不给"及格线"。**原因有两个:第一,这个数和你鼠标的 DPI 绑在一起 —— ' +
+      'DPI 越高,同样的手抖会走出更多像素,所以在 800 DPI 下很漂亮的成绩,' +
+      '换到 3200 DPI 就会难看一大截;第二,它还和你握鼠标的姿势、手臂有没有支撑有关。' +
+      '所以这一页只做**同机前后对比**:和上次比、和换鼠标垫之前比。' +
+      '跨设备比一个手抖距离,比的是设备设置,不是手。',
+  },
+  {
+    q: '为什么说是"指针"的漂移,不是鼠标的?',
+    a:
+      '因为中间隔了一层操作系统。你手上的每一次微小移动,系统会先做**平滑**和' +
+      '(如果开着)加速度处理,再变成屏幕上的指针位置。这一页拿到的就是处理之后的结果,' +
+      '所以它测的是**整条链路**的稳定度,里面混着系统、驱动和屏幕的账。' +
+      '想单独看鼠标硬件有没有自激,请用轨迹测试页里的「静止漂移」那一段 —— ' +
+      '那个要求你把手完全离开鼠标。',
+  },
+  {
+    q: '靶子为什么要画这么大?',
+    a:
+      '因为它不是难度设置,是**一个边界**。指针一旦离开圆,这一轮就作废重来 —— ' +
+      '圆太小的话,你会一直在跟边界较劲,而不是在"保持不动"这件事上。' +
+      '画成 110 像素直径是让正常的手抖(几个像素)根本碰不到边,' +
+      '于是这个圆的存在只是为了保证"这 5 秒里你确实在瞄准同一个点"。',
+  },
+  {
+    q: '为什么按了开始之后要我先动一下?',
+    a:
+      '因为**"收到 0 个采样"本身是有歧义的**。指针在浏览器窗口外、鼠标没接上,' +
+      '页面同样一个事件都收不到,和"你的手稳如磐石"在数据上完全一样,结论却相反。' +
+      `所以流程多了一步:先等你把指针移进靶心,确认页面真的收得到信号,再等你停手,` +
+      `最后才开始记这 ${HOLD_MS / 1000} 秒。走过这一步之后,0 才真的等于 0。`,
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'GameApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标手稳度定靶挑战</h1>
+
+  <p class="prose">
+    点开始,把指针移进靶心,然后<strong>尽量别动</strong>——页面会等你停手,
+    再记满 {HOLD_MS / 1000} 秒,量这段时间里指针一共漂了多远。
+    <strong>中途指针出圈就作废重来</strong>。
+  </p>
+
+  <p class="prose">
+    要看的是<strong>累计路程</strong>:指针来回微抖多少下,都会一格一格累加上去,
+    比"最远漂了多少"更能反映手有多稳。它测的是<strong>指针</strong>的稳定度 ——
+    指针已经被系统平滑和加速处理过一遍,所以里面混着系统的账,只适合同一台机器前后对比。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <button type="button" id="start">开始挑战</button>
+    <button type="button" id="stop" disabled>放弃这一轮</button>
+    <span class="test-hint" id="hint">点开始后把指针移进靶心,然后停手</span>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well steady-area" id="area" data-phase="idle">
+        <div class="steady-target" id="target" aria-hidden="true"></div>
+        <div class="test-area__hint" id="overlay">
+          点“开始挑战”,然后把指针移进中间的圆里
+        </div>
+        <div class="steady-live" id="live" hidden>
+          <div class="steady-live__value" id="live-left">5.0</div>
+          <div class="steady-live__label">秒 · 保持住,别出圈</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">累计路程</div>
+          <div>
+            <span class="verdict__value" id="path-main">—</span
+            ><span class="verdict__unit">px</span>
+          </div>
+          <div class="verdict__note" id="verdict-note">
+            点“开始挑战”,把指针移进靶心,然后尽量别动
+          </div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="state-badge">等待开始</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="span" label="抖动幅度" unit="px" hint="最远两点之间的距离" />
+        <StatPanel id="samples" label="采样点数" hint="5 秒里指针动了多少下" />
+        <StatPanel id="best" label="最好成绩" unit="px" hint="越小越稳,只存在本机" />
+        <StatPanel id="rounds" label="有效轮数" hint="作废的不计" />
+      </div>
+    </div>
+  </div>
+
+  <section class="prose">
+    <h2>怎么读这些数</h2>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>指标</th>
+          <th>看什么</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>累计路程</td>
+          <td>手稳不稳</td>
+          <td>
+            这段时间里指针走过的<strong>总</strong>距离。手不动时指针会因为手抖、桌面振动、
+            传感器噪声在几个像素的范围里来回走,每一下都算进去 ——
+            所以它比"最远漂了多少"灵敏得多,也是这一页的主指标。
+          </td>
+        </tr>
+        <tr>
+          <td>抖动幅度</td>
+          <td>抖成了什么样</td>
+          <td>
+            所有采样点里<strong>最远两点</strong>的距离。它和累计路程要一起看:
+            累计路程大而幅度小,说明指针在原地高频微抖;两个都大,说明手是真的在挪。
+          </td>
+        </tr>
+        <tr>
+          <td>采样点数</td>
+          <td>指针动了多少下</td>
+          <td>
+            0 是<strong>最好的结果</strong>——那说明传感器在这 5 秒里一个计数都没产生。
+            但这个 0 只有在走完了"先移动进靶心"那一步之后才有意义,理由见下面的 FAQ。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>定靶为什么不算分</h2>
+    <p>
+      这一页刻意<strong>不给分数、不给等级、不给及格线</strong>。
+      换算成"手稳度 82 分"需要一套权重,而那套权重是编出来的 ——
+      本站不为这种事编数字。能说的只有:这次比上次稳,或者没有。
+    </p>
+    <p>
+      还有一个更实际的理由:同样一段手抖,在 800 DPI 和 3200 DPI 下走出的像素数差四倍。
+      所以那个数<strong>只和你自己的历史成绩比</strong>,而且最好在同一个 DPI 设置下比。
+    </p>
+
+    <h2>如果想更稳</h2>
+    <ul>
+      <li>
+        <strong>先排除鼠标自己有问题。</strong>去轨迹测试页做一次「静止漂移」,
+        把手完全离开鼠标再测 —— 那一步测的是鼠标会不会自己爬。鼠标自己在动的话,
+        后面练什么都是白练。
+      </li>
+      <li>
+        <strong>换一块深色布垫再测一次。</strong>玻璃、纯白纸、太光滑的桌面上,
+        大多数鼠标的读数都会明显变差。
+      </li>
+      <li>
+        <strong>别悬着手腕。</strong>这一条不是这个页面教的,但这是这个页面能量出来的:
+        手臂有支撑时测一次、悬空时再测一次,两个数会差很远。
+      </li>
+    </ul>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 测试面。高度给得比别页足 —— 靶子要有地方待,而且要离边缘远一点,
+     * 免得用户为了进靶心把指针怼到窗口角上。
+     */
+    .steady-area {
+      height: 340px;
+      cursor: crosshair;
+    }
+
+    /*
+     * 靶心。**`pointer-events: none`** —— 它只是画出来的一个圈,
+     * 指针在不在里面由脚本按几何算,不靠事件。挂上去的话它会成为
+     * 事件目标,而这一页的判据(出圈作废)是纯几何的,不需要它参与。
+     *
+     * 两圈:外圈是边界(出圈作废),内圈是"理想位置"的提示。
+     *
+     * 两个颜色令牌都写**通用名**(`--border-strong` / `--text-faint`)而不是
+     * `--well-*`:靶心长在 `.well` 里,而 `.well` 把通用令牌整套重指过去了 ——
+     * 写 `--well-*` 等于绕过那层重映射,以后井的配色变了靶心不会跟着变。
+     */
+    .steady-target {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 110px;
+      height: 110px;
+      margin: -55px 0 0 -55px;
+      border: 1px solid var(--border-strong);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .steady-target::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 10px;
+      height: 10px;
+      margin: -5px 0 0 -5px;
+      border-radius: 50%;
+      background: var(--text-faint);
+    }
+
+    /* 测量中把边界说重一点:这时候它才真的是一条会被判的线 */
+    .steady-area[data-phase='measuring'] .steady-target {
+      border-color: var(--accent);
+    }
+
+    /* 出圈那一刻闪一下朱砂 —— 这是"这一轮没了"的即时反馈,不是读数 */
+    .steady-area[data-phase='missed'] .steady-target {
+      border-color: var(--danger);
+    }
+  </style>
+
+  <script>
+    import { measureDrift } from '../lib/analysis';
+    import { createMoveSampler } from '../lib/sampler';
+    import {
+      createTicker,
+      el,
+      format,
+      loadBest,
+      mountCapabilityNotices,
+      saveBest,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    /*
+     * 这一页只读**坐标**,一个时间戳都不用(主指标是路程,幅度是几何量,
+     * 采样数只是计数)。所以能力告警传 `{ timing: false }` —— 不传的话页面上会
+     * 印出一条"本页不报抖动和丢包率就是这个原因",而这一页压根不测那两样。
+     * 判据见 capabilities.ts 的 `CapabilityOptions`。
+     */
+    mountCapabilityNotices(el('cap-notice'), { timing: false });
+
+    // 用户全程要把指针停在测试面上,右键菜单和中键自动滚动都会盖住靶心。见 ui.ts
+    suppressWorkbenchDefaults();
+
+    const HOLD_MS = 5000;
+    const SETTLE_MS = 600;
+    /** 等指针进靶心的上限。超了就如实说"没等到",不能判成"开始测了" */
+    const ARM_TIMEOUT_MS = 20_000;
+    /** 换 DPI 之后成绩不可比,所以键名里写死"路程"这一件事 */
+    const BEST_KEY = 'mouse-test:steadiness-best-path';
+
+    const area = el('area');
+    const target = el('target');
+    const overlay = el('overlay');
+    const live = el('live');
+    const startButton = el('start') as HTMLButtonElement | null;
+    const stopButton = el('stop') as HTMLButtonElement | null;
+
+    if (!area || !target) throw new Error('测试区未就绪');
+
+    /**
+     * 采样面是**整个文档**,和轨迹页的静止漂移同一个理由的镜像:
+     * 判据是"指针有没有离开靶心",而离开靶心之后指针可能立刻停在测试面**外面**
+     * (用户把鼠标一甩就松手)。采样面只取测试面的话,那一段根本没被记录,
+     * 出的圈也就永远判不出来 —— 这一轮会当成"完美通过"结算。
+     *
+     * `capture: false`:捕获会把 `click` 一起重定向到采样元素上,页面上的
+     * 按钮就点不动了(见 sampler.ts / ui.ts 的说明)。这一页不需要捕获 ——
+     * 指针跑到窗口外本来就应该算作"出圈"。
+     */
+    const sampler = createMoveSampler(document.documentElement, {
+      capture: false,
+      capacity: 60_000,
+    });
+    sampler.stop();
+
+    /**
+     * 三个阶段,和轨迹页那套静止漂移同源:
+     *
+     * - `arming`:等指针进靶心 —— 它同时证明了"页面收得到信号"
+     * - `settling`:等指针停下来(采样数不再增长),把"移进去"那一段丢掉
+     * - `measuring`:真正的 5 秒窗口
+     *
+     * `arming` 这一步是必需的:没有它,"0 个采样"既可能是手真的稳,
+     * 也可能是指针根本不在窗口里、页面压根没在听。两者在数据上完全一样。
+     */
+    type Phase = 'idle' | 'arming' | 'settling' | 'measuring' | 'missed';
+    let phase: Phase = 'idle';
+    let phaseSince = 0;
+    let windowStartedAt = 0;
+    let timer = 0;
+    let lastN = 0;
+    let grewAt = 0;
+    /** 已经检查过出圈的缓冲区下标,每次 tick 只扫新到的那一段 */
+    let checkedUpTo = 0;
+    let rounds = 0;
+
+    /** 靶心的圆心与半径(视口坐标)。每次开始一轮时重取,中途不回读 */
+    let centerX = 0;
+    let centerY = 0;
+    let radius = 0;
+
+    /** 把靶心的几何读进来。用户中途滚动会让旧值失效,所以每一轮开始时都重读一次 */
+    function readTarget(): void {
+      const box = target!.getBoundingClientRect();
+      centerX = box.left + box.width / 2;
+      centerY = box.top + box.height / 2;
+      radius = box.width / 2;
+    }
+
+    function setPhase(next: Phase): void {
+      phase = next;
+      phaseSince = performance.now();
+      area?.setAttribute('data-phase', next);
+    }
+
+    function resetReadouts(): void {
+      setText(el('path-main'), '—');
+      for (const id of ['span', 'samples']) setStat(id, '—');
+    }
+
+    function showBest(): void {
+      setStat('best', format(loadBest(BEST_KEY), 1));
+    }
+
+    showBest();
+
+    function setRunning(running: boolean): void {
+      if (startButton) startButton.disabled = running;
+      if (stopButton) stopButton.disabled = !running;
+      overlay?.toggleAttribute('hidden', running);
+      live?.toggleAttribute('hidden', !running);
+    }
+
+    function start(): void {
+      if (phase !== 'idle' && phase !== 'missed') return;
+
+      readTarget();
+      sampler.reset();
+      sampler.start();
+      checkedUpTo = 0;
+      setPhase('arming');
+      setRunning(true);
+      resetReadouts();
+      setBadge(el('state-badge'), '等你进靶心', 'idle');
+      setText(el('verdict-note'), '把指针移进中间的圆里。');
+      setText(el('live-left'), (HOLD_MS / 1000).toFixed(1));
+      setText(el('hint'), '把指针移进圆里,然后停手…');
+    }
+
+    /** 指针进来了,开始等它停下 */
+    function settle(): void {
+      setPhase('settling');
+      lastN = sampler.buffer.n;
+      /**
+       * **`grewAt` 必须在这里重置。**它是"上一次采样数增长的时刻",而推进器
+       * 判"停手了没有"靠的是 `now - grewAt > SETTLE_MS`。进这个函数时它还是
+       * 上一轮(或页面加载时那个 0)留下的值 —— 拿 `0` 去减,`now - 0` 永远
+       * 大于 600,于是**下一拍立刻就开测**,用户的手还在往靶心里挪。
+       *
+       * 后果不是报错,是**读数被系统性抬高**:窗口的头一段量到的是"移进来"
+       * 那一次移动的尾巴,而那正是这一整段 `settling` 要丢掉的东西。
+       * 判据在代码上是确定的:进这里时 `grewAt` 若还是 `0`,
+       * 推进器下一拍就会 `beginWindow()`(页面早就跑过 600ms 了)。
+       */
+      grewAt = performance.now();
+      setBadge(el('state-badge'), '等指针停下', 'idle');
+      setText(el('verdict-note'), '好,现在尽量别动,我确认一下你停手了就开测。');
+      setText(el('hint'), '保持不动…');
+    }
+
+    /** 真的开测。把"移进来"和"停手"那两段采样全部丢掉 */
+    function beginWindow(): void {
+      sampler.reset();
+      checkedUpTo = 0;
+      windowStartedAt = performance.now();
+      timer = window.setTimeout(finish, HOLD_MS);
+      setPhase('measuring');
+      setBadge(el('state-badge'), '测量中', 'idle');
+      setText(el('verdict-note'), `保持住,${HOLD_MS / 1000} 秒。`);
+      setText(el('hint'), '别动…');
+    }
+
+    /** 收尾:停采样、复位按钮。结果由调用方各自写 */
+    function endRound(): void {
+      sampler.stop();
+      window.clearTimeout(timer);
+      timer = 0;
+      setRunning(false);
+      setText(el('hint'), '点开始后把指针移进靶心,然后停手');
+    }
+
+    /** 指针出圈。这一轮作废,照实说 */
+    function miss(): void {
+      endRound();
+      setPhase('missed');
+      setBadge(el('state-badge'), '出圈了', 'poor');
+      setText(el('verdict-note'), '指针离开了圆,这一轮作废。点“开始挑战”重来。');
+      resetReadouts();
+    }
+
+    /** 一直没等到指针进靶心 */
+    function abort(): void {
+      endRound();
+      setPhase('idle');
+      setBadge(el('state-badge'), '没等到', 'idle');
+      setText(
+        el('verdict-note'),
+        `这 ${ARM_TIMEOUT_MS / 1000} 秒里指针一直没有进到圆里。` +
+          '请确认指针在浏览器窗口内、鼠标真的接上了,再试一次。',
+      );
+    }
+
+    function finish(): void {
+      endRound();
+      setPhase('idle');
+
+      const buffer = sampler.buffer;
+      const n = buffer.n;
+
+      // 走到这里说明 arming 阶段确实收到过采样,装置是活的 ——
+      // 所以此刻的 0 是**真的纹丝未动**,不是"没在听"。
+      //
+      // 必须单独处理:`measureDrift` 对空区间返回 null(样本不足),
+      // 照搬会把"最好的一次"显示成"测不出来",正好把结论说反。
+      if (n === 0) {
+        rounds += 1;
+        setStat('samples', '0');
+        setStat('span', '0');
+        setStat('rounds', String(rounds));
+        setText(el('path-main'), '0');
+        saveBest(BEST_KEY, 0, { lowerIsBetter: true });
+        showBest();
+        setBadge(el('state-badge'), '纹丝未动', 'good');
+        setText(
+          el('verdict-note'),
+          `这 ${HOLD_MS / 1000} 秒里传感器一个计数都没产生 —— 这是最好的一档,没有更好的了。`,
+        );
+        return;
+      }
+
+      const drift = measureDrift(buffer.x, buffer.y, { start: 0, end: n });
+      if (!drift) {
+        setStat('samples', String(n));
+        setBadge(el('state-badge'), '测不出来', 'idle');
+        setText(el('verdict-note'), '数据异常,请重新测一次。');
+        return;
+      }
+
+      rounds += 1;
+      setStat('samples', String(drift.samples));
+      setStat('span', drift.spanPx.toFixed(1));
+      setStat('rounds', String(rounds));
+      setText(el('path-main'), drift.pathPx.toFixed(1));
+
+      const isRecord = saveBest(BEST_KEY, drift.pathPx, { lowerIsBetter: true });
+      showBest();
+
+      setBadge(
+        el('state-badge'),
+        isRecord ? '刷新纪录' : '完成',
+        isRecord ? 'good' : 'idle',
+      );
+      setText(
+        el('verdict-note'),
+        `这 ${HOLD_MS / 1000} 秒里指针走了 ${drift.pathPx.toFixed(1)} px,` +
+          `最远的两点相距 ${drift.spanPx.toFixed(1)} px。` +
+          (isRecord
+            ? '这是你在本机的最好成绩。'
+            : '要跟别的成绩比,只能比本机历史 —— 这个数和 DPI 绑在一起,跨设备比不出手稳不稳。'),
+      );
+    }
+
+    /**
+     * 推进器。三个阶段都靠它走:静止时没有任何事件可监听,
+     * "指针停下了没有""还剩几秒"只能靠刷新循环推上去。
+     */
+    createTicker(100, (now) => {
+      if (phase === 'idle' || phase === 'missed') return;
+
+      const buffer = sampler.buffer;
+      const n = buffer.n;
+
+      if (phase === 'arming') {
+        if (n === 0) {
+          if (now - phaseSince > ARM_TIMEOUT_MS) abort();
+          return;
+        }
+        // 看**最新**那个采样在不在圆里 —— 指针可能进来又出去了
+        const x = buffer.x[n - 1];
+        const y = buffer.y[n - 1];
+        if (Math.hypot(x - centerX, y - centerY) <= radius) settle();
+        else if (now - phaseSince > ARM_TIMEOUT_MS) abort();
+        return;
+      }
+
+      if (phase === 'settling') {
+        if (n > lastN) {
+          lastN = n;
+          grewAt = now;
+        } else if (now - grewAt > SETTLE_MS) {
+          beginWindow();
+        }
+        return;
+      }
+
+      // measuring:先看有没有出圈,再看倒计时。
+      // 顺序不能反 —— 出圈那一下要立刻判,晚一个 tick 就会多算 100ms 的漂移
+      for (let i = checkedUpTo; i < n; i++) {
+        if (Math.hypot(buffer.x[i] - centerX, buffer.y[i] - centerY) > radius) {
+          checkedUpTo = n;
+          miss();
+          return;
+        }
+      }
+      checkedUpTo = n;
+
+      const left = Math.max(0, HOLD_MS - (now - windowStartedAt));
+      setText(el('live-left'), (left / 1000).toFixed(1));
+    });
+
+    startButton?.addEventListener('click', start);
+    stopButton?.addEventListener('click', () => {
+      // 用户自己放弃:这不算成绩,也不算出圈,直接回到待机
+      if (phase === 'idle') return;
+      endRound();
+      setPhase('idle');
+      setBadge(el('state-badge'), '已放弃', 'idle');
+      setText(el('verdict-note'), '这一轮自己结束了,没有计入成绩。点“开始挑战”重来。');
+      resetReadouts();
+    });
+
+    /**
+     * 窗口失焦:用户已经不在看这一页了,继续测没有意义。
+     *
+     * **和瞄准页同一条理由**:计时器走的是 rAF,后台标签页里它会停,
+     * 回到前台时 `now` 一下跳到窗口之后 —— 结算出来会是一段被拉长的时间配上
+     * 只有一部分时间的采样,比不给还糟。这里直接作废。
+     */
+    window.addEventListener('blur', () => {
+      if (phase === 'idle' || phase === 'missed') return;
+      endRound();
+      setPhase('idle');
+      setBadge(el('state-badge'), '已中断', 'idle');
+      setText(el('verdict-note'), '页面切走了,这一轮作废(后台标签页里计时会停,继续测出的数不可信)。');
+      resetReadouts();
+    });
+
+    window.addEventListener('pagehide', () => sampler.destroy());
+  </script>
+</BaseLayout>

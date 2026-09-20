@@ -1,0 +1,299 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { href } from '../lib/url';
+import { cmPer360, GAMES } from '../lib/sensitivity';
+
+const tool = findTool('sensitivity-converter')!;
+
+/*
+ * 这一页**没有工作台**,也**没有仪器窗**。
+ *
+ * 它不测任何东西 —— 它把两个你填进去的已知数按各游戏的固定常数推成另外两个数,
+ * 换算在 `input` 事件里当场算完,没有"开始测量",也没有"正在出数"的那个状态。
+ * 所以读数走**纸面**的 `.stat-grid` / `.stat`(全站统计面板都在纸面),
+ * 一个 `.well` 都不出现 —— `.well` 说的是"这里正在出数",而这里没有。
+ */
+
+/** 表格里用来做对照的那一组设定。取最常见的两个数,方便读者拿自己的设置比 */
+const REF_DPI = 800;
+const REF_SENS = 1;
+
+/*
+ * FAQ 的答案**不能放 HTML**。两条出口都从同一份原文出发:`faqHtml` 先转义
+ * `& < >` 再插 `<strong>`(不然答案里一个小于号就会把标签吃掉),`faqText`
+ * 直接原样送进 JSON-LD。所以答案里写 `<a>` 只会**原样印出一串尖括号**。
+ * 要放链接,放在正文里(见下面那段 prose)。
+ */
+const FAQ = [
+  {
+    q: 'eDPI 和 cm/360° 有什么区别?为什么说 eDPI 不能跨游戏比?',
+    a:
+      'eDPI = DPI × 游戏内灵敏度,它**完全由你自己填的两个数决定**,和你在玩哪款游戏无关。' +
+      '问题就在这里:两款游戏里填同样的数,eDPI 一样,可视角转起来的速度完全不同 ——' +
+      '因为每款游戏对"灵敏度 1"的定义不一样(下面表格里那个 yaw 就是各家的定义)。' +
+      '所以 eDPI 只能**在同一款游戏里**横着比。真正跨游戏可比的是 cm/360°,' +
+      '它把游戏自己的常数也算了进去,问的是"鼠标要在桌面上走多少厘米,视角才转满一圈"。',
+  },
+  {
+    q: '我填的是驱动里标的 DPI,这个数准吗?',
+    a:
+      '**不一定准,而且这一页不会替你验证它。**厂商标的 DPI 和实测值差 5% 左右是常态,' +
+      '有些鼠标在驱动里改过几档之后偏差更大。这一页做的是**换算**,输入一个不准确的' +
+      'DPI,算出来的 cm/360° 会按同样的比例一起偏 —— 数字看着很精确,错的却是里面那个前提。' +
+      '想知道手上这只鼠标的真实值,请先去 DPI 测试页沿着尺子量一次,再把量到的数填到这里来。',
+  },
+  {
+    q: '算出来的 cm/360° 和我实际手感对不上?',
+    a:
+      '几个常见原因:**(1)** 驱动里的 DPI 不是真值(见上一条);' +
+      '**(2)** 游戏里开了"鼠标加速"或原始输入相关的选项,那会让物理位移和视角转角不再成比例,' +
+      '而这个公式的前提正是"成正比";**(3)** 视角范围(FOV)不同 —— cm/360° 与 FOV 无关,' +
+      '但 FOV 一变,同样的转角在屏幕上看起来的位移就变了,手感自然跟着变。' +
+      '这个数是一个**换算结果**,不是对你手感的判决。',
+  },
+  {
+    q: '为什么只有这几款游戏?',
+    a:
+      '因为只有这几款的 yaw 取值是明确的,而且我们把每一个都印在下面的表格里,方便你核对。' +
+      '**宁可少收几款,也不给一个看起来精确的错数字** —— 猜错一个常数,算出来的 cm/360° ' +
+      '会一路错到用户在游戏里重新适应一套手感。要加新游戏,先去把该游戏的 yaw 核实清楚。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={tool.title}
+  description={tool.description}
+  current={tool.slug}
+  jsonLd={jsonLd}
+>
+  <h1>鼠标灵敏度换算器</h1>
+
+  <p class="prose">
+    填上你的 DPI 和游戏内灵敏度,换算出 <strong>eDPI</strong> 与
+    <strong>cm/360°</strong>(视角转满一圈,鼠标要在桌面上走多少厘米)。
+    这一步<strong>不测任何东西</strong>——它把你填的两个数按各游戏的固定常数推成另外两个数。
+    所以填进去的 DPI 准不准,直接决定结果准不准。
+  </p>
+
+  <p class="prose">
+    你填的 DPI 是驱动里标的<strong>标称值</strong>。厂商标的值和实测值差 5% 是常态,
+    想拿真值请先去 <a href={href('dpi-test/')}>鼠标 DPI 测试</a>沿着尺子量一次 ——
+    再回到这里把量到的数填进去。这一页算得再准,也救不回一个错的前提。
+  </p>
+
+  <div class="controls">
+    <label class="field">
+      <span class="field__label">游戏</span>
+      <select id="game">
+        {
+          GAMES.map((game) => (
+            <option value={game.id}>
+              {game.label}
+            </option>
+          ))
+        }
+      </select>
+    </label>
+
+    <label class="field">
+      <span class="field__label">鼠标 DPI</span>
+      <input id="dpi" type="number" min="1" step="50" value={REF_DPI} inputmode="numeric" />
+    </label>
+
+    <label class="field">
+      <span class="field__label">游戏内灵敏度</span>
+      <input id="sens" type="number" min="0.01" step="0.01" value={REF_SENS} inputmode="decimal" />
+    </label>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel
+      id="cm360"
+      label="cm / 360°"
+      unit="cm"
+      primary
+      hint="视角转满一圈要走的距离,跨游戏可比的就是它"
+    />
+    <StatPanel id="edpi" label="eDPI" hint="DPI × 灵敏度,只在同一款游戏里可比" />
+    <StatPanel id="cm180" label="转身 180°" unit="cm" hint="半个 360°,大约是一次甩枪的距离" />
+  </div>
+
+  <p class="prose" id="note" data-note="sensitivity">
+    —
+  </p>
+
+  <section class="prose">
+    <h2>各游戏的常数</h2>
+    <p>
+      换算要靠一个游戏自己写死的数:<strong>yaw</strong> —— 灵敏度为 1 时,
+      鼠标每走一个计数,视角转过多少度。它是玩家改不了的,也正是"同一个灵敏度数字在
+      这款游戏和那款游戏里手感完全不同"的全部原因。
+    </p>
+    <p>
+      下面把这个数和它算出来的结果一起印出来,是为了让你<strong>能核对</strong>,
+      而不是只能信一个不透明的结果。第三列是 {REF_DPI} DPI、灵敏度 {REF_SENS} 时的
+      cm/360°,可以拿来对你自己的设置。
+    </p>
+
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>游戏</th>
+          <th>yaw(度 / 计数)</th>
+          <th>{`${REF_DPI} DPI、灵敏度 ${REF_SENS} 时转一圈`}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          GAMES.map((game) => (
+            <tr data-ref-game={game.id}>
+              <td>{game.label}</td>
+              <td>{game.yaw}</td>
+              <td>{cmPer360(REF_DPI, REF_SENS, game.yaw)!.toFixed(1)} cm</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>这两个数都怎么来的</h2>
+    <ul>
+      <li>
+        <strong>eDPI = DPI × 游戏内灵敏度。</strong>它是一个纯乘积,不含任何游戏常数,
+        所以只在同一款游戏里横着比才有意义。
+      </li>
+      <li>
+        <strong>cm/360° = (360 × 2.54) ÷ (DPI × 灵敏度 × yaw)。</strong>
+        分子是"转满一圈要转过多少度 × 一英寸多少厘米",分母是"鼠标走一个计数,
+        视角转多少度 × 每个计数对应多少灵敏度点"。两者一除,单位就落到了厘米上。
+      </li>
+    </ul>
+
+    <h2>手感的其他变量</h2>
+    <p>
+      cm/360° 一样、手感却不一样,这种事很常见。除开上面 FAQ 里那几条,
+      还有一个容易被忽略的:<strong>鼠标握法和手臂 / 手腕的分工</strong>。
+      同样 40cm 转一圈,靠手腕甩的人会觉得太慢,靠整条手臂带的人会觉得刚好 ——
+      公式里没有手,只有距离。
+    </p>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 换算结果是**当场出数**的,所以这里给一句说明文字一点间距让它不贴着面板。
+     * 别的都走 global.css(`.field` / `.field__label` / `.stat-grid` 都是共用的)。
+     */
+    [data-note='sensitivity'] {
+      margin-top: -0.5rem;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+  </style>
+
+  <script>
+    import { cmPer360, edpi, findGame } from '../lib/sensitivity';
+    import { el, format, setStat, setText } from '../lib/ui';
+
+    /*
+     * 这一页**刻意不调 `suppressWorkbenchDefaults()`**,也不做能力告警。
+     *
+     * 判据是全站那条:**这一页的读数会不会被指针的默认行为污染?**
+     * 这里没有测试区、没有手势,读数由键盘敲进去的两个数决定 —— 右键菜单和
+     * 中键自动滚动拦不拦,都不会让哪个数变样。而这一页上真正需要右键的是
+     * **数字输入框的粘贴**,拦掉只会给人添麻烦(`keyboard-test` 不调它同理,
+     * 那一页量的是键盘)。
+     *
+     * 能力告警同理:这一页不读时间戳、不读指针坐标,`detectCapabilities()`
+     * 那四条与精度有关的告警在这里说的全是不成立的话(字面上还会印出
+     * "本页不报抖动和丢包率就是这个原因",而这一页压根不测那两样)。
+     * 少印一段与读者无关的警告,和少印一个假数字是同一条纪律。
+     */
+
+    const gameSelect = el('game') as HTMLSelectElement | null;
+    const dpiInput = el('dpi') as HTMLInputElement | null;
+    const sensInput = el('sens') as HTMLInputElement | null;
+
+    /** 读一个数字输入框。空着或写了字母时 `valueAsNumber` 就是 NaN,交给纯函数返回 null */
+    function readNumber(input: HTMLInputElement | null): number {
+      return input ? input.valueAsNumber : NaN;
+    }
+
+    function update(): void {
+      const game = findGame(gameSelect?.value ?? '');
+      const dpi = readNumber(dpiInput);
+      const sens = readNumber(sensInput);
+
+      // yaw 找不到就给 NaN,`cmPer360` 会因此返回 null —— 破折号,不是 0
+      const yaw = game ? game.yaw : NaN;
+
+      const value360 = cmPer360(dpi, sens, yaw);
+      setStat('cm360', format(value360, 2));
+      setStat('edpi', format(edpi(dpi, sens), 0));
+      // 180° 就是半个 360°,不用另一个公式:同一个量除以二,免得两份实现漂开
+      setStat('cm180', format(value360 === null ? null : value360 / 2, 1));
+
+      if (value360 === null) {
+        setText(
+          el('note'),
+          '填一个大于 0 的 DPI 和灵敏度才会出数。空着或填 0 时这里显示破折号 —— ' +
+            '"算不出来"和"结果是 0"是两件事。',
+        );
+        return;
+      }
+
+      const label = game ? game.label : '这款游戏';
+      setText(
+        el('note'),
+        `${label}里,${format(dpi, 0)} DPI 配上灵敏度 ${sens},` +
+          `视角转满一圈要在桌面上走 ${value360.toFixed(2)} 厘米。` +
+          '换游戏时 eDPI 不变,cm/360° 会变 —— 后者才是真正在描述手感的那一个。',
+      );
+    }
+
+    gameSelect?.addEventListener('change', update);
+    dpiInput?.addEventListener('input', update);
+    sensInput?.addEventListener('input', update);
+
+    // 首帧先算一次:值写在标记里(`value={REF_DPI}`),脚本只读不写第二份
+    update();
+  </script>
+</BaseLayout>

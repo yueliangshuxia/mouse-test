@@ -1,5 +1,5 @@
 ---
-import { READY_TOOLS } from '../lib/tools';
+import { NAV } from '../lib/tools';
 import { href } from '../lib/url';
 
 interface Props {
@@ -10,35 +10,58 @@ interface Props {
 const { current } = Astro.props;
 
 /*
- * 报头那一条横向菜单。
+ * 报头那一条横向菜单,**分三段**。
  *
- * **两层结构,不是一个 flex 行** —— 这不是为了好看,是为了让"放不下"这件事
- * 在 JS 跑起来之前也有一个体面的样子:
+ * ```
+ * [ 框住的那一组诊断工具 ] [ 更多 ▾ ] [ 工具箱 ▾ ]
+ * ```
+ *
+ * ## 为什么是三层结构,不是一条 flex 行
+ *
+ * 这不是为了好看,是为了让"放不下"这件事在 JS 跑起来之前也有一个体面的样子:
  *
  * - `__track` 是真正排菜单的地方,`overflow: hidden`。窗口太窄而脚本还没跑时,
  *   放不下的项被**裁掉**,而不是溢出到报头外面把整页撑宽。
  * - `__more` 是它的兄弟,带 `hidden`。它是绝对定位的下拉,必须待在 `__track`
  *   的裁剪范围**之外**,否则面板一展开就被切掉。
+ * - `__group` **在** `__track` 里面,是那圈圆角边框。它必须在轨道里面 ——
+ *   轨道的 `overflow: hidden` 是脚本跑起来之前唯一把过宽的导航裁掉的东西,
+ *   把框挪到轨道外面,窄屏 + JS 还没跑的那一两帧就会横向溢出。
  *
- * 两者之间的搬运由 `nav-overflow.ts` 负责:量 `__track` 的 `scrollWidth`
- * 和 `clientWidth`,超了就把尾部的项搬进 `__panel`,并把 `__more` 显出来。
+ * 三者之间的搬运由 `nav-overflow.ts` 负责:量 `__track` 的 `scrollWidth`
+ * 和 `clientWidth`,超了就从 `__group` 的尾部往前搬进 `__panel`。
+ * **搬的落点是框,不是轨道** —— 这是这一版和上一版唯一的实质差别。
+ *
+ * ## 为什么「工具箱」住在轨道**外面**
+ *
+ * 一举解决两件事:
+ *
+ * 1. **绕开裁剪。** 它自己也是一个下拉,长在轨道里同样会被 `overflow: hidden`
+ *    切掉。
+ * 2. **它绝不会被折进「更多」。** `nav-overflow.ts` 的项是从 `__group` 里取的,
+ *    它不在里面 —— 所以它是趣味工具在报头里**唯一**的入口,任何宽度下都在。
+ *
+ * 面板的开合是**纯 CSS**(`:hover` / `:focus-within`,见 global.css),所以
+ * 这里一个 `data-*` 挂钩都没有,`nav-overflow.ts` 也完全不碰它。
  */
 ---
 
 <nav class="site-nav" aria-label="工具导航" data-nav>
   <div class="site-nav__track" data-nav-track>
-    {
-      READY_TOOLS.map((tool) => (
-        <a
-          class="site-nav__item"
-          href={href(`${tool.slug}/`)}
-          title={tool.name}
-          aria-current={current === tool.slug ? 'page' : undefined}
-        >
-          {tool.navLabel}
-        </a>
-      ))
-    }
+    <div class="site-nav__group" data-nav-group>
+      {
+        NAV.group.map((tool) => (
+          <a
+            class="site-nav__item"
+            href={href(`${tool.slug}/`)}
+            title={tool.name}
+            aria-current={current === tool.slug ? 'page' : undefined}
+          >
+            {tool.navLabel}
+          </a>
+        ))
+      }
+    </div>
   </div>
 
   <div class="site-nav__more" data-nav-more hidden>
@@ -52,5 +75,44 @@ const { current } = Astro.props;
       更多<span class="site-nav__caret" aria-hidden="true"></span>
     </button>
     <div class="site-nav__panel" data-nav-panel></div>
+  </div>
+
+  {/*
+    工具箱。面板的展开全靠 CSS,所以**不写 `aria-expanded`** —— 那个属性
+    声称的是"JS 拥有一个开合状态",而这里没有:能打开它的只有悬停和焦点,
+    CSS 两样都读得到,点击就是导航。**没有状态就没有会漂的 `aria-expanded`**,
+    这是从来没声称过,不是漏了。
+
+    `aria-current` 分两种粒度:
+    - 在 `/toolbox/` 上,这个链接指的就是这一页 → `page`
+    - 在某个趣味工具页上 → `true`("当前组里的当前项"),而 `page` 留给该在
+      下拉里高亮的那一项。给它标 `page` 是句假话 —— 它指向的不是这一页。
+  */}
+  <div class="site-nav__tools">
+    <a
+      class="site-nav__item site-nav__item--tools"
+      href={href(`${NAV.toolbox.slug}/`)}
+      aria-current={current === NAV.toolbox.slug
+        ? 'page'
+        : NAV.dropdown.some((tool) => tool.slug === current)
+          ? 'true'
+          : undefined}
+    >
+      {NAV.toolbox.navLabel}<span class="site-nav__caret" aria-hidden="true"></span>
+    </a>
+    <div class="site-nav__panel">
+      {
+        NAV.dropdown.map((tool) => (
+          <a
+            class="site-nav__item"
+            href={href(`${tool.slug}/`)}
+            title={tool.name}
+            aria-current={current === tool.slug ? 'page' : undefined}
+          >
+            {tool.navLabel}
+          </a>
+        ))
+      }
+    </div>
   </div>
 </nav>

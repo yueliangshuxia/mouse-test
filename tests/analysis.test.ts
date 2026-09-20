@@ -769,7 +769,7 @@ describe('summarizeScroll', () => {
 
 describe('markScrollGlitches', () => {
   /*
-   * 首页滚轮卡那条方向带靠它决定**哪一格标红**。它和 `summarizeScroll` 的
+   * 首页合并卡那条方向带靠它决定**哪一格标红**。它和 `summarizeScroll` 的
    * `glitches` 是同一条判据的两个出口,所以这两个 describe 的用例形状故意
    * 对得上 —— 哪天一边改了另一边没改,这两组就会互相咬住。
    */
