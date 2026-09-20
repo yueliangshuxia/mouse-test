@@ -1,0 +1,113 @@
+---
+import { CONFIDENCE_LABEL } from '../lib/tools';
+import type { Tool } from '../lib/tools';
+import { DEFAULT_TRACE_SLOTS } from '../lib/mini-cards';
+import type { MiniCard } from '../lib/mini-cards';
+import { href } from '../lib/url';
+
+interface Props {
+  tool: Tool;
+  spec: MiniCard;
+  /**
+   * 装置槽空态那句话。
+   *
+   * **由页面算好传进来**,不在这里现算 —— 空态那句话可以随模式变
+   * (`MiniMode.prompt`),挑哪一句的判据(`defaultMiniMode`)必须和驱动复位回
+   * 空态时用的是同一份,所以那个选择留在页面/驱动的公共层,不在这里重来一次。
+   */
+  prompt: string;
+}
+
+const { tool, spec, prompt } = Astro.props;
+
+/*
+ * 首页的一张卡片。
+ *
+ * 抽成组件是因为首页现在有**两片网格**(诊断工具一片、「更多工具」一片),
+ * 而卡片的样子只能有一份 —— 复制一遍那段带 `data-mini*` 挂钩的标记,
+ * 迟早有一份漏掉某个键,而**那种失败是静默的**(`setText(null)` 是空操作,
+ * 那一格永远是破折号)。
+ *
+ * 样式全在 `global.css`(没有一处在这个文件里),所以抽出来不会踩
+ * `data-astro-cid` 那条作用域坑:`.mini-card` 一类的规则照样命中。
+ */
+---
+
+<li class="mini-card">
+  <div class="mini-card__head">
+    <a class="mini-card__name" href={href(`${tool.slug}/`)}>{tool.name}</a>
+    <span class={`confidence confidence--${tool.confidence}`}>
+      {CONFIDENCE_LABEL[tool.confidence]}
+    </span>
+  </div>
+
+  <p class="mini-card__desc">{tool.description}</p>
+
+  {/*
+    模式开关。位置在**描述和装置面之间** —— 模式说的是"这台仪器怎么测",
+    属于仪器,不属于读数。也和 `trail-test` 一样落在测试区**上面**。
+
+    **它不是「开始」。** 按下去只换挡,开测仍然是碰装置面(全站这张卡片
+    和 CPS 那一页都是"点一下就开局")。选中态走全局的
+    `button[aria-pressed='true']`,这里不另写一个状态色。
+  */}
+  {spec.modes && spec.modes.length > 0 && (
+    <div class="mini-modes" role="group" aria-label={`${tool.name}的模式`}>
+      {spec.modes.map((mode, index) => (
+        <button
+          type="button"
+          class="mini-modes__btn"
+          data-mini-mode={`${tool.slug}:${mode.key}`}
+          aria-pressed={(mode.default ?? index === 0) ? 'true' : 'false'}
+        >
+          {mode.label}
+        </button>
+      ))}
+    </div>
+  )}
+
+  <div class={`mini-device${spec.kind === null ? ' mini-device--static' : ''}`} data-mini={tool.slug}>
+    {spec.kind === null
+      ? <p class="mini-device__why">{spec.fallback}</p>
+      : <p class="mini-device__prompt">{prompt}</p>}
+  </div>
+
+  {spec.readouts.length > 0 && (
+    <div class="mini-read">
+      {spec.readouts.map((readout) =>
+        readout.kind === 'trace' ? (
+          /*
+           * 方向带。**格子在这里渲染**,驱动只往上刷 `data-mark` /
+           * `data-glitch` —— 和读数槽同一套分工:页面管结构,驱动管值。
+           * 格数读 `readout.slots`,和 `mini-cards.ts` 是同一份声明。
+           *
+           * `aria-hidden`:格子是空的 `<i>`,不藏起来读屏会念十个空元素;
+           * 它表达的事(红格 = 反向毛刺)在卡底那行小注里有文字。
+           */
+          <div class="mini-read__item mini-read__item--trace">
+            <span class="mini-read__label">{readout.label}</span>
+            <span
+              class="mini-trace"
+              data-mini-trace={`${tool.slug}:${readout.key}`}
+              aria-hidden="true"
+            >
+              {Array.from({ length: readout.slots ?? DEFAULT_TRACE_SLOTS }).map(() => (
+                <i class="mini-trace__cell" />
+              ))}
+            </span>
+          </div>
+        ) : (
+          <div class="mini-read__item">
+            <span class="mini-read__label">{readout.label}</span>
+            <span class="mini-read__num">
+              <span class="mini-read__value" data-mini-out={`${tool.slug}:${readout.key}`}>—</span>
+              {readout.unit && <span class="mini-read__unit">{readout.unit}</span>}
+            </span>
+          </div>
+        ),
+      )}
+    </div>
+  )}
+
+  <p class="mini-card__note">{spec.note}</p>
+</li>

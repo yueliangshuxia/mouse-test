@@ -347,10 +347,24 @@ export function loadBest(key: string): number | null {
   }
 }
 
+export interface SaveBestOptions {
+  /**
+   * 越小越好的指标(反应时间这种)。默认是"越大越好"(CPS、命中数)。
+   *
+   * 传错这一位的后果是**静默的**:纪录要么永远不更新,要么每次都被覆盖。
+   * 所以别用位置参数传,写成 `{ lowerIsBetter: true }` —— 调用点上读得出意思。
+   */
+  lowerIsBetter?: boolean;
+}
+
 /** 保存最好成绩。只在新成绩更好时才写入。返回是否刷新了纪录。 */
-export function saveBest(key: string, value: number): boolean {
+export function saveBest(key: string, value: number, options: SaveBestOptions = {}): boolean {
+  if (!Number.isFinite(value)) return false;
   const previous = loadBest(key);
-  if (previous !== null && previous >= value) return false;
+  if (previous !== null) {
+    const better = options.lowerIsBetter ? previous > value : previous < value;
+    if (!better) return false;
+  }
   try {
     localStorage.setItem(key, String(value));
   } catch {

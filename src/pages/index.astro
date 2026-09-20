@@ -1,8 +1,9 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { CONFIDENCE_LABEL, PLANNED_TOOLS, READY_TOOLS } from '../lib/tools';
+import MiniCard from '../components/MiniCard.astro';
+import { CONFIDENCE_LABEL, DIAGNOSTIC_TOOLS, FUN_TOOLS, PLANNED_TOOLS } from '../lib/tools';
 import type { Confidence } from '../lib/tools';
-import { CONFIDENCE_NOTE, DEFAULT_TRACE_SLOTS, findMiniCard } from '../lib/mini-cards';
+import { CONFIDENCE_NOTE, defaultMiniMode, findMiniCard } from '../lib/mini-cards';
 import { href } from '../lib/url';
 
 const title = '鼠标测试 - 在线检测鼠标按键、回报率与传感器性能';
@@ -36,7 +37,19 @@ const jsonLd = {
  */
 const CONFIDENCE_ORDER: Confidence[] = ['exact', 'estimate', 'shape', 'direction'];
 
-const cards = READY_TOOLS.map((tool) => ({ tool, spec: findMiniCard(tool.slug)! }));
+/*
+ * 空态那句话**可以随模式变**(`MiniMode.prompt`),所以首帧就要挑对那一个 ——
+ * 判据和驱动复位回空态时用的是同一个 `defaultMiniMode`,不写两份。
+ *
+ * **只从 `DIAGNOSTIC_TOOLS` 建卡片。** 趣味工具不上卡片(理由写在
+ * `mini-cards.ts` 的文件头),它们进下面那一节,只给链接。`findMiniCard` 对这
+ * 批 slug 一定有值,`!` 是安全的 —— 这份对应关系由 `tests/mini-cards.test.ts`
+ * 钉着(它断言的正是 `MINI_CARDS` 与 `DIAGNOSTIC_TOOLS` 一一对应)。
+ */
+const cards = DIAGNOSTIC_TOOLS.map((tool) => {
+  const spec = findMiniCard(tool.slug)!;
+  return { tool, spec, prompt: defaultMiniMode(spec)?.prompt ?? spec.prompt };
+});
 ---
 
 <BaseLayout title={title} description={description} current="index" jsonLd={jsonLd}>
@@ -61,62 +74,40 @@ const cards = READY_TOOLS.map((tool) => ({ tool, spec: findMiniCard(tool.slug)! 
   </p>
 
   <ul class="mini-grid">
+    {cards.map(({ tool, spec, prompt }) => <MiniCard tool={tool} spec={spec} prompt={prompt} />)}
+  </ul>
+
+  {/*
+    第二片:**趣味工具,只给链接,不给卡片。**
+
+    它们和上面十项不是一类东西 —— 上面是诊断(测鼠标坏没坏),这两页是玩。
+    正文里把这点说破,免得读者拿瞄准成绩去判断鼠标好坏。
+
+    **为什么不发卡片**(判据在 `mini-cards.ts` 的文件头):两页各要一台计时器
+    才能结束(反应要等一段随机延迟,瞄准要跑满 10–60 秒),而卡片那台装置是
+    "空闲了就结算",拧着用;而且卡片只有 120px,刺激面和目标直径都得缩,
+    缩完量出来的就已经不是那一页的数了 —— 那正是全站最不能做的一件事。
+
+    清单从 `FUN_TOOLS` 派生,**不是手写两个 `<li>`**:手写的话加一个趣味工具
+    只改 `tools.ts` 就会从这里静默消失,而下面那句"下面 N 页"也就跟着说了谎。
+
+    样式:悬停用底色(同 `.brand` / `.site-nav__item`)—— 纸面没有色相可用,
+    `color` 那条路是死的。规则写在页面自己的 `<style>` 里,不新增全局类。
+  */}
+  <h2>更多工具</h2>
+
+  <p class="prose">
+    上面十项是诊断,测的是"鼠标坏没坏";下面这两页是玩,成绩同样只存在本机,
+    也一样会在页面上说清楚哪些数测不准、为什么。
+  </p>
+
+  <ul class="more-list">
     {
-      cards.map(({ tool, spec }) => (
-        <li class="mini-card">
-          <div class="mini-card__head">
-            <a class="mini-card__name" href={href(`${tool.slug}/`)}>{tool.name}</a>
-            <span class={`confidence confidence--${tool.confidence}`}>
-              {CONFIDENCE_LABEL[tool.confidence]}
-            </span>
-          </div>
-
-          <p class="mini-card__desc">{tool.description}</p>
-
-          <div class={`mini-device${spec.kind === null ? ' mini-device--static' : ''}`} data-mini={tool.slug}>
-            {spec.kind === null
-              ? <p class="mini-device__why">{spec.fallback}</p>
-              : <p class="mini-device__prompt">{spec.prompt}</p>}
-          </div>
-
-          {spec.readouts.length > 0 && (
-            <div class="mini-read">
-              {spec.readouts.map((readout) =>
-                readout.kind === 'trace' ? (
-                  /*
-                   * 方向带。**格子在这里渲染**,驱动只往上刷 `data-mark` /
-                   * `data-glitch` —— 和读数槽同一套分工:页面管结构,驱动管值。
-                   * 格数读 `readout.slots`,和 `mini-cards.ts` 是同一份声明。
-                   *
-                   * `aria-hidden`:格子是空的 `<i>`,不藏起来读屏会念十个空元素;
-                   * 它表达的事(红格 = 反向毛刺)在卡底那行小注里有文字。
-                   */
-                  <div class="mini-read__item mini-read__item--trace">
-                    <span class="mini-read__label">{readout.label}</span>
-                    <span
-                      class="mini-trace"
-                      data-mini-trace={`${tool.slug}:${readout.key}`}
-                      aria-hidden="true"
-                    >
-                      {Array.from({ length: readout.slots ?? DEFAULT_TRACE_SLOTS }).map(() => (
-                        <i class="mini-trace__cell" />
-                      ))}
-                    </span>
-                  </div>
-                ) : (
-                  <div class="mini-read__item">
-                    <span class="mini-read__label">{readout.label}</span>
-                    <span class="mini-read__num">
-                      <span class="mini-read__value" data-mini-out={`${tool.slug}:${readout.key}`}>—</span>
-                      {readout.unit && <span class="mini-read__unit">{readout.unit}</span>}
-                    </span>
-                  </div>
-                ),
-              )}
-            </div>
-          )}
-
-          <p class="mini-card__note">{spec.note}</p>
+      FUN_TOOLS.map((tool) => (
+        <li>
+          <a class="more-list__item" href={href(`${tool.slug}/`)}>
+            {tool.name}
+          </a>
         </li>
       ))
     }
@@ -238,5 +229,40 @@ const cards = READY_TOOLS.map((tool) => ({ tool, spec: findMiniCard(tool.slug)! 
     max-width: 42em;
     color: var(--text-dim);
     line-height: 1.6;
+  }
+
+  /*
+   * 「更多工具」那两条链接。
+   *
+   * 用的是 `.site-nav__item` 那套:淡底药丸 + 悬停换底色和字色。**为什么不加
+   * 描边或者下划线**:描边药丸是 `.confidence` 徽章的长相,而徽章就在上面那些
+   * 卡片里 —— 同一节里出现两批长得很像的药丸,读者会以为它们是同一种东西。
+   *
+   * `list-style: none` + `padding: 0` 自己去掉了项目符号:`ul` 在这里只是
+   * "若干项"的结构,视觉上是一排链接,不是一份带点的清单。
+   *
+   * 窄屏交给 `flex-wrap` 自己折行 —— 全站**只有 760px 那一个断点**,
+   * 这里不新增。
+   */
+  .more-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 1.75rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .more-list__item {
+    display: inline-block;
+    padding: 4px 11px;
+    border-radius: var(--radius-pill);
+    color: var(--text-dim);
+  }
+
+  .more-list__item:hover {
+    background: var(--bg-inset);
+    color: var(--text);
+    text-decoration: none;
   }
 </style>

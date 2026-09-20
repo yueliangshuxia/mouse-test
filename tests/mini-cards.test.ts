@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CONFIDENCE_NOTE, DEFAULT_TRACE_SLOTS, MINI_CARDS } from '../src/lib/mini-cards';
-import { CONFIDENCE_LABEL, READY_TOOLS } from '../src/lib/tools';
+import { CONFIDENCE_LABEL, DIAGNOSTIC_TOOLS, FUN_TOOLS, READY_TOOLS } from '../src/lib/tools';
 
 /*
  * 这一组用例守的是**首页那份说明书和工具注册表之间的对应关系**。
@@ -13,11 +13,40 @@ import { CONFIDENCE_LABEL, READY_TOOLS } from '../src/lib/tools';
  * 所以这里不测"卡片长什么样",只钉住这张对应表。
  */
 
+/**
+ * `mini-devices.ts` 的源码,**注释已经剥掉**。
+ *
+ * 剥注释不是洁癖:注释里举的例子(「签错名写成了 `push` 加一个字面量」这种)会被
+ * 后面的正则当成真的键读进来 —— 那不是代码在写,却会让用例报一个假故障。
+ * 这条踩过一次:一段说明文字让用例红了,而它指的那个键根本不存在。
+ *
+ * 下面的扫描和 `mini-cards.ts` 是**两个世界共用值**的同一类守护:一处写字符串、
+ * 另一处按字符串找,中间没有任何类型能拦住打错的字母。
+ */
+function driverSource(): string {
+  return readFileSync(new URL('../src/lib/mini-devices.ts', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+}
+
 describe('mini-cards', () => {
-  it('与 READY_TOOLS 一一对应,顺序也一致', () => {
-    expect(MINI_CARDS.map((card) => card.slug)).toEqual(READY_TOOLS.map((tool) => tool.slug));
+  /*
+   * 对应的是 `DIAGNOSTIC_TOOLS`,不是 `READY_TOOLS`。
+   *
+   * 趣味工具**不上首页卡片**(理由写在 `mini-cards.ts` 的文件头),首页那一节
+   * 只给两个链接。所以这条判据跟着收窄:拿 `READY_TOOLS` 去比的话,加一个
+   * 不上卡片的工具会红成"少了一张卡",而它本来就不该有卡。
+   */
+  it('与 DIAGNOSTIC_TOOLS 一一对应,顺序也一致', () => {
+    expect(MINI_CARDS.map((card) => card.slug)).toEqual(DIAGNOSTIC_TOOLS.map((tool) => tool.slug));
   });
 
+  it('趣味工具确实没有卡片 —— 有卡片就说明它会被首页当诊断项渲染', () => {
+    const carded = new Set(MINI_CARDS.map((card) => card.slug));
+    for (const tool of FUN_TOOLS) {
+      expect(carded.has(tool.slug), `${tool.slug} 是趣味工具,不该有卡片`).toBe(false);
+    }
+  });
   it('没有重复的 slug', () => {
     const slugs = MINI_CARDS.map((card) => card.slug);
     expect(new Set(slugs).size).toBe(slugs.length);
@@ -85,14 +114,7 @@ describe('mini-cards', () => {
    * 字母的键不会出现在任何一张卡里,这条判据抓得住。
    */
   it('装置写入的每一个 key 都能找到对应的读数槽', () => {
-    /*
-     * **先把注释剥掉再扫。** 注释里举的例子(「签错名写成了 push 加一个字面量」
-     * 这种)会被当成真的键读进来 —— 那不是代码在写,却会让这条用例报一个假故障。
-     * 这条踩过一次:一段说明文字让用例红了,而它指的那个键根本不存在。
-     */
-    const source = readFileSync(new URL('../src/lib/mini-devices.ts', import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '');
+    const source = driverSource();
 
     // `.push(` 一起扫:方向带也按 key 挂钩,签错名同样是**静默不画**。
     const written = new Set(
@@ -107,6 +129,91 @@ describe('mini-cards', () => {
       expect(declared.has(key), `mini-devices.ts 往 "${key}" 写,但没有任何读数槽叫这个名字`).toBe(
         true,
       );
+    }
+  });
+
+  /*
+   * 模式表本身的完整性。
+   *
+   * `key` 打错一个字母不会报任何错:按钮照旧能按、照旧高亮,而 `ctx.mode` 永远
+   * 不等于它 —— 工厂于是**静默地**跑在另一套口径上。和 `write()` 签错名是同一类
+   * 事故,所以钉在同一层。
+   */
+  it('模式表的 key 唯一、有标签,而且至多一个默认', () => {
+    for (const card of MINI_CARDS) {
+      const modes = card.modes ?? [];
+      const keys = modes.map((mode) => mode.key);
+      expect(new Set(keys).size, `${card.slug} 的模式 key 有重名`).toBe(keys.length);
+      expect(
+        modes.filter((mode) => mode.default).length,
+        `${card.slug} 声明了不止一个默认模式 —— 默认是哪一个会变成源码顺序说了算`,
+      ).toBeLessThan(2);
+      for (const mode of modes) {
+        expect(mode.key, `${card.slug} 有一个模式没写 key`).toBeTruthy();
+        expect(mode.label, `${card.slug} 的模式 ${mode.key} 没写标签`).toBeTruthy();
+      }
+    }
+  });
+
+  /*
+   * 装置比对过的模式 key 必须真的存在。
+   *
+   * `ctx.mode === 'five'` 里的字面量写在 `mini-devices.ts`,而 key 写在
+   * `mini-cards.ts` —— **一个字符串横跨两个文件**。改了一处,那一整段分支就永远
+   * 走不到,而按钮照旧亮、页面照旧不报错,只是那个模式悄悄变成了另一个模式的行为。
+   * 这正是上面 `write()` 那条扫的是同一类东西,所以用同一个办法扫。
+   */
+  it('装置比对过的模式 key 都在卡片表里', () => {
+    const source = driverSource();
+    const compared = new Set(
+      [...source.matchAll(/ctx\.mode\s*===\s*'([^']+)'/g)].map((match) => match[1]),
+    );
+
+    // 一个空集合会让下面那个循环永远通过(假绿),所以先确认扫到了东西
+    expect(compared.size).toBeGreaterThan(0);
+
+    const declared = new Set(
+      MINI_CARDS.flatMap((card) => (card.modes ?? []).map((mode) => mode.key)),
+    );
+    for (const key of compared) {
+      expect(declared.has(key), `mini-devices.ts 比对了模式 "${key}",但没有任何卡片声明它`).toBe(
+        true,
+      );
+    }
+  });
+});
+
+/*
+ * 首页两片网格的分组不变量。
+ *
+ * `index.astro` 是按 `group` 把 `READY_TOOLS` 切成两片渲染的:诊断工具一片、
+ * 趣味功能一片。这个切法有一个静默失败 —— **新加的工具忘了填 `group`**,
+ * 或者填了个没人在过滤的值,那一项就会**从首页上凭空消失**,而构建、类型、
+ * 上面那条"与 READY_TOOLS 一一对应"的用例**全都不会响**(卡片表里它还在)。
+ *
+ * 所以这里钉的是"这个划分是完整的":两边合起来必须一个字不差地等于
+ * `READY_TOOLS`,既不重也不漏。`Tool.group` 是必填字段,typecheck 只能拦住
+ * "没写",拦不住"写了个别的值",这条用例补上那一半。
+ */
+describe('首页分组', () => {
+  it('诊断 + 趣味 恰好等于 READY_TOOLS,不重不漏', () => {
+    const grouped = [...DIAGNOSTIC_TOOLS, ...FUN_TOOLS].map((tool) => tool.slug);
+    expect(grouped.slice().sort()).toEqual(READY_TOOLS.map((tool) => tool.slug).sort());
+  });
+
+  it('两片都不是空的', () => {
+    // 空的那一片会让首页多出一个只有标题、没有卡片的空节 ——
+    // `index.astro` 不判断空集,会老老实实渲染一个空网格
+    expect(DIAGNOSTIC_TOOLS.length).toBeGreaterThan(0);
+    expect(FUN_TOOLS.length).toBeGreaterThan(0);
+  });
+
+  it('每一片都保持了 READY_TOOLS 的顺序', () => {
+    // 顺序只有一份:两片是"切"出来的,不是各自排的。
+    // 切出来的子序列必然保序 —— 这条就是防止有人日后改成手工列两份。
+    for (const slice of [DIAGNOSTIC_TOOLS, FUN_TOOLS]) {
+      const positions = slice.map((tool) => READY_TOOLS.indexOf(tool));
+      expect(positions).toEqual([...positions].sort((a, b) => a - b));
     }
   });
 });

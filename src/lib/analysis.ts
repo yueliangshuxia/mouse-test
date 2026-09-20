@@ -870,6 +870,27 @@ export function summarizeClickGaps(gaps: readonly number[]): ClickGapStats {
 // CPS:每秒点击次数
 // ---------------------------------------------------------------------------
 
+/**
+ * 结算之后多久内,测试面上的点击**不算"想再来一轮"**。
+ *
+ * 这一条是实测逼出来的,不是拍脑袋加的:计时到点由 ticker 每 80ms 结算一次,
+ * 而人手在 5 秒里连点完之后不会立刻停 —— 实测跑一轮 5 秒(约 20 CPS),
+ * 到点时还在惯性地按,结果成绩刚摆上去,**50ms 后那一下就把它抹掉、直接开了
+ * 第二轮**,成绩在屏幕上存在的时间比一次眨眼还短,等于白测。
+ *
+ * 900ms 够看清一个三位数、也够看清下面四块面板刷新;之后点击恢复成"再来一轮"。
+ * 这个数是量出来的:用机器以 20 CPS 从结算那一刻起不停地按,成绩在**第 872ms**
+ * 被抹掉 —— 人类要打破它,得在计时结束后仍以极限速度多按二十几下,而人真正的
+ * 收手反射只多出 1–3 下(约 50–150ms),留了六倍余量。所以这条锁不是"够长",
+ * 是"比人长得多"。
+ *
+ * **两个世界共用这一个值**:CPS 整页和首页那张 CPS 卡片的 5 秒模式。卡片那边
+ * 遇到的问题一模一样 —— 窗口由计时器关闭,不是由"手停下来"关闭,所以结算那一刻
+ * 手同样还在按。各写一份的话,调了一处,另一处会静默地留下一段"成绩立刻被抹掉"
+ * 的窗口,而它只在连点很快时才现形。
+ */
+export const RESTART_LOCK_MS = 900;
+
 export interface CpsStats {
   clicks: number;
   durationMs: number;
@@ -1186,6 +1207,243 @@ export function detectTrailJumps(
   }
 
   return { steps: steps.length, medianStep, maxStep, jumps, isolated, threshold };
+}
+
+// ---------------------------------------------------------------------------
+// 轨迹:角度吸附
+// ---------------------------------------------------------------------------
+
+/**
+ * 角度吸附(angle snapping,厂商也叫"预测")是固件把**接近水平或垂直**的手部
+ * 动作拉成完全笔直的功能。判据的物理依据只有一句:
+ *
+ * > **人手画不出完美直线。** 一条一百像素以上的手绘笔画,总会在拟合线两侧
+ * > 游走一两个像素;而被吸附过的笔画**严格落在轴上**。
+ *
+ * 所以量的是"整条笔画离它自己的拟合线有多远"。它只读 x/y 两个几何量,
+ * 整段判据里**没有时间戳**——和 `detectTrailJumps` 同一类,因此浏览器里成立。
+ *
+ * **这套阈值不是照搬来的,是量出来的,而且量出来的结论对判据不利。**
+ * 见 `tests/analysis.test.ts` 里那两组量化用例:造手抖 → 取整 → 量误判率。
+ * 误判(把干净鼠标说成开了吸附)在 31 个采样 / 手抖 0.2px 时高达 **27%**,
+ * 因为手抖是亚像素的,取整会把它整个吃掉。**这个模块只用来做试验性展示,
+ * 不要拿它给用户下一个确定的结论。** 细节见 `trail-test.astro` 里那段说明。
+ */
+
+/** 笔画短于这个长度(像素)就不判——太短的笔画没有形状可言。 */
+export const SNAP_MIN_LENGTH_PX = 100;
+
+/** 采样少于这么多就不判——几个点连成"直线"是巧合。 */
+export const SNAP_MIN_SAMPLES = 20;
+
+/** 与最近坐标轴的夹角小于这个度数,才算"近轴笔画"。吸附只在这种笔画上动手。 */
+export const SNAP_NEAR_AXIS_DEG = 15;
+
+/** 近轴笔画还要同时满足下面两条,才算被吸附。 */
+export const SNAP_AXIS_DEG = 1;
+/**
+ * 到拟合线的**最大**垂直距离。**这个才是判据的承重墙,而且它是量出来的。**
+ *
+ * 实测(造手抖 → 取整 → 量残差):
+ *
+ * | 笔画 | 最大残差 |
+ * | --- | --- |
+ * | 固件吸附(严格贴轴) | **恰好 0** |
+ * | 手抖 0.05px/采样 | 0.69 – 0.95 |
+ * | 手抖 0.1px/采样 | 约 0.69 |
+ * | 手抖 0.25px/采样 | 约 1.09 |
+ *
+ * 中间那段**是空的** —— 从 0 直接跳到 0.69。因为"贴轴"是个整数量化事实:
+ * `y` 要么全程只有一个值(残差恰好 0),要么总有一个点落到隔壁那一行上。
+ * 阈值放这段空档的中点,取 0.35。
+ *
+ * **别改回均方根。** 最初照搬原生实现写的是"rms < 0.3 且 max < 1.5",实测
+ * `step=1px` 时手抖 0.1px/采样就落进 0.300,被误判成吸附 —— 均方根把 200 个点
+ * 平均掉,一个点跳出去就摊薄到 0.3 以下,而"有一个点跳出去了"正是要抓的那件事。
+ * `rmsResidual` 仍然算出来,只作形状描述,不再参与判定。
+ */
+export const SNAP_MAX_RESIDUAL = 0.35;
+
+/** 至少这么多条近轴笔画才给结论——一条都不能说明问题,只能说明运气。 */
+export const SNAP_MIN_NEAR_AXIS_STROKES = 3;
+
+/** 近轴笔画里被判为吸附的比例达到这个值,才说"检出吸附"。 */
+export const SNAP_FRACTION = 0.5;
+
+/** 一条笔画的几何形状。 */
+export interface StrokeShape {
+  /** 沿路径累加的长度(像素),不是首尾直线距离 */
+  length: number;
+  /** 净位移方向(度),-180..180。屏幕坐标,正 y 向下 */
+  angleDeg: number;
+  /** 到最近坐标轴的角度距离,0..45 */
+  axisDeviationDeg: number;
+  /** 路径到拟合线的垂直距离的**均方根**。只作形状描述,不参与判定 */
+  rmsResidual: number;
+  /** 路径到拟合线的**最大**垂直距离。判定就看它 */
+  maxResidual: number;
+  /** 参与拟合的点数 */
+  samples: number;
+}
+
+/**
+ * 把一段采样拟合成一条笔画,量出它的形状。
+ *
+ * 返回 `null` 表示这段太短(长度或采样数不够),给不出形状——UI 必须如实
+ * 显示"这条不算",而不是拿几个点的巧合去凑一个"笔直"的结论。
+ *
+ * 拟合在**相对轨迹**上做:从起点把每一步的增量叠起来。绝对坐标里可能藏着
+ * 一个很大的偏移,那个偏移对"直不直"没有任何信息。
+ */
+export function strokeShape(
+  x: Float32Array,
+  y: Float32Array,
+  start: number,
+  end: number,
+): StrokeShape | null {
+  const count = end - start;
+  if (count < SNAP_MIN_SAMPLES) return null;
+
+  const px = new Float64Array(count);
+  const py = new Float64Array(count);
+  let length = 0;
+  for (let i = 1; i < count; i++) {
+    const dx = x[start + i] - x[start + i - 1];
+    const dy = y[start + i] - y[start + i - 1];
+    px[i] = px[i - 1] + dx;
+    py[i] = py[i - 1] + dy;
+    length += Math.sqrt(dx * dx + dy * dy);
+  }
+  if (length < SNAP_MIN_LENGTH_PX) return null;
+
+  // 净位移定"往哪个方向去了"。轴偏离看它,不看拟合方向——拟合方向在小抖动下
+  // 会自己往抖动那边偏,而"这条笔画是不是横的"应该由首尾说了算。
+  const angleDeg = (Math.atan2(py[count - 1], px[count - 1]) * 180) / Math.PI;
+  const mod = Math.abs(angleDeg) % 90;
+  const axisDeviationDeg = Math.min(mod, 90 - mod);
+
+  // 拟合线取点云的主方向(2×2 协方差的主特征向量),不是首尾连线:
+  // 首尾连线会被两端各一个离群点整个带偏,主方向不会。
+  let mx = 0;
+  let my = 0;
+  for (let i = 0; i < count; i++) {
+    mx += px[i];
+    my += py[i];
+  }
+  mx /= count;
+  my /= count;
+
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (let i = 0; i < count; i++) {
+    const ex = px[i] - mx;
+    const ey = py[i] - my;
+    sxx += ex * ex;
+    syy += ey * ey;
+    sxy += ex * ey;
+  }
+  const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const ux = Math.cos(theta);
+  const uy = Math.sin(theta);
+
+  let sumSq = 0;
+  let maxResidual = 0;
+  for (let i = 0; i < count; i++) {
+    const ex = px[i] - mx;
+    const ey = py[i] - my;
+    const perp = Math.abs(ex * uy - ey * ux);
+    sumSq += perp * perp;
+    if (perp > maxResidual) maxResidual = perp;
+  }
+
+  return {
+    length,
+    angleDeg,
+    axisDeviationDeg,
+    rmsResidual: Math.sqrt(sumSq / count),
+    maxResidual,
+    samples: count,
+  };
+}
+
+/** 这条笔画够不够"横平竖直",值得拿去判吸附。 */
+export function isNearAxis(shape: StrokeShape): boolean {
+  return shape.axisDeviationDeg < SNAP_NEAR_AXIS_DEG;
+}
+
+/**
+ * 这条笔画是不是笔直到了人手做不到的程度。
+ *
+ * 两道闸缺一不可。角度那道闸**不是冗余**:实测一条 8° 的整数阶梯(每 7 步落
+ * 一格)最大残差只有 0.435,只比阈值高一丁点——锯齿的主方向会自己往中间偏,
+ * 把两侧摊平。所以"够不够贴轴"和"够不够直"必须分开问。
+ */
+export function isSnapped(shape: StrokeShape): boolean {
+  return (
+    shape.axisDeviationDeg < SNAP_AXIS_DEG &&
+    shape.maxResidual < SNAP_MAX_RESIDUAL
+  );
+}
+
+/** 这条笔画贴着的是哪个轴:0 = 水平,90 = 垂直。 */
+export function snapAxis(angleDeg: number): number {
+  const a = Math.abs(angleDeg) % 180;
+  return a >= 45 && a <= 135 ? 90 : 0;
+}
+
+export interface AngleSnapStats {
+  /**
+   * 结论是否可信。近轴笔画不足 {@link SNAP_MIN_NEAR_AXIS_STROKES} 条时为 false,
+   * 此时 `hasSnapping` 一律是 false —— "没检出"和"画得太少没法判"必须分开。
+   */
+  conclusive: boolean;
+  hasSnapping: boolean;
+  totalStrokes: number;
+  nearAxisStrokes: number;
+  snappedStrokes: number;
+  /** 近轴笔画里被吸附的比例,0..1 */
+  snapStrength: number;
+  /** 检出吸附的轴(0 = 水平,90 = 垂直) */
+  axes: number[];
+}
+
+/**
+ * 由若干条笔画的形状判定有没有角度吸附。
+ *
+ * **结论只有"检出 / 没检出 / 画得不够"三档**,没有中间态。近轴笔画不够就给
+ * `conclusive: false`,页面必须说"再画几条横的和竖的"而不是报"未检出吸附"——
+ * 后者会让一个开着吸附的鼠标拿到清白。
+ *
+ * 但**"检出"这一档本身也不可信**:误判率取决于用户的手抖幅度和笔画长度,
+ * 而这两样页面都量不到。见本节的模块注释。
+ */
+export function detectAngleSnap(shapes: readonly StrokeShape[]): AngleSnapStats {
+  const nearAxis = shapes.filter(isNearAxis);
+  const snapped = nearAxis.filter(isSnapped);
+
+  const conclusive = nearAxis.length >= SNAP_MIN_NEAR_AXIS_STROKES;
+  const snapStrength = nearAxis.length === 0 ? 0 : snapped.length / nearAxis.length;
+  const hasSnapping = conclusive && snapStrength >= SNAP_FRACTION;
+
+  const axes: number[] = [];
+  if (hasSnapping) {
+    for (const shape of snapped) {
+      const axis = snapAxis(shape.angleDeg);
+      if (!axes.includes(axis)) axes.push(axis);
+    }
+    axes.sort((a, b) => a - b);
+  }
+
+  return {
+    conclusive,
+    hasSnapping,
+    totalStrokes: shapes.length,
+    nearAxisStrokes: nearAxis.length,
+    snappedStrokes: snapped.length,
+    snapStrength,
+    axes,
+  };
 }
 
 export interface DriftStats {
@@ -1708,4 +1966,232 @@ export function summarizeKeyboard(events: readonly KeyEvent[]): KeyboardStats {
     maxSimultaneous,
     stuck: held.size,
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * 反应速度测试(趣味工具,不是诊断)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 一次按下的生理下限(毫秒)。
+ *
+ * 简单视觉反应的生理下限约 120–150ms。**短于这个数的按下不可能是反应**——
+ * 它是预判好的那一下正好落在刺激刷新之后,会记到一个真实、但不是反应的数。
+ *
+ * 判据是"生理上不可能",不是调参旋钮,所以可以照实写进正文。
+ *
+ * 副作用(已记录):CDP 的合成点击几乎必然落进这一档被标成"可疑"。
+ * 那是**对的行为**,不要为了让它变绿去删这个下限。
+ */
+export const RT_IMPLAUSIBLE_MS = 100;
+
+/**
+ * 单次的等待上限(毫秒)。到点没等到按下,这一次作废。
+ *
+ * 必须有这条:**按住不放跨过刺激刷新时,永远不会有 `pointerdown`**
+ * (`pointerdown` 只在"无键按下 → 有键按下"那一刻派发一次)。不设超时,
+ * 这一次要么挂死,要么被记成一条几千毫秒的假成绩。
+ */
+export const RT_TIMEOUT_MS = 1500;
+
+/** 刺激出现前随机等待的区间(毫秒)。 */
+export const RT_WAIT_MIN_MS = 1500;
+export const RT_WAIT_MAX_MS = 4000;
+
+/** 一轮几次。少于这个数不给中位数。 */
+export const TRIALS_PER_ROUND = 5;
+
+/**
+ * 中位数至少要这么多次有效成绩才出。
+ *
+ * 两次的"中位数"就是平均值,那个数说明不了任何事——宁可给破折号。
+ */
+export const MIN_VALID_TRIALS = TRIALS_PER_ROUND;
+
+export type ReactionOutcome = 'timed' | 'foul' | 'timeout' | 'void';
+
+/**
+ * 一次尝试的记录。
+ *
+ * 判据在**页面**上(它才知道用户什么时候按的),但**分类在这层**:
+ * 哪一条算有效、哪一条只是"可疑",由 {@link summarizeReaction} 用
+ * {@link RT_IMPLAUSIBLE_MS} 定,这样这套判据能被单测钉住——放在页面里就只能靠手测。
+ */
+export type ReactionTrial =
+  | { outcome: 'timed'; ms: number }
+  | { outcome: 'foul' }
+  | { outcome: 'timeout' }
+  | { outcome: 'void' };
+
+export interface ReactionSummary {
+  /** 中位反应。有效次数不足 {@link MIN_VALID_TRIALS} 时为 `null`,页面出破折号 */
+  medianMs: number | null;
+  /** 观察到的最快一次。**不是极限**;没有有效成绩时为 `null` */
+  fastestMs: number | null;
+  /** 有效次数,即进入中位数的样本数 */
+  valid: number;
+  /** 抢跑:刺激还没出现就按了。是有效可测的事件,单独计数 */
+  foul: number;
+  /** 到点没按 */
+  timeout: number;
+  /** 中途作废(切走页面、时钟无效) */
+  void: number;
+  /** 快得不像反应,已排除在中位数之外 */
+  suspect: number;
+}
+
+/**
+ * 汇总一轮反应成绩。
+ *
+ * 四条排除规则,**每一条都单独计数、都在页面上可见**:
+ *
+ * 1. `foul` / `timeout` / `void` 直接不进中位数——它们根本没有反应时间可言。
+ * 2. `ms <= 0` 归入 `void`。输入事件的 `timeStamp` 可以早于锚点帧,夹到 0 是造假。
+ * 3. `ms < RT_IMPLAUSIBLE_MS` 归入 `suspect`,**排除但不丢弃**:条数照报。
+ *
+ * **报中位数而不是平均值。** 理由不是时钟量化,是走神:一次 600ms 的失神能把
+ * 10 次的平均值推高 40ms,而中位数几乎不动。
+ */
+export function summarizeReaction(trials: readonly ReactionTrial[]): ReactionSummary {
+  const valid: number[] = [];
+  let foul = 0;
+  let timeout = 0;
+  let invalid = 0;
+  let suspect = 0;
+
+  for (const trial of trials) {
+    if (trial.outcome === 'foul') {
+      foul++;
+      continue;
+    }
+    if (trial.outcome === 'timeout') {
+      timeout++;
+      continue;
+    }
+    if (trial.outcome === 'void') {
+      invalid++;
+      continue;
+    }
+
+    const ms = trial.ms;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      invalid++;
+    } else if (ms < RT_IMPLAUSIBLE_MS) {
+      suspect++;
+    } else {
+      valid.push(ms);
+    }
+  }
+
+  // 走既有的 percentile,不另写一份中位数 —— 分位数的插值口径全站只能有一套
+  const sorted = Float64Array.from(valid).sort();
+
+  return {
+    medianMs: valid.length >= MIN_VALID_TRIALS ? percentile(sorted, 0.5) : null,
+    fastestMs: valid.length > 0 ? sorted[0] : null,
+    valid: valid.length,
+    foul,
+    timeout,
+    void: invalid,
+    suspect,
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * 瞄准测试(趣味工具,不是诊断)
+ * ------------------------------------------------------------------ */
+
+export type AimMode = 'multi' | 'single';
+export type AimDifficulty = 'easy' | 'standard' | 'hard';
+
+/**
+ * 目标直径,CSS 像素。
+ *
+ * **这个数必须显示在页面上。** 命中率不受 DPI 和灵敏度影响,但受目标的
+ * **角尺寸**影响——不印直径,那个百分比就不是自描述的,换一档就没法比。
+ */
+export const TARGET_DIAMETER_PX: Record<AimDifficulty, number> = {
+  easy: 56,
+  standard: 40,
+  hard: 28,
+};
+
+/** 同时在场的目标数。 */
+export const TARGET_COUNT: Record<AimMode, number> = { multi: 3, single: 1 };
+
+/**
+ * 一次射击。`offsetPx` 是落点到目标圆心的距离,**只在命中时有意义**。
+ * 用可辨识联合而不是 `offsetPx: number | null`,是为了让"脱靶却带偏移"
+ * 这种记录在类型上就写不出来。
+ */
+export type AimShot = { hit: true; offsetPx: number } | { hit: false };
+
+export interface AimSummary {
+  hits: number;
+  /** 点击次数。**脱靶的也算**,否则命中率的分母就没有意义了 */
+  clicks: number;
+  /** 命中数 ÷ 点击数。一次没点时为 `null`,不是 0 */
+  accuracy: number | null;
+  /** 命中数 ÷ 时长。时长由**计时器**给,不从时间戳反推 */
+  hitsPerSecond: number | null;
+  /** 平均偏离,**只统计命中**。一次没中时为 `null` */
+  meanOffsetPx: number | null;
+}
+
+/**
+ * 汇总一轮瞄准成绩。
+ *
+ * 三处刻意的选择:
+ *
+ * 1. **`hitsPerSecond` 的分母是传进来的 `durationMs`,由页面上的计时器给。**
+ *    同 `computeCps`:打完最后一下就停手的话,那一段空闲在时间戳里根本不存在,
+ *    从时间戳推出来的时长会让"十秒里疯狂点了两秒"平均成一个虚高的数。
+ * 2. **`meanOffsetPx` 只统计命中。** 一个 300px 的脱靶会把均值整个带走,
+ *    那个数既答不了"命中得紧不紧",也答不了"脱得有多远"——分给两个数各答一句。
+ * 3. **没有加权总分。** 一个权重公式本身就是编出来的数。
+ *
+ * 注意这里**不含"漏掉"**:事实上的做法是**靶子不自己消失** —— 你不点它,它就
+ * 一直在那儿。于是这一页只有两种结果(点中 / 点空),"没反应过来"永远不会混进
+ * `clicks`。要做"漏掉"就得先有超时消失的靶子,那时它必须单独计数、不进 `clicks`,
+ * 否则"没反应过来"和"瞄歪了"会混成同一个百分比。
+ */
+export function summarizeAim(shots: readonly AimShot[], durationMs: number): AimSummary {
+  let hits = 0;
+  let offsetSum = 0;
+
+  for (const shot of shots) {
+    if (!shot.hit) continue;
+    hits++;
+    offsetSum += shot.offsetPx;
+  }
+
+  const clicks = shots.length;
+
+  return {
+    hits,
+    clicks,
+    accuracy: clicks > 0 ? hits / clicks : null,
+    hitsPerSecond:
+      Number.isFinite(durationMs) && durationMs > 0 ? hits / (durationMs / 1000) : null,
+    // 命中的偏离按构造一定是有限数(两个坐标相减),所以这里**不做兜底过滤**:
+    // 真混进坏值就该让均值变成 NaN,由 format() 出破折号 —— 那比悄悄按
+    // "命中的条数"去平均(把坏值稀释掉)诚实
+    meanOffsetPx: hits > 0 ? offsetSum / hits : null,
+  };
+}
+
+/**
+ * 最好成绩的存储键。
+ *
+ * **必须是函数。** 这个字符串横跨"写入存储"和"读出显示"两处,手抄的话
+ * 打错一个字母不会报任何错,只会让所有人的纪录静默地变成孤儿——和
+ * `mini-cards.ts` 那类键是同一类失败。三档设置各记各的:难度换了目标直径,
+ * 成绩就不可比。
+ */
+export function aimBestKey(
+  mode: AimMode,
+  difficulty: AimDifficulty,
+  durationMs: number,
+): string {
+  return `mouse-test:aim-best:${mode}:${difficulty}:${durationMs}`;
 }

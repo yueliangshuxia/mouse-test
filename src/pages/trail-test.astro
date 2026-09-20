@@ -94,6 +94,19 @@ const jsonLd = {
 
   <div id="cap-notice"></div>
 
+  <!--
+    模式开关。两个模式共用同一片测试区、同一个采样器,区别只在拿到缓冲区之后
+    走哪一套分析:画圈看丢帧,画直线看角度吸附。
+
+    直线模式是**试验性**的,判定本身不可靠 —— 原因写在它那一侧的判定说明里,
+    不长篇大论但必须说清楚。见 `analysis.ts` 的「轨迹:角度吸附」一节。
+  -->
+  <div class="controls">
+    <span class="test-hint">模式</span>
+    <button type="button" id="mode-loop" class="mode-btn" aria-pressed="true">画圈 · 查丢帧</button>
+    <button type="button" id="mode-line" class="mode-btn" aria-pressed="false">画直线 · 查角度吸附</button>
+  </div>
+
   <div class="controls">
     <button type="button" id="toggle">开始绘制</button>
     <button type="button" id="clear">清空轨迹</button>
@@ -111,9 +124,10 @@ const jsonLd = {
     <div class="workbench__readout">
       <div class="verdict">
         <div>
-          <div class="verdict__label">孤立尖峰</div>
+          <div class="verdict__label" id="verdict-label">孤立尖峰</div>
           <div>
-            <span class="verdict__value" id="jumps">—</span><span class="verdict__unit">处</span>
+            <span class="verdict__value" id="jumps">—</span
+            ><span class="verdict__unit" id="verdict-unit">处</span>
           </div>
           <div class="verdict__note" id="verdict-note">
             画完之后点“停止”或松开,这里会给出统计
@@ -124,13 +138,43 @@ const jsonLd = {
         </div>
       </div>
 
+      <!-- 采样点数是两个模式共用的,放在换挡的两块面板外面,免得切模式时一起消失 -->
       <div class="stat-grid">
         <StatPanel id="samples" label="采样点数" />
+      </div>
+
+      <div class="stat-grid" id="stats-loop">
         <StatPanel id="duration" label="分析时长" unit="ms" hint="最长的一段连续运动" />
         <StatPanel id="over-count" label="超线间隔" hint="含连着出现的,只作分母" />
         <StatPanel id="median-step" label="中位步长" unit="px" hint="相邻两点的典型间距" />
         <StatPanel id="max-step" label="最大步长" unit="px" />
       </div>
+
+      <div class="stat-grid" id="stats-line" hidden>
+        <StatPanel id="snap-strokes" label="有效笔画" hint="够长、采样够多才计入" />
+        <StatPanel id="snap-near" label="近轴笔画" hint="离坐标轴 15° 以内" />
+        <StatPanel id="snap-hit" label="判为吸附" hint="贴轴,且最大残差小于 0.35px" />
+        <StatPanel id="snap-axes" label="检出轴" />
+      </div>
+
+      <!--
+        每条笔画各自的数。**这张表才是这一页真正要给人看的东西。**
+        判定本身不可信(见下面那段说明),但"这条线离它自己的拟合线最远差了
+        几个像素"是个可以直接照着看的量——用户能拿它跟自己的手感对上。
+      -->
+      <table class="ref-table stroke-table" id="stroke-table" hidden>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>方向</th>
+            <th>长度</th>
+            <th>轴偏离</th>
+            <th>最大残差</th>
+            <th>判定</th>
+          </tr>
+        </thead>
+        <tbody id="stroke-rows"></tbody>
+      </table>
     </div>
   </div>
 
@@ -253,6 +297,33 @@ const jsonLd = {
       cursor: crosshair;
     }
 
+    /*
+     * 模式按钮**没有本页样式**:选中态由全局的 `button[aria-pressed='true']`
+     * 给(实心药丸 + 反色字),和双击页的 `.target`、CPS 页的 `.duration`
+     * 是同一套。这里曾经写过一条 `[data-active='true'] { 描边 + 墨色字 }`,
+     * 那是同一件事的第二种说法 —— 两套并存迟早有一套忘记跟着改。
+     */
+
+    /* 每条笔画一行,数字要能竖着对齐扫下来 */
+    .stroke-table {
+      margin-top: 14px;
+    }
+
+    /* 同 global.css 里 `.site-nav__more[hidden]` 那条:显式管住,不指望 UA 规则 */
+    .stroke-table[hidden] {
+      display: none;
+    }
+
+    .stroke-table td {
+      font-variant-numeric: tabular-nums;
+      padding: 7px 14px 7px 0;
+    }
+
+    .stroke-table th {
+      padding: 7px 14px 7px 0;
+    }
+
+
     .trail-area[data-drawing='true'] {
       border-color: var(--accent);
     }
@@ -275,7 +346,18 @@ const jsonLd = {
   </style>
 
   <script>
-    import { analyzeSegments, detectTrailJumps, measureDrift } from '../lib/analysis';
+    import {
+      analyzeSegments,
+      detectAngleSnap,
+      detectTrailJumps,
+      isNearAxis,
+      isSnapped,
+      measureDrift,
+      segmentTimestamps,
+      snapAxis,
+      strokeShape,
+      type StrokeShape,
+    } from '../lib/analysis';
     import { createTrailRenderer, observeResize } from '../lib/renderer';
     import { createMoveSampler } from '../lib/sampler';
     import {
@@ -361,6 +443,26 @@ const jsonLd = {
 
     let drawing = false;
 
+    // ---- 模式 ----
+
+    type Mode = 'loop' | 'line';
+    let mode: Mode = 'loop';
+
+    /**
+     * 直线模式下判断"两条笔画之间"的停顿阈值,比画圈那套用的 50ms 宽。
+     *
+     * 画圈时手腕的微停顿不该切断轨迹;而直线模式里换一条线是**刻意**的,
+     * 用户会明显停一下。宽一点才切得准 —— 切不准的代价不对称:把两条方向
+     * 不同的线缝成一条,拟合出来的"残差"就完全是假的。
+     */
+    const LINE_MAX_GAP_MS = 120;
+
+    /** 一条笔画至少要几个采样才送去量形状(与 analysis 的 SNAP_MIN_SAMPLES 对齐) */
+    const LINE_MIN_SAMPLES = 20;
+
+    const LOOP_HINT = '点开始之后,在这个区域里匀速画圈';
+    const LINE_HINT = '画几条横线和竖线,每条之间停一下再画下一条';
+
     // ---- 轨迹绘制 ----
 
     function startDrawing(): void {
@@ -375,7 +477,10 @@ const jsonLd = {
       overlay?.setAttribute('hidden', '');
       document.documentElement.classList.add('is-testing');
       setBadge(el('state-badge'), '绘制中', 'good');
-      setText(el('hint'), '匀速画十几圈,画完点“停止绘制”');
+      setText(
+        el('hint'),
+        mode === 'line' ? '画几条横线和竖线,每条之间停一下' : '匀速画十几圈,画完点“停止绘制”',
+      );
       if (toggle) toggle.textContent = '停止绘制';
     }
 
@@ -391,7 +496,147 @@ const jsonLd = {
       analyze();
     }
 
+    /** 把两套读数一起清空。模式切换和“清空轨迹”都要用,别各写一份。 */
+    function clearReadouts(): void {
+      setText(el('jumps'), '—');
+      setBadge(el('state-badge'), '等待绘制', 'idle');
+      setText(el('verdict-note'), '画完之后点“停止”或松开,这里会给出统计');
+      for (const id of ['samples', 'duration', 'over-count', 'median-step', 'max-step'])
+        setStat(id, '—');
+      for (const id of ['snap-strokes', 'snap-near', 'snap-hit', 'snap-axes']) setStat(id, '—');
+      el('stroke-rows')?.replaceChildren();
+      el('stroke-table')?.setAttribute('hidden', '');
+    }
+
+    /** 画完之后按当前模式分派。两套分析共用同一个缓冲区。 */
     function analyze(): void {
+      if (mode === 'line') analyzeStrokes();
+      else analyzeJumps();
+    }
+
+    /**
+     * 直线模式:把每一笔拟合成一条线,量它离**自己的拟合线**有多远。
+     *
+     * 判定给不给得出来是次要的 —— 这一页真正有信息量的是那张逐条笔画的表。
+     * 判定本身在浏览器数据上不可靠,原因见下面那段说明。
+     */
+    function analyzeStrokes(): void {
+      const buffer = sampler.buffer;
+
+      /*
+       * 靠**停顿**切段:用户画完一条线换下一条时会停一下,那段时间鼠标一个
+       * 报文都不发,缓冲区里留下一个空档。阈值给得比画圈那套宽,理由见
+       * LINE_MAX_GAP_MS。
+       */
+      const segments = segmentTimestamps(buffer.t, buffer.n, {
+        maxGapMs: LINE_MAX_GAP_MS,
+        minSamples: LINE_MIN_SAMPLES,
+        minDurationMs: 0,
+      });
+
+      const shapes: StrokeShape[] = [];
+      for (const seg of segments) {
+        const shape = strokeShape(buffer.x, buffer.y, seg.start, seg.end);
+        if (shape) shapes.push(shape);
+      }
+
+      setStat('samples', String(buffer.n));
+      renderStrokeTable(shapes);
+
+      if (shapes.length === 0) {
+        setText(el('jumps'), '—');
+        setBadge(el('state-badge'), '笔画不足', 'idle');
+        setText(
+          el('verdict-note'),
+          segments.length === 0
+            ? '没找到成形的笔画。每条线之间停一下再画下一条 —— 页面靠这个停顿把笔画切开。'
+            : `切出了 ${segments.length} 段,但都太短(不足 100px 或采样太少),量不出形状。把线画长一点。`,
+        );
+        for (const id of ['snap-strokes', 'snap-near', 'snap-hit', 'snap-axes'])
+          setStat(id, '—');
+        return;
+      }
+
+      const stats = detectAngleSnap(shapes);
+      setStat('snap-strokes', String(shapes.length));
+      setStat('snap-near', String(stats.nearAxisStrokes));
+      setStat('snap-hit', String(stats.snappedStrokes));
+      setStat(
+        'snap-axes',
+        stats.axes.length
+          ? stats.axes.map((a) => (a === 0 ? '水平' : '垂直')).join('、')
+          : '—',
+      );
+      setText(el('jumps'), String(stats.snappedStrokes));
+
+      if (!stats.conclusive) {
+        setBadge(el('state-badge'), '还判不了', 'idle');
+        setText(
+          el('verdict-note'),
+          `只画出了 ${stats.nearAxisStrokes} 条近轴笔画,不到 3 条给不出结论 —— ` +
+            '一条说明不了问题,只能说明运气。再画几条横的和竖的。',
+        );
+        return;
+      }
+
+      if (!stats.hasSnapping) {
+        setBadge(el('state-badge'), '未见吸附', 'good');
+        setText(
+          el('verdict-note'),
+          `${stats.nearAxisStrokes} 条近轴笔画里,只有 ${stats.snappedStrokes} 条直到了` +
+            '人手做不到的程度,看不出固件在拉直线。',
+        );
+        return;
+      }
+
+      setBadge(el('state-badge'), '疑似吸附', 'fair');
+      setText(
+        el('verdict-note'),
+        `${stats.nearAxisStrokes} 条近轴笔画里有 ${stats.snappedStrokes} 条严格贴在轴上` +
+          '(最大残差小于 0.35px,人手做不到)。但先别下结论:这个判定只在' +
+          '"线够长、画的时候手也确实在抖"时才可信 —— 手抖是亚像素的,取整之后' +
+          '可能被整个抹平,那样一条手画的线也会显示成严格贴轴。短笔画尤其容易误判' +
+          '(实测 31 个采样、手抖 0.2px 时误判率约 27%)。' +
+          '所以请看上面那张表里每条线自己的残差,别只看这个结论。',
+      );
+    }
+
+    /** 把每条笔画的数摊成一张表 —— 判定可能不可信,但残差是能直接看的量。 */
+    function renderStrokeTable(shapes: readonly StrokeShape[]): void {
+      const tbody = el('stroke-rows');
+      const table = el('stroke-table');
+      if (!tbody || !table) return;
+
+      if (shapes.length === 0) {
+        tbody.replaceChildren();
+        table.setAttribute('hidden', '');
+        return;
+      }
+      table.removeAttribute('hidden');
+
+      tbody.replaceChildren(
+        ...shapes.map((shape, i) => {
+          const tr = document.createElement('tr');
+          const cells = [
+            String(i + 1),
+            snapAxis(shape.angleDeg) === 0 ? '水平' : '垂直',
+            shape.length.toFixed(0),
+            `${shape.axisDeviationDeg.toFixed(2)}°`,
+            shape.maxResidual.toFixed(3),
+            !isNearAxis(shape) ? '斜的,不判' : isSnapped(shape) ? '吸附' : '—',
+          ];
+          for (const text of cells) {
+            const td = document.createElement('td');
+            td.textContent = text;
+            tr.append(td);
+          }
+          return tr;
+        }),
+      );
+    }
+
+    /** 画圈模式:数轨迹里的孤立尖峰。判据见 `detectTrailJumps`。 */
+    function analyzeJumps(): void {
       const buffer = sampler.buffer;
       // 只取最长的一段连续运动:中间停顿留下的空档会把中位步长拉低,
       // 从而把判定门槛也一起拉低,凭空造出一堆"跳变"
@@ -461,6 +706,50 @@ const jsonLd = {
       );
     }
 
+    /**
+     * 切换模式。两套读数、标签、提示文案、按钮高亮一起换,缓冲区清掉重来。
+     *
+     * 两种画法是**互斥的**:画圈的数据里没有直线笔画,画直线的数据里也没有
+     * 圆滑的轨迹。共用一片测试区就必须换模式,不能同时分析。
+     */
+    function setMode(next: Mode): void {
+      if (mode === next) return;
+      // 先按**旧**模式收尾出结果,再整体清掉 —— 顺序反了会拿新判据去分析
+      // 旧数据,那是纯粹的假结论
+      if (drawing) stopDrawing();
+      mode = next;
+
+      const line = next === 'line';
+      // 选中态走全局的 `button[aria-pressed='true']` —— 和双击页的 `.target`、
+      // CPS 页的 `.duration` 是同一套。别再各写一个 `data-active` 加一条规则。
+      el('mode-loop')?.setAttribute('aria-pressed', String(!line));
+      el('mode-line')?.setAttribute('aria-pressed', String(line));
+
+      // 注意:`.stat-grid` 是 display: grid,而 `[hidden]` 那条 UA 规则
+      // 压不过它 —— 页面的 <style> 里补了 .stat-grid[hidden] { display: none }
+      el('stats-loop')?.toggleAttribute('hidden', line);
+      el('stats-line')?.toggleAttribute('hidden', !line);
+
+      setText(el('verdict-label'), line ? '判为吸附' : '孤立尖峰');
+      setText(el('verdict-unit'), line ? '条' : '处');
+      overlay?.removeAttribute('hidden');
+      setText(
+        el('overlay'),
+        line
+          ? '点“开始绘制”,然后在这里画几条横线和竖线,每条之间停一下'
+          : '点“开始绘制”,然后在这里匀速画十几圈',
+      );
+      setText(el('hint'), line ? LINE_HINT : LOOP_HINT);
+
+      sampler.reset();
+      renderer.clear();
+      clearReadouts();
+      if (toggle) toggle.textContent = '开始绘制';
+    }
+
+    el('mode-loop')?.addEventListener('click', () => setMode('loop'));
+    el('mode-line')?.addEventListener('click', () => setMode('line'));
+
     toggle?.addEventListener('click', () => {
       if (drawing) stopDrawing();
       else startDrawing();
@@ -472,13 +761,9 @@ const jsonLd = {
       // 缓冲区清空后渲染层的游标还停在旧位置上,必须先对齐再重绘,
       // 否则它会去读已经不存在的采样
       renderer.clear();
-      setText(el('jumps'), '—');
-      setBadge(el('state-badge'), '等待绘制', 'idle');
-      setText(el('verdict-note'), '画完之后点“停止”或松开,这里会给出统计');
-      for (const id of ['samples', 'duration', 'over-count', 'median-step', 'max-step'])
-        setStat(id, '—');
+      clearReadouts();
       overlay?.removeAttribute('hidden');
-      setText(el('hint'), '点开始之后,在这个区域里匀速画圈');
+      setText(el('hint'), mode === 'line' ? LINE_HINT : LOOP_HINT);
       if (toggle) toggle.textContent = '开始绘制';
     });
 

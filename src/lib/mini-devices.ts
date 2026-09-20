@@ -48,13 +48,15 @@ import {
   longestSegment,
   markScrollGlitches,
   normalizeWheelDelta,
+  RESTART_LOCK_MS,
   segmentTimestamps,
   summarizeScroll,
+  type CpsStats,
   type DragEvent,
   type ScrollNotch,
 } from './analysis';
 import { BUTTONS, eachButtonEdge, maskFromButtons } from './mouse-buttons';
-import type { MiniCard, MiniKind } from './mini-cards';
+import { defaultMiniMode, type MiniCard, type MiniKind } from './mini-cards';
 import { createTrailRenderer, observeResize } from './renderer';
 import { createMoveSampler } from './sampler';
 import { createTicker, format, setText } from './ui';
@@ -69,6 +71,14 @@ export interface MiniContext {
   readonly surface: HTMLElement;
   /** 装置自建的实时画面放这里。驱动每次开测都换一个新的 */
   readonly live: HTMLElement;
+  /**
+   * 当前选中的模式 key;卡片没写 `modes` 时是 `null`。
+   *
+   * 工厂在**创建时**读一次就够了 —— 换模式时驱动会把卡片复位回空态,下一次
+   * 交互重新建一个工厂。所以工厂不必监听模式变化,也**不该**中途改口径:
+   * 一轮测到一半换挡,前面那段的读数和后面的对不上号。
+   */
+  readonly mode: string | null;
   /** 写一个读数槽。槽是按 `MiniCard.readouts[].key` 找的 */
   write(key: string, value: string): void;
   /**
@@ -97,6 +107,17 @@ export interface MiniContext {
    * 把测量判成结束。
    */
   settleAfter(ms: number, busy?: boolean): void;
+  /**
+   * 结算之后这么久内,**装置面上的交互不算"想再测一轮"**,由驱动的探针挡住。
+   *
+   * 只有"窗口到点自动关闭"的测量需要它(卡片上就是 CPS 的 5 秒模式):结算那
+   * 一刻手还在惯性连点,下一按就会把刚出的成绩抹掉、原地开下一轮。理由和整页
+   * 同一条,见 `analysis.ts` 的 `RESTART_LOCK_MS` —— 那个常量就是给这里用的。
+   *
+   * 锁挂在**驱动**上而不是工厂里,因为新的一轮会新建一个工厂,工厂自己记的
+   * 任何状态都活不过这一次结算。
+   */
+  cooldown(ms: number): void;
   /** 立刻了结这次测量 */
   finish(): void;
 }
@@ -286,37 +307,97 @@ const doubleClickMini: MiniFactory = (ctx, seed) => {
   if (pointer) press(pointer);
 };
 
+/** 卡片上那个 5 秒档。整页那边还有 10 / 30 秒,见 `cps-test.astro` 的 `DURATIONS`。 */
+const CPS_FIVE_SECONDS_MS = 5000;
+
 /**
- * CPS。只给**瞬时**手感 —— 正式成绩要跑完 5 / 10 / 30 秒模式,那是整页的事,
- * 卡里放不下,卡底的说明和正文都写明了这一点。
+ * CPS。两个模式共用同一套读数,差别只在**这次测量什么时候结束**:
+ *
+ * - `instant` —— 手停下来 1.2 秒就算完。大数字是"1 秒内最多几下"(1 秒滑窗的
+ *   最高次数),分母用"从第一下到现在"的墙钟 —— 用户还在点,那两个数本来就是
+ *   一回事,不必等计时器。
+ * - `five` —— 窗口由**计时器**在 5 秒整关闭,与手停不停无关。大数字是这 5 秒的
+ *   平均 CPS。这就是整页 5 秒档的口径:时长**显式**传给 `computeCps`。
+ *
+ * 5 秒模式**绝不能**调 `settleAfter`:手在 5 秒中间歇一下是正常的,而
+ * `settleAfter` 会在那一下之后把这一轮提前结束掉。它只由 deadline 关闭。
+ *
+ * 结尾那段空档是这条设计的全部理由 —— "点 20 下然后歇 4 秒"在时间戳里长得和
+ * "匀速点 5 秒"一模一样,因为不点就没有事件。分母只能由计时器给。
  */
 const cpsMini: MiniFactory = (ctx, seed) => {
   const times: number[] = [];
   const big = bigNumber(ctx.live);
   const captionNode = caption(ctx.live);
   big.textContent = '—';
-  captionNode.textContent = '1 秒内最多几下';
+
+  const timed = ctx.mode === 'five';
+  captionNode.textContent = timed ? '连点 5 秒' : '1 秒内最多几下';
 
   let base = 0;
+  let stopTick: (() => void) | null = null;
+
+  /**
+   * 把当前累计摆到两个读数槽上,返回算出来的那组数。
+   *
+   * `windowMs` 固定 1 秒而 `durationMs` 由**调用方**给:前者是峰值的定义
+   * ("任意 1 秒内最多几下"),后者是平均的分母,两件事。瞬时模式传墙钟,
+   * 计时模式传 5 秒整 —— 后者哪怕这一轮只点了 3 下也必须按 5 秒算。
+   */
+  function publish(durationMs: number): CpsStats | null {
+    const stats = computeCps(times, { windowMs: 1000, durationMs });
+    ctx.write('cps', format(stats ? stats.peak : null, 0));
+    ctx.write('clicks', String(times.length));
+    return stats;
+  }
+
+  /** 5 秒模式:窗口到点就结算,和手停没停无关 */
+  function settleTimed(): void {
+    stopTick?.();
+    stopTick = null;
+    const stats = publish(CPS_FIVE_SECONDS_MS);
+    big.textContent = format(stats ? stats.average : null, 1);
+    captionNode.textContent = '5 秒平均 CPS';
+    // 结算这一刻手还在惯性连点 —— 不锁的话下一按就把这个数抹掉、原地开下一轮
+    ctx.cooldown(RESTART_LOCK_MS);
+    ctx.finish();
+  }
+
+  function beginTimed(): void {
+    stopTick?.();
+    stopTick = createTicker(80, () => {
+      const elapsed = performance.now() - base;
+      const left = (CPS_FIVE_SECONDS_MS - elapsed) / 1000;
+      if (left <= 0) {
+        settleTimed();
+        return;
+      }
+      // 跑的时候大数字是**倒计时**:这是个有终点的测量,得让人看得到还剩多久
+      big.textContent = left.toFixed(1);
+      captionNode.textContent = `还剩 ${left.toFixed(1)} 秒`;
+      publish(Math.max(1000, elapsed));
+    });
+    ctx.onCleanup(() => {
+      stopTick?.();
+      stopTick = null;
+    });
+  }
 
   function press(event: PointerEvent): void {
     if (event.button !== 0) return; // 只认主键,和那一页的默认键一致
 
     const stamp = event.timeStamp;
-    if (times.length === 0) base = stamp;
+    if (times.length === 0) {
+      base = stamp;
+      if (timed) beginTimed();
+    }
     times.push(stamp - base);
 
-    const stats = computeCps(times, {
-      windowMs: 1000,
-      // 结尾那段空档事件里不存在,只有计时器知道 —— 但这里是**瞬时**读数,
-      // 用户还在点,所以用"从第一次到现在"当分母是对的。
-      durationMs: Math.max(1000, stamp - base),
-    });
+    // 计时模式的读数和结束都归 ticker 管,这里只记数
+    if (timed) return;
 
-    ctx.write('cps', format(stats ? stats.peak : null, 0));
-    ctx.write('clicks', String(times.length));
+    const stats = publish(Math.max(1000, stamp - base));
     big.textContent = format(stats ? stats.peak : null, 0);
-
     ctx.settleAfter(IDLE_DONE_MS);
   }
 
@@ -631,12 +712,21 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
     paintTrace(trace);
   }
 
+  const modes = spec.modes ?? [];
+  let activeMode = defaultMiniMode(spec)?.key ?? null;
+
   let phase: Phase = 'idle';
   let cleanups: Array<() => void> = [];
   let settleTimer = 0;
   let live: HTMLElement | null = null;
   /** 正在唤醒装置的那一个事件对象,见 `MiniFactory` 和 `on()` */
   let seeding: Event | null = null;
+  /**
+   * 这个时刻之前,装置面上的交互**不许开局**。由工厂通过 `ctx.cooldown()` 设,
+   * 理由见 `MiniContext.cooldown`。**挂在驱动上**:新的一轮会新建一个工厂,
+   * 工厂自己记的任何状态都活不过这一次结算。
+   */
+  let lockUntil = 0;
 
   /*
    * 状态写在 `data-phase` 上。**没有 CSS 依赖它** —— 它是给验证用的:
@@ -648,6 +738,19 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
   function runCleanups(): void {
     for (const fn of cleanups) fn();
     cleanups = [];
+  }
+
+  /** 空态那句话。模式可以覆盖卡片的 `prompt`,所以每次都要现取 */
+  function promptText(): string {
+    return modes.find((mode) => mode.key === activeMode)?.prompt ?? spec.prompt;
+  }
+
+  /** 把装置面换回空态那句话 */
+  function showPrompt(): void {
+    const node = document.createElement('p');
+    node.className = 'mini-device__prompt';
+    node.textContent = promptText();
+    surface.replaceChildren(node);
   }
 
   function armSettle(ms: number, busy: boolean): void {
@@ -669,10 +772,35 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
     // 框也回到虚线:那是"碰我开始测"这句话,而它随时可以重测。
   }
 
+  /**
+   * 回到空态。**换模式的时候用** —— 上一轮的数是在另一个口径下测出来的,
+   * 留着就像"这个模式已经测过了",而它一次都没测。
+   *
+   * 和 `finish()` 的差别只有一处:读数也一并清掉。测量跑着的时候不换挡
+   * (见下面模式按钮那个守卫),所以这里不必处理"跑了一半"。
+   */
+  function resetToIdle(): void {
+    if (phase === 'running') return;
+    runCleanups();
+    window.clearTimeout(settleTimer);
+    settleTimer = 0;
+    live = null;
+    for (const key of outputs.keys()) setText(outputs.get(key) ?? null, '—');
+    for (const trace of traces.values()) {
+      trace.marks.length = 0;
+      paintTrace(trace);
+    }
+    surface.classList.remove('well', 'mini-device--running');
+    showPrompt();
+    phase = 'idle';
+    surface.dataset.phase = phase;
+  }
+
   function makeContext(): MiniContext {
     return {
       surface,
       live: live as HTMLElement,
+      mode: activeMode,
       write(key, value) {
         setText(outputs.get(key) ?? null, value);
       },
@@ -700,6 +828,9 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
       },
       settleAfter(ms, busy = false) {
         armSettle(ms, busy);
+      },
+      cooldown(ms) {
+        lockUntil = performance.now() + ms;
       },
       finish,
     };
@@ -736,6 +867,12 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
 
   const probe = (event: Event): void => {
     if (phase === 'running') return;
+    /*
+     * 结算冷却。这一段里手还在惯性连点,由着它开局的话刚出的成绩会被立刻抹掉
+     * —— 和 CPS 那一页是同一条(`analysis.ts` 的 `RESTART_LOCK_MS`)。事件整个
+     * 吞掉,不是"忽略这一次计数":连开局都不该开。
+     */
+    if (performance.now() < lockUntil) return;
     start(event);
   };
   for (const type of device.wake) {
@@ -745,5 +882,31 @@ export function mountMiniCard(card: HTMLElement, spec: MiniCard): void {
      * 而被动监听里调的 `preventDefault()` 会被浏览器直接忽略。
      */
     surface.addEventListener(type, probe, { capture: true });
+  }
+
+  /*
+   * 模式开关。**装在卡片上,不是装置面上** —— 它落在描述和装置面之间,和
+   * `trail-test` 的模式行一样在测试区**外面**。这正是它不会顺手开测的原因:
+   * 探针长在装置面上,按钮是它的兄弟节点,点按钮不经过探针。
+   *
+   * 选中态交给全局的 `button[aria-pressed='true']`(双击页 `.target`、CPS 页
+   * `.duration` 同一套),这里只管按下时改哪个属性。
+   */
+  for (const button of card.querySelectorAll<HTMLElement>('[data-mini-mode]')) {
+    // 属性写的是 `slug:key`(和读数槽同一个挂钩方式)。slug 里没有冒号
+    const key = button.dataset.miniMode?.split(':')[1] ?? '';
+    if (!key) continue;
+    button.setAttribute('aria-pressed', key === activeMode ? 'true' : 'false');
+    button.addEventListener('click', () => {
+      // 跑着的时候换挡会让这一轮的读数前后对不上号,直接不认
+      if (phase === 'running' || key === activeMode) return;
+      activeMode = key;
+      for (const mode of modes) {
+        card
+          .querySelector(`[data-mini-mode="${spec.slug}:${mode.key}"]`)
+          ?.setAttribute('aria-pressed', mode.key === key ? 'true' : 'false');
+      }
+      resetToIdle();
+    });
   }
 }

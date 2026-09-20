@@ -11,8 +11,15 @@
  * `keyboard-layout.ts` / `theme.ts` / `mouse-buttons.ts` 的同一个理由。
  *
  * 本模块**只有纯数据**,不碰 DOM,所以能在 node 里直接单测 —— 那个单测断言
- * 这份表和 `tools.ts` 的 `READY_TOOLS` **一一对应**:少一条首页就少一张卡,
+ * 这份表和 `tools.ts` 的 `DIAGNOSTIC_TOOLS` **一一对应**:少一条首页就少一张卡,
  * 多一条就是一张指向不存在页面的卡。
+ *
+ * **对应的是 `DIAGNOSTIC_TOOLS`,不是 `READY_TOOLS`。** 趣味工具(反应速度 /
+ * 瞄准)不上首页卡片 —— 它们各要一台**计时器**才能结束(反应要等一段随机延迟,
+ * 瞄准要跑满 10–60 秒),而 mini 驱动那套 `settleAfter` 是给"空闲检测"造的,
+ * 塞定时刺激进去是拧着用;更要紧的是卡里那个数会和那一页的数**不是同一件事**
+ * (卡片只有 120px,刺激面和目标直径都得缩,量出来就是另一个数了)。
+ * 首页那一节只给两个链接,不给装置。**加新工具时先问一句:它上不上首页卡片?**
  */
 
 import type { Confidence } from './tools';
@@ -58,6 +65,28 @@ export interface MiniReadout {
   slots?: number;
 }
 
+/**
+ * 卡片上的一个模式。给了 `MiniCard.modes` 就在描述和装置面之间渲染一排小按钮。
+ *
+ * 模式只改**这次测量怎么进行**(什么时候结束、装置面那句提示),**不改读数槽的
+ * 含义** —— 所以这里刻意没有"按模式换标签"的写法:读数槽在两种模式下指的是同一
+ * 件事,换个模式换一套标签只会让人对不上号。CPS 那张卡的三个数(峰值 / 平均 /
+ * 次数)两种模式下都成立,正是这条的实例。
+ *
+ * **选中不启动测量。** 卡片和 CPS 那一页一样是"点一下就开局",按钮只负责换挡;
+ * 真要开测还是碰装置面。这是那个按钮不叫「开始」的原因。
+ */
+export interface MiniMode {
+  /** 驱动通过 `ctx.mode` 读到的值。 */
+  key: string;
+  /** 按钮上的字。 */
+  label: string;
+  /** 默认选中。一张卡至多一个;一个都没写就是第一个。 */
+  default?: boolean;
+  /** 这个模式下的空态提示。不写就落回卡片的 `prompt`。 */
+  prompt?: string;
+}
+
 export interface MiniCard {
   /** 与 `Tool.slug` 对齐。两处靠它挂钩,由单测保证不漏不错。 */
   slug: string;
@@ -73,6 +102,14 @@ export interface MiniCard {
   prompt: string;
   /** 读数槽,按显示顺序。 */
   readouts: MiniReadout[];
+  /**
+   * 模式开关。不写就是"没有模式"—— 那台装置只有一种测法。
+   *
+   * 两种都要写清楚"什么时候算测完"才算数:模式存在的理由**从来不是**换个数字
+   * 看看,而是结束的条件真的不一样。CPS 那个是对的实例(瞬时靠手停下来,
+   * 5 秒靠计时器到点);凑数的模式(同一套测法换个标签)不该往这里加。
+   */
+  modes?: MiniMode[];
   /**
    * 这一项**特有**的那句限制。
    *
@@ -147,11 +184,21 @@ export const MINI_CARDS: MiniCard[] = [
     slug: 'cps-test',
     kind: 'cps',
     prompt: '在框里快速连点',
+    /*
+     * 两个模式的差别是**结束的条件**,不是"换个数字看看":
+     * `instant` 靠手停下来(1.2 秒没有新点击就结算),`five` 靠计时器在 5 秒整
+     * 关闭窗口 —— 与手停不停无关,所以中途歇一下不会提前结束那一轮。
+     * 后者才是整页 5 秒档的口径,平均值的分母由计时器给,不是从时间戳推的。
+     */
+    modes: [
+      { key: 'instant', label: '瞬时', default: true },
+      { key: 'five', label: '5 秒', prompt: '连点 5 秒,第一下就开始计时' },
+    ],
     readouts: [
       { key: 'cps', label: '瞬时 CPS' },
       { key: 'clicks', label: '点击' },
     ],
-    note: '这里只给瞬时手感。正式成绩要跑完 5 / 10 / 30 秒模式,去那一页测。',
+    note: '卡里这个 5 秒够看个大概。要 10 / 30 秒、逐秒柱状图和最好成绩,去那一页。',
   },
   {
     slug: 'trail-test',
@@ -204,4 +251,16 @@ export const MINI_CARDS: MiniCard[] = [
 /** 按 slug 取卡片说明书。 */
 export function findMiniCard(slug: string): MiniCard | undefined {
   return MINI_CARDS.find((card) => card.slug === slug);
+}
+
+/**
+ * 卡片默认选中的那个模式。没写 `modes` 时是 `undefined`。
+ *
+ * **两个世界都要它**:`index.astro` 靠它渲染正确的空态提示(模式可以覆盖
+ * `prompt`),驱动靠它初始化 `ctx.mode`。判据写两份的话,首帧那句提示和
+ * 复位回空态之后那句迟早不一样。
+ */
+export function defaultMiniMode(card: MiniCard): MiniMode | undefined {
+  const modes = card.modes ?? [];
+  return modes.find((mode) => mode.default) ?? modes[0];
 }

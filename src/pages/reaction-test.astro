@@ -1,0 +1,719 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import StatPanel from '../components/StatPanel.astro';
+import { findTool } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import {
+  MIN_VALID_TRIALS,
+  RT_IMPLAUSIBLE_MS,
+  RT_TIMEOUT_MS,
+  RT_WAIT_MAX_MS,
+  RT_WAIT_MIN_MS,
+  TRIALS_PER_ROUND,
+} from '../lib/analysis';
+
+const tool = findTool('reaction-test')!;
+
+/**
+ * 常见刷新率下的偏移量级。
+ *
+ * **这些是推算出来的界,不是量出来的修正量。** 每一行 = 一整帧(锚点在帧首,
+ * 所以必然多等一整帧)+ 约半个刷新周期的扫描输出 + 2–10ms 的面板灰阶响应
+ * + 鼠标按键的回报周期。页面只用它说明"为什么这个数一定偏大",
+ * **绝不拿它去减任何结果** —— 减掉一个估算值就是全站禁止的那个假数字。
+ */
+const OFFSET_TABLE = [
+  { hz: '60Hz', frame: '16.7ms', total: '约 25 – 35ms' },
+  { hz: '120Hz', frame: '8.3ms', total: '约 15 – 25ms' },
+  { hz: '144Hz', frame: '6.9ms', total: '约 12 – 18ms' },
+  { hz: '240Hz', frame: '4.2ms', total: '约 8 – 14ms' },
+];
+
+/*
+ * 文案里的数字**全部从模块常量插值**,不手抄一份。
+ *
+ * 先例是双击页的 `CLICK_CHATTER_MS`:frontmatter 能 import 到常量,`<script>`
+ * import 的是同一份。手抄一遍的话,改了判据忘了改文案,页面上就会印一个和实际
+ * 行为对不上的数,而且**没有任何东西会报错**。
+ */
+const FAQ = [
+  {
+    q: '为什么测出来的反应时间比我想的慢?',
+    a:
+      '因为这个数里**装的不只是你的反应**。从屏幕刷出颜色到你被记到按下,中间串了四段延迟:屏幕要等到下一次刷新才把画面呈现出来、显示器面板本身要几毫秒才变色、' +
+      '鼠标按键状态要等到下一次回报才被采样、系统和浏览器还要把它送过来。这几段**全都加在结果上**,加起来通常比你的神经反应时间还长。' +
+      '所以这一页测的是**这台电脑的反应速度**,不是你的反应速度。想知道自己有没有变快,只能用同一台机器前后比。',
+  },
+  {
+    q: '为什么只跟"同一台机器"比?',
+    a:
+      '因为那段设备延迟是**跟着机器走的固定值**。60Hz 的屏光"等一整帧"这一项就比 144Hz 多出约 8 毫秒,再加上面板响应和鼠标回报率,两台机器之间差出十几二十毫秒很正常 ——' +
+      '这个差距比大多数人练一年的进步还大。所以拿成绩去跟别人比、或者跟网上"人类平均反应 250ms"的说法比,比的其实是显示器。' +
+      '同一个人在**同一台机器上**的成绩是很稳的 —— 这一页正是因此才敢用中位数。',
+  },
+  {
+    q: '为什么报中位数,不报平均值?',
+    a:
+      '因为平均值扛不住一次走神。一轮里有一次发呆 600 毫秒,平均值就被推高几十毫秒,而中位数几乎不动 —— 它只关心"排中间的那次是多少"。' +
+      '所以要连着看三个数:**中位反应**是结论,**有效次数**说明这一轮够不够,而**最快一次**是观察到的最小值、**不是你的极限**,再多测几次大概率还能更低。',
+  },
+  {
+    q: '"抢跑"是什么意思?',
+    a:
+      '颜色还没出来你就按了 —— 那不是反应时间,这一次不算,单独计数然后重来。' +
+      `等待时间**每轮重新随机**(${RT_WAIT_MIN_MS / 1000} – ${RT_WAIT_MAX_MS / 1000} 秒),所以盯着节奏数秒数是没用的。` +
+      '这一条不是惩罚,是**必须**:不判抢跑的话,提前按住的手会正好落在颜色之后,记下一个又快又假的值。',
+  },
+  {
+    q: '"可疑"又是什么?',
+    a:
+      `颜色出来之后不到 ${RT_IMPLAUSIBLE_MS} 毫秒就按下了。简单视觉反应的生理下限在 120 – 150 毫秒左右,比这更快的"反应"不可能是看到了才按 ——` +
+      '那是提前准备好了、正好落在颜色之后的那么一下。它**排除在中位数之外,但照样单独计数**,不会被悄悄丢掉。',
+  },
+  {
+    q: '按住不放行不行?',
+    a:
+      `**左键**按一下就好。判定看的是"按下"这个瞬间,而按住不放跨过颜色变化时,浏览器**根本不会**再发一次按下事件(按下事件只在"从没按到按下"的那一刻发一次),` +
+      `所以不设超时这一轮会一直挂着。超过 ${RT_TIMEOUT_MS} 毫秒没等到按下就算超时作废。右键和中键都不算,测试期间右键菜单和中键自动滚动也会被挡掉,不会打断你。`,
+  },
+  {
+    q: `为什么一轮要 ${TRIALS_PER_ROUND} 次?`,
+    a:
+      `单次测量说明不了什么 —— 状态、有没有分神,都会让一次的结果差出几十毫秒。所以一轮跑 ${TRIALS_PER_ROUND} 次,取中位数。` +
+      `有效次数不足 ${MIN_VALID_TRIALS} 次时(比如作废了两次),中位数**不给数、显示破折号** —— 两次的"中位数"其实就是平均值,那比不给还糟。`,
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: tool.name,
+      description: tool.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout title={tool.title} description={tool.description} current={tool.slug} jsonLd={jsonLd}>
+  <h1>鼠标反应速度测试</h1>
+
+  <p class="prose">
+    下面的框会等一段<strong>随机</strong>的时间,然后整块亮起来。看到变亮就<strong
+      >立刻按下左键</strong
+    >,一轮 {TRIALS_PER_ROUND} 次,给中位数。
+  </p>
+
+  <p class="prose">
+    先把话说清楚:读到的毫秒数里,含着屏幕刷新、显示器响应和鼠标回报的延迟,
+    所以它衡量的是<strong>这一整套设备</strong>,不是你的神经。这个数一定<strong
+      >比你的真实反应时间大</strong
+    >,大多少测不出来。它只适合在<strong>同一台机器上前后对比</strong> ——
+    换台电脑、甚至只换台显示器,这个数就会整体平移十几二十毫秒。下面有完整的拆解。
+  </p>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <button type="button" id="toggle">开始</button>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      {/*
+        `data-stim` 而不是 `data-phase`:`mini-devices.ts` 已经在首页卡片的装置面上
+        拥有 `data-phase`,词汇是 idle|running|done|static。同一个名字底下再挂一套
+        不同的词汇,是给下一个人挖的坑。
+
+        提示层直接用 `.test-area__hint`(七个页面共用那个类)。**不新加覆盖元素**:
+        它是 `pointer-events: none`,于是"颜色还没出就按"的那一下会**穿透文字落在
+        `.test-area` 上** —— 监听器正在那儿,才能被读成抢跑。换成真元素会把它吞掉。
+      */}
+      <div class="test-area well reaction-pad" id="pad" data-stim="idle">
+        <div class="test-area__hint" id="hint">
+          {/*
+            `.test-area__hint` 是 `display: flex`(横向),所以这两行必须包在一个
+            `flex-direction: column` 的壳里才能上下排 —— 直接当兄弟节点会并排。
+            CPS 页的 `.cps-start` 就是这个壳,这里照抄一份。
+          */}
+          <span class="reaction-start">
+            <span class="reaction-call" id="call">点「开始」</span>
+            <span class="reaction-meta" id="meta">
+              一轮 {TRIALS_PER_ROUND} 次 · 变亮后按左键
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="stat-grid">
+        <StatPanel
+          id="median"
+          label="中位反应"
+          unit="ms"
+          primary
+          hint={`有效 ${MIN_VALID_TRIALS} 次以上才出数`}
+        />
+        <StatPanel id="fastest" label="最快一次" unit="ms" hint="观察到的最小值,不是你的极限" />
+        <StatPanel id="valid" label="有效次数" />
+        <StatPanel id="foul" label="抢跑" hint="颜色没出就按,这一次作废" />
+        <StatPanel id="suspect" label="可疑" hint={`快于 ${RT_IMPLAUSIBLE_MS}ms,不计入中位数`} />
+        <StatPanel id="hz" label="屏幕刷新" unit="Hz" hint="实测,只作参照" />
+      </div>
+    </div>
+  </div>
+
+  <h2>逐次记录</h2>
+  <p class="prose tight">
+    每一行是这一轮里的一次尝试。等不到中位数的时候,<strong>这张表里的原始读数才是唯一能看的</strong>
+    —— 它也是"中位数确实是从这些数里算出来的"的证据。
+  </p>
+  <ul class="log-list" id="log"></ul>
+
+  <section class="prose">
+    <h2>这个数里装了什么</h2>
+    <p>
+      屏幕上出现颜色,到你被记到"按下了",中间串着四段延迟。它们<strong>全都加在结果上</strong>,
+      而且这一段<strong>测不出来</strong> —— 浏览器看不到屏幕,也看不到 USB 线。所以这一页只报原始读数,
+      <strong>不替你减掉一个估算的修正量</strong>:那只会得到一个看起来精确的假数字。
+    </p>
+    <table class="ref-table ref-table--kv">
+      <thead>
+        <tr>
+          <th>刷新率</th>
+          <th>一整帧</th>
+          <th>合计(含扫描、面板响应、鼠标采样)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          OFFSET_TABLE.map((row) => (
+            <tr>
+              <td>{row.hz}</td>
+              <td>{row.frame}</td>
+              <td>{row.total}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+    <p>
+      最大的一项不是玄学,是<strong>构造上必然的</strong>:颜色是在某一帧里刷上去的,而那一帧要等到
+      下一次屏幕刷新才真正呈现。所以光这一项就固定多出<strong>整整一帧</strong> ——
+      60Hz 上 16.7 毫秒,而 1000Hz 的鼠标回报率只占 1 毫秒。<strong>屏幕比鼠标影响大得多。</strong>
+    </p>
+    <p>
+      这也是这一页<strong>不理会</strong>计时精度的原因。回报率页需要跨域隔离,是因为它算的是
+      <strong>相邻两个事件之差</strong>,8000Hz 下只有 125 微秒,而没隔离的时间戳精度是 100 微秒 ——
+      误差占掉 80%。这里只有<strong>一个</strong>事件,尺度是几十万微秒,100 微秒占万分之几,
+      而鼠标 USB 采样比它大 10 – 80 倍。<strong>隔离一次也消不掉这里的误差</strong>,
+      却要让每个访客白等一次页面重载 —— 所以这一页不隔离。
+    </p>
+
+    <h2>什么会让这个数变得不可比</h2>
+    <ul>
+      <li>
+        <strong>换显示器或换刷新率。</strong>一整帧那一项直接跟着变 —— 同一台电脑从 60Hz 换到
+        144Hz,光这一项就少 8 毫秒。
+      </li>
+      <li>
+        <strong>换鼠标或改回报率。</strong>按键状态是搭在上报里送出去的,125Hz 是每 8 毫秒才采样一次,
+        1000Hz 是每毫秒 —— 这一项最多能差出几毫秒。
+      </li>
+      <li>
+        <strong>页面被切走或被别的窗口挡住。</strong>后台标签页不绘制,颜色根本没刷上去。
+        这一页检测到页面被切走会直接把这一轮作废、记一笔,而不是记一个几百毫秒的假成绩。
+      </li>
+      <li>
+        <strong>用触控板或触摸屏。</strong>那不是"按下左键",采样链路也完全不同。
+        这一页在检测到指针不精确时会给出提示。
+      </li>
+    </ul>
+
+    <h2>常见问题</h2>
+    <div class="faq">
+      {
+        FAQ.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * `.test-area__hint` 被**七个页面**共用(按键 / DPI / 拖拽 / CPS / 双击 / 滚轮 /
+     * 轨迹),所以一条规则都不能往它身上加 —— 加在这里等于改那七个页面。
+     * 做法和 CPS 页一样:新增内层的 `.reaction-call` / `.reaction-meta`,
+     * 共用那个类只被读 `hidden`(它的 `[hidden]` 规则已经写在 global.css 里)。
+     */
+    .reaction-start {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .reaction-call {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    .reaction-meta {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    /*
+     * 刺激:整块刷成亮色。
+     *
+     * **只写 `background-color` 这一条 longhand,绝不写 `background` 简写** ——
+     * `.test-area` 的刻度栅格是 `background-image` 给的,简写会把它一并重置成
+     * none。同理也**不要顺手补一句 `background-image: none`**:栅格是白色低透明度,
+     * 压在近白的闪烁上本来就看不见,两个 longhand 各管各的。
+     *
+     * 色值取 `--well-text` 而不是 `--text`:**刺激的亮度是测量参数,不能随主题变。**
+     * `.well` 那组前景色令牌在两个主题下本来就是同一份,写 `--well-*` 是把这个
+     * 意图说出来 —— 真写成纸面的令牌,浅色和深色用户拿到的刺激亮度就不一样,
+     * 数字会因为和用户无关的原因移动。
+     *
+     * **刻意没有 `transition`。** 过渡会把刺激的起始沿按时长抹开,直接毁掉这次测量。
+     * 全局那条 `prefers-reduced-motion` 夹子夹的是 `transition-duration`,
+     * 这里没有过渡可夹,正好不受影响。**这是测量,不是动画。**
+     */
+    .reaction-pad[data-stim='go'] {
+      background-color: var(--well-text);
+    }
+
+    /*
+     * 抢跑**不做第二次全屏闪**:闪一下配上"你错了"什么也教不了,而且是短时间内
+     * 第二个亮度事件。改成底色不变 + 朱砂描边 + 提示文字转朱砂 ——
+     * 提示文字必须换色:`--well-text-faint` 压在 `--well-danger-dim` 上只有约
+     * 3.2:1,低于 AA;`--well-danger` 是约 6.3:1。
+     */
+    .reaction-pad[data-stim='foul'] {
+      border-color: var(--well-danger);
+    }
+
+    .reaction-pad[data-stim='foul'] .test-area__hint {
+      color: var(--well-danger);
+    }
+
+    .reaction-pad {
+      cursor: pointer;
+    }
+  </style>
+
+  <script>
+    import {
+      MIN_VALID_TRIALS,
+      RT_IMPLAUSIBLE_MS,
+      RT_TIMEOUT_MS,
+      RT_WAIT_MAX_MS,
+      RT_WAIT_MIN_MS,
+      TRIALS_PER_ROUND,
+      summarizeReaction,
+    } from '../lib/analysis';
+    import type { ReactionTrial } from '../lib/analysis';
+    import {
+      createTicker,
+      el,
+      format,
+      loadBest,
+      mountCapabilityNotices,
+      saveBest,
+      setHint,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
+
+    mountCapabilityNotices(el('cap-notice'));
+    // 右键菜单会盖住测试区;中键自动滚动会让指针底下的采样面溜走
+    suppressWorkbenchDefaults();
+
+    const BEST_KEY = 'mouse-test:reaction-best-ms';
+
+    /** 每一次尝试之后停多久,让用户看清刚才那一下 */
+    const FEEDBACK_MS = 800;
+
+    const pad = el('pad');
+    const hint = el('hint');
+    const call = el('call');
+    const meta = el('meta');
+    const toggle = el('toggle');
+    const logHost = el('log');
+
+    /*
+     * 机器状态和显示状态是**两件事**,刻意不合成一个变量。
+     *
+     * 机器状态只有三个,它决定"还能不能按下":`idle` 按了没用、`waiting` 按了是抢跑、
+     * `go` 按了才算数。而「抢跑」是一个**显示**状态 —— 它出现在机器已经回到空闲的
+     * 那段时间里。合成一个变量的话,就会写出 `setPhase('foul' as 'idle')`
+     * 这种必须靠类型断言才编得过去的谎话。
+     */
+    let phase: 'idle' | 'waiting' | 'go' = 'idle';
+    let trials: ReactionTrial[] = [];
+    /** 这一轮是否已经开始过 —— 决定那个按钮写「开始」还是「重置」 */
+    let started = false;
+
+    /** 刺激刷上去的那一帧的**帧首**时刻,和 `performance.now()` 同一时基 */
+    let anchor = 0;
+    /** 当前这一步的截止时刻 */
+    let deadline = 0;
+    let stopTicker: (() => void) | null = null;
+    let laterTimer = 0;
+
+    /** 帧间隔采样。只用来报一个**实测**刷新率,不参与任何换算 */
+    let lastFrame = 0;
+    const frameGaps: number[] = [];
+
+    // ---------- 渲染 ----------
+
+    function setStim(next: string): void {
+      pad?.setAttribute('data-stim', next);
+    }
+
+    function say(title: string, detail: string): void {
+      setText(call, title);
+      setText(meta, detail);
+      if (hint) hint.hidden = false;
+    }
+
+    // ---------- 逐次记录 ----------
+
+    /** 一条记录怎么显示。**统计口径不在这里** —— 那在 `summarizeReaction` 里 */
+    function describe(trial: ReactionTrial): { cls: string; value: string; note: string } {
+      if (trial.outcome === 'foul') {
+        return { cls: 'log-item log-item--warn', value: '—', note: '抢跑:颜色还没出就按了' };
+      }
+      if (trial.outcome === 'timeout') {
+        return {
+          cls: 'log-item log-item--alert',
+          value: '—',
+          note: `超时:${RT_TIMEOUT_MS}ms 没等到按下`,
+        };
+      }
+      if (trial.outcome === 'void') {
+        return {
+          cls: 'log-item log-item--alert',
+          value: '—',
+          note: '作废:页面被切走,颜色根本没画出来',
+        };
+      }
+      // 剩下的一定是 timed;坏值在这里归到"作废",和纯函数那边同一口径
+      if (!Number.isFinite(trial.ms) || trial.ms <= 0) {
+        return { cls: 'log-item log-item--alert', value: '—', note: '作废:时间戳无效' };
+      }
+      if (trial.ms < RT_IMPLAUSIBLE_MS) {
+        return {
+          cls: 'log-item log-item--warn',
+          value: format(trial.ms),
+          note: `可疑:快于 ${RT_IMPLAUSIBLE_MS}ms,不计入中位数`,
+        };
+      }
+      return { cls: 'log-item', value: format(trial.ms), note: '有效' };
+    }
+
+    function renderLog(): void {
+      if (!logHost) return;
+
+      if (trials.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'log-empty';
+        empty.textContent = `还没有记录。点「开始」,一轮跑 ${TRIALS_PER_ROUND} 次。`;
+        logHost.replaceChildren(empty);
+        return;
+      }
+
+      // 新的在上面 —— 最近那一次才是此刻在看的那一次
+      const shown = trials.slice(Math.max(0, trials.length - 40));
+      const fragment = document.createDocumentFragment();
+      for (let i = shown.length - 1; i >= 0; i--) {
+        const { cls, value, note } = describe(shown[i]);
+        const item = document.createElement('li');
+        item.className = cls;
+
+        const index = document.createElement('span');
+        index.className = 'log-item__index';
+        index.textContent = `#${i + 1}`;
+
+        const valueNode = document.createElement('span');
+        valueNode.className = 'log-item__value';
+        valueNode.textContent = value;
+
+        const noteNode = document.createElement('span');
+        noteNode.className = 'log-item__note';
+        noteNode.textContent = note;
+
+        item.append(index, valueNode, noteNode);
+        fragment.appendChild(item);
+      }
+      logHost.replaceChildren(fragment);
+    }
+
+    // ---------- 读数 ----------
+
+    /** 实测刷新率。样本不够就给 0,由调用点决定要不要显示 */
+    function estimateHz(): number {
+      if (frameGaps.length < 10) return 0;
+      const sorted = [...frameGaps].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      return median > 0 ? Math.round(1000 / median) : 0;
+    }
+
+    function renderStats(): void {
+      const s = summarizeReaction(trials);
+      setStat('median', format(s.medianMs));
+      setStat('fastest', format(s.fastestMs));
+      setStat('valid', String(s.valid));
+      setStat('foul', String(s.foul));
+      setStat('suspect', String(s.suspect));
+
+      const hz = estimateHz();
+      setStat('hz', hz > 0 ? String(hz) : '—');
+
+      const best = loadBest(BEST_KEY);
+      setHint(
+        'median',
+        best === null ? `有效 ${MIN_VALID_TRIALS} 次以上才出数` : `本机最好 ${format(best)} ms`,
+      );
+    }
+
+    // ---------- 一轮的推进 ----------
+
+    function stopAll(): void {
+      stopTicker?.();
+      stopTicker = null;
+      if (laterTimer !== 0) {
+        window.clearTimeout(laterTimer);
+        laterTimer = 0;
+      }
+    }
+
+    /** 停一会儿再做下一步(留出看清反馈的时间) */
+    function later(fn: () => void, ms: number): void {
+      laterTimer = window.setTimeout(() => {
+        laterTimer = 0;
+        fn();
+      }, ms);
+    }
+
+    /** 记一条尝试,然后进下一次(或结算) */
+    function push(trial: ReactionTrial, pauseMs: number): void {
+      trials.push(trial);
+      renderLog();
+      renderStats();
+
+      if (trials.length >= TRIALS_PER_ROUND) {
+        later(finish, pauseMs);
+        return;
+      }
+      later(arm, pauseMs);
+    }
+
+    /**
+     * 等一段随机时间,然后刷出刺激。
+     *
+     * **等待、刷新率采样、翻转全在同一个 rAF 回调里**,而且锚在它交上来的 `now`
+     * —— 那是这一帧的**开始**时刻(`createTicker` 用 rAF,交上来的就是 rAF 的
+     * timestamp,和 `performance.now()` 同一时基)。
+     *
+     * 这不是风格问题:锚点既然是帧首、翻转又是那一帧里的第一次 DOM 写,那么
+     * "颜色出现到你按下"的偏移才是一个**固定**值(一整帧 + 半个扫描周期);
+     * 改成在回调里现取 `performance.now()`,偏移就变成每轮都不一样 ——
+     * 那正是"五次的中位数"会抖的原因。
+     */
+    function arm(): void {
+      stopAll();
+
+      if (trials.length >= TRIALS_PER_ROUND) {
+        finish();
+        return;
+      }
+
+      phase = 'waiting';
+      setStim('waiting');
+      say('等颜色出现', '现在别按 —— 提前按算抢跑');
+
+      // 每轮重新随机:固定延迟会把这个测试变成"节奏预判测试"
+      deadline =
+        performance.now() + RT_WAIT_MIN_MS + Math.random() * (RT_WAIT_MAX_MS - RT_WAIT_MIN_MS);
+
+      stopTicker = createTicker(0, (now) => {
+        // 顺带采一段帧间隔,结算时报一个实测刷新率
+        if (lastFrame > 0) {
+          const gap = now - lastFrame;
+          if (gap > 0 && gap < 100) {
+            frameGaps.push(gap);
+            if (frameGaps.length > 240) frameGaps.shift();
+          }
+        }
+        lastFrame = now;
+
+        if (now < deadline) return;
+
+        stopAll();
+        anchor = now;
+        phase = 'go';
+        setStim('go');
+        // 提示整块让位 —— 它是测量面,不能再压字上去
+        if (hint) hint.hidden = true;
+        armTimeout();
+      });
+    }
+
+    /** 刺激已经出来了,等着按下;一直不按就作废 */
+    function armTimeout(): void {
+      deadline = performance.now() + RT_TIMEOUT_MS;
+      stopTicker = createTicker(100, (now) => {
+        if (now < deadline) return;
+        stopAll();
+        phase = 'idle';
+        setStim('timeout');
+        say('没按', `超过 ${RT_TIMEOUT_MS} 毫秒没等到按下,这一次作废`);
+        push({ outcome: 'timeout' }, FEEDBACK_MS);
+      });
+    }
+
+    function finish(): void {
+      stopAll();
+      phase = 'idle';
+      setStim('idle');
+      setText(toggle, '再测一轮');
+
+      const s = summarizeReaction(trials);
+      const hz = estimateHz();
+
+      if (s.medianMs === null) {
+        say(
+          '有效次数不够',
+          `要 ${MIN_VALID_TRIALS} 次才算得出中位数,这一轮只有 ${s.valid} 次 —— 再跑一轮`,
+        );
+      } else {
+        // 反应时间是**越小越好** —— 这一位传错是静默的,所以写成选项对象
+        const isRecord = saveBest(BEST_KEY, Math.round(s.medianMs), { lowerIsBetter: true });
+        say(
+          `中位 ${format(s.medianMs)} ms`,
+          `有效 ${s.valid} 次 · 最快 ${format(s.fastestMs)} ms · ${
+            isRecord ? '本机新纪录' : '没破本机纪录'
+          }`,
+        );
+        if (hz > 0) {
+          setHint('hz', `实测 · 一整帧约 ${(1000 / hz).toFixed(1)}ms`);
+        }
+      }
+      renderStats();
+    }
+
+    // ---------- 交互 ----------
+
+    /*
+     * 判定一律用 `button === 0`(左键)。
+     *
+     * **CDP 合成的点击几乎必然落进"可疑"那一档**(快于 `RT_IMPLAUSIBLE_MS`)——
+     * 那是对的行为,不是 bug。合成点击的时间戳和帧调度都是测试装置的,不是人的。
+     * 所以**别为了让它变绿去删那个下限**,也别指望在 CDP 里量出这个页面的数值:
+     * 状态机、逐次表、各类计数可以在 CDP 里验,**那个毫秒数只能真机手测**。
+     */
+    pad?.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+
+      if (phase === 'waiting') {
+        // 抢跑:颜色还没出。这一次作废,重起一段随机等待
+        stopAll();
+        phase = 'idle';
+        setStim('foul');
+        say('抢跑', '颜色还没出现 —— 这一次不算,重新等');
+        push({ outcome: 'foul' }, 900);
+        return;
+      }
+
+      if (phase !== 'go') return;
+
+      stopAll();
+      phase = 'idle';
+      /*
+       * **两次事件之间的差必须取 `event.timeStamp`**,不能取处理函数里的
+       * `performance.now()`:浏览器会把攒在一起的事件放进同一个任务里派发,
+       * 那一刻两个处理函数几乎是同时跑的,那个差会塌到 0 —— 一次正常的人手
+       * 点击会被报成"零毫秒反应"。
+       */
+      const ms = event.timeStamp - anchor;
+      setStim('idle');
+      say(
+        `${format(ms)} ms`,
+        ms < RT_IMPLAUSIBLE_MS ? '快得不像反应,已排除出中位数' : `第 ${trials.length + 1} 次`,
+      );
+      push({ outcome: 'timed', ms }, FEEDBACK_MS);
+    });
+
+    toggle?.addEventListener('click', () => {
+      stopAll();
+
+      if (started) {
+        // 「重置」:清空,回到最初
+        trials = [];
+        frameGaps.length = 0;
+        lastFrame = 0;
+        started = false;
+        phase = 'idle';
+        setStim('idle');
+        setText(toggle, '开始');
+        say('点「开始」', `一轮 ${TRIALS_PER_ROUND} 次 · 变亮后按左键`);
+        setHint('hz', '实测,只作参照');
+        renderLog();
+        renderStats();
+        return;
+      }
+
+      trials = [];
+      frameGaps.length = 0;
+      lastFrame = 0;
+      started = true;
+      setText(toggle, '重置');
+      renderLog();
+      renderStats();
+      arm();
+    });
+
+    /*
+     * 页面被切走就作废这一轮。
+     *
+     * 锚点本身仍然是对的(帧时间戳不因切走而失效),但用户注意力已经不在,
+     * 那个样本是垃圾 —— **记一个几百毫秒的"反应时间"比不记还糟**。
+     */
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) return;
+      if (phase !== 'waiting' && phase !== 'go') return;
+
+      stopAll();
+      phase = 'idle';
+      setStim('void');
+      say('页面被切走', '这一次作废 —— 颜色根本没画出来,记下来的会是假数');
+      push({ outcome: 'void' }, 900);
+    });
+
+    renderLog();
+    renderStats();
+  </script>
+</BaseLayout>

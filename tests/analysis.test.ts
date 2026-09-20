@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aimBestKey,
   analyzeDragEpisodes,
   analyzeDragEpisodesByButton,
   analyzeSegments,
@@ -16,22 +17,31 @@ import {
   computePollingRate,
   computeRateWindows,
   countAnomalies,
+  detectAngleSnap,
   detectGaps,
   detectTrailJumps,
   estimateDpi,
+  isNearAxis,
+  isSnapped,
   longestSegment,
   markScrollGlitches,
   measureDrift,
+  MIN_VALID_TRIALS,
   normalizeWheelDelta,
   pathLength,
   percentile,
   positiveIntervals,
   rateByCount,
+  RT_IMPLAUSIBLE_MS,
   segmentTimestamps,
+  summarizeAim,
   summarizeClickGaps,
   summarizeKeyboard,
+  summarizeReaction,
   summarizeScroll,
+  strokeShape,
 } from '../src/lib/analysis';
+import type { AimShot, ReactionTrial } from '../src/lib/analysis';
 
 /** 生成 n 个恒定间隔的时间戳。 */
 function constantInterval(count: number, intervalMs: number): Float64Array {
@@ -1245,5 +1255,539 @@ describe('summarizeKeyboard', () => {
     expect(stats.presses).toBe(0);
     expect(stats.maxSimultaneous).toBe(0);
     expect(stats.stuck).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 角度吸附
+// ---------------------------------------------------------------------------
+
+/** 确定性伪随机(LCG),用来造可复现的"人手抖动"。 */
+function prng(seed: number): () => number {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 0x1_0000_0000;
+  };
+}
+
+/**
+ * 造一条笔画。
+ *
+ * `wobble` 是每一步在 y(或竖直笔画的 x)上的**物理**抖动幅度,单位像素、
+ * 可以是小数 —— 手在鼠标垫上走出来的路径本来就是亚像素的。**输出一律取整**,
+ * 因为浏览器给我们的就是取整后的 CSS 像素增量,这一层量化必须如实模拟,
+ * 不能拿浮点数去测一个跑在整数上的判据。
+ *
+ * `wobble = 0` 就是理想吸附:严格贴轴,每一个点的 y 完全相同。
+ */
+function strokeOf(
+  reports: number,
+  step: number,
+  wobble = 0,
+  seed = 1,
+  vertical = false,
+) {
+  const rnd = prng(seed);
+  const x = new Float32Array(reports + 1);
+  const y = new Float32Array(reports + 1);
+  let phys = 0;
+  for (let i = 1; i <= reports; i++) {
+    phys += (rnd() * 2 - 1) * wobble;
+    if (vertical) {
+      y[i] = i * step;
+      x[i] = Math.round(phys);
+    } else {
+      x[i] = i * step;
+      y[i] = Math.round(phys);
+    }
+  }
+  return { x, y };
+}
+
+/** 同上,但直接要形状。样本没造够会当场抛,免得用例悄悄测了个 null。 */
+function shapeOf(
+  reports: number,
+  step: number,
+  wobble = 0,
+  seed = 1,
+  vertical = false,
+) {
+  const { x, y } = strokeOf(reports, step, wobble, seed, vertical);
+  const shape = strokeShape(x, y, 0, x.length);
+  if (!shape) throw new Error('样本没造够,用例本身写错了');
+  return shape;
+}
+
+/**
+ * 在多种子下数一遍"人手笔画被判成吸附"的个数。
+ *
+ * 被判成吸附 = 误判,因为造出来的这些笔画**是我们自己一格一格抖出来的**,
+ * 任何固件都没碰过它们。
+ */
+function snapFalsePositiveRate(samples: number, wobble: number, seeds = 2000): number {
+  let hits = 0;
+  for (let s = 1; s <= seeds; s++) {
+    const { x, y } = strokeOf(samples - 1, 4, wobble, s * 2654435761);
+    const shape = strokeShape(x, y, 0, x.length);
+    if (shape && isSnapped(shape)) hits++;
+  }
+  return hits;
+}
+
+/**
+ * 45 度对角线:两个轴各自是一条累积随机游走,各自取整。
+ * 被吸附过的对角线满足 `x - x0` 与 `y - y0` **逐点严格相等**。
+ */
+function diagonalOf(reports: number, step: number, wobble = 0, seed = 1) {
+  const rnd = prng(seed);
+  const x = new Float32Array(reports + 1);
+  const y = new Float32Array(reports + 1);
+  let px = 0;
+  let py = 0;
+  for (let i = 1; i <= reports; i++) {
+    px += step + (rnd() * 2 - 1) * wobble;
+    py += step + (rnd() * 2 - 1) * wobble;
+    x[i] = Math.round(px);
+    y[i] = Math.round(py);
+  }
+  return { x, y };
+}
+
+/** 到"过起点、斜率 +1"那条直线的最大偏离(像素)。吸附的对角线是 0。 */
+function diagonalDeviation(x: Float32Array, y: Float32Array): number {
+  let max = 0;
+  for (let i = 0; i < x.length; i++) {
+    const d = Math.abs(x[i] - x[0] - (y[i] - y[0]));
+    if (d > max) max = d;
+  }
+  return max;
+}
+
+describe('角度吸附', () => {
+  it('严格贴轴的笔画残差是 0', () => {
+    const shape = shapeOf(200, 2);
+    expect(shape.length).toBe(400);
+    expect(shape.samples).toBe(201);
+    expect(shape.axisDeviationDeg).toBe(0);
+    expect(shape.rmsResidual).toBe(0);
+    expect(shape.maxResidual).toBe(0);
+    expect(isNearAxis(shape)).toBe(true);
+    expect(isSnapped(shape)).toBe(true);
+  });
+
+  it('竖直方向的吸附笔画同样认得出', () => {
+    const shape = shapeOf(200, 2, 0, 1, true);
+    expect(shape.axisDeviationDeg).toBe(0);
+    expect(isSnapped(shape)).toBe(true);
+  });
+
+  it('45 度对角线离两条轴一样远,不参与判定', () => {
+    const n = 201;
+    const x = new Float32Array(n);
+    const y = new Float32Array(n);
+    for (let i = 1; i < n; i++) {
+      x[i] = x[i - 1] + 2;
+      y[i] = y[i - 1] + 2;
+    }
+    const shape = strokeShape(x, y, 0, n)!;
+    expect(shape.axisDeviationDeg).toBe(45);
+    expect(isNearAxis(shape)).toBe(false);
+    expect(isSnapped(shape)).toBe(false);
+  });
+
+  it('太短或采样太少的笔画返回 null,而不是硬凑一个形状', () => {
+    expect(strokeShape(new Float32Array(11), new Float32Array(11), 0, 11)).toBeNull();
+    const { x, y } = strokeOf(30, 2); // 60px,不够长
+    expect(strokeShape(x, y, 0, x.length)).toBeNull();
+  });
+
+  it('压线:刚好够 100px / 刚好 20 个采样算数', () => {
+    const short = strokeOf(49, 2); // 98px,差一点
+    expect(strokeShape(short.x, short.y, 0, short.x.length)).toBeNull();
+    const ok = strokeOf(50, 2); // 100px,达标
+    expect(strokeShape(ok.x, ok.y, 0, ok.x.length)).not.toBeNull();
+  });
+
+  it('近轴笔画不够 3 条时给"无法判定",不报"未检出"', () => {
+    const two = detectAngleSnap([shapeOf(200, 2), shapeOf(200, 2, 0, 7)]);
+    expect(two.conclusive).toBe(false);
+    expect(two.hasSnapping).toBe(false);
+    // 这两条其实都是吸附的 —— 正因为如此,更不能说"未检出吸附"
+    expect(two.snappedStrokes).toBe(2);
+
+    const three = detectAngleSnap([
+      shapeOf(200, 2),
+      shapeOf(200, 2, 0, 7),
+      shapeOf(200, 2, 0, 13),
+    ]);
+    expect(three.conclusive).toBe(true);
+    expect(three.hasSnapping).toBe(true);
+    expect(three.snapStrength).toBe(1);
+    expect(three.axes).toEqual([0]);
+  });
+
+  it('两条轴都检出时都报出来', () => {
+    const stats = detectAngleSnap([
+      shapeOf(200, 2),
+      shapeOf(200, 2, 0, 7),
+      shapeOf(200, 2, 0, 11, true),
+      shapeOf(200, 2, 0, 13, true),
+    ]);
+    expect(stats.conclusive).toBe(true);
+    expect(stats.axes).toEqual([0, 90]);
+    expect(stats.nearAxisStrokes).toBe(4);
+  });
+
+  it('真人手绘的一组里一条都不算吸附', () => {
+    const shapes = [1, 2, 3, 4, 5, 6].map((s) => shapeOf(200, 2, 1, s * 7919));
+    const stats = detectAngleSnap(shapes);
+    expect(stats.conclusive).toBe(true);
+    expect(stats.hasSnapping).toBe(false);
+    expect(stats.snappedStrokes).toBe(0);
+    expect(stats.snapStrength).toBe(0);
+    expect(stats.axes).toEqual([]);
+  });
+
+  it('斜着画的近轴笔画混进来也不会被算成吸附', () => {
+    /*
+     * 约 8° 的整数阶梯:每走 7 步 x 落 1 步 y。这是**取整世界里**一条人手斜线
+     * 的真实样子 —— 阶梯本身就说明它不直。
+     *
+     * **拒掉它的其实是角度那道闸,不是残差那道。** 实测这条阶梯的最大残差只有
+     * 0.435,只比 0.35 的阈值高一丁点 —— "每个周期落一格"的锯齿,它的主方向
+     * 自己会往中间偏,把两侧的锯齿摊平。所以两道闸缺一不可,别把角度那道当冗余。
+     */
+    const reports = 300;
+    const x = new Float32Array(reports + 1);
+    const y = new Float32Array(reports + 1);
+    for (let i = 1; i <= reports; i++) {
+      x[i] = i;
+      y[i] = Math.floor(i / 7);
+    }
+    const shape = strokeShape(x, y, 0, reports + 1)!;
+    expect(shape.angleDeg).toBeGreaterThan(7);
+    expect(shape.angleDeg).toBeLessThan(9);
+    expect(isNearAxis(shape)).toBe(true);
+    expect(isSnapped(shape)).toBe(false);
+    expect(shape.maxResidual).toBeGreaterThan(0);
+  });
+});
+
+/*
+ * 这一组不是功能用例,是**验证用例** —— 回答的是"这套判据搬到浏览器里还成不成立"。
+ *
+ * 原实现跑在原生驱动层,拿到的是硬件计数(子像素分辨率、无系统加速);
+ * 浏览器给的是**取整后的 CSS 像素增量**。取整会抹掉亚像素的抖动,
+ * 而"抖不抖"正是判据唯一的输入 —— 所以真正要量的是:
+ * **手抖幅度小到什么程度,量化之后就会被误判成吸附?**
+ *
+ * 结论是负面的,**这些数字就是不做这个功能的依据**,别删。
+ */
+describe('角度吸附:浏览器像素量化下的余量', () => {
+  const report = (rows: string[]) => {
+    // 仓库里没有 lint,console.log 是用例唯一的输出口
+    console.log('\n' + rows.join('\n'));
+  };
+
+  it('扫一遍手抖幅度 × 步长,量出误判的边界', () => {
+    const rows: string[] = [];
+    for (const step of [1, 2, 4]) {
+      for (const wobble of [0, 0.1, 0.25, 1]) {
+        const shape = shapeOf(200, step, wobble, 4242);
+        rows.push(
+          `step=${step}px wobble=${wobble}px | rms=${shape.rmsResidual.toFixed(3)}` +
+            ` max=${shape.maxResidual.toFixed(3)} | nearAxis=${isNearAxis(shape)} snapped=${isSnapped(shape)}`,
+        );
+      }
+    }
+    report(rows);
+    expect(rows).toHaveLength(12);
+  });
+
+  it('量出"人手笔画被误判成吸附"的比例', () => {
+    /*
+     * 吸附笔画的残差**恰好是 0**,因为固件输出的是一整串相同的整数。所以我方
+     * 唯一怕的是反过来:手抖小到被取整整个吃掉,人手画的线也 quantize 成一条
+     * 严格贴轴的常量 —— 那就是**误判**,会把一只干净鼠标说成开了吸附。
+     *
+     * 每种情形跑 2000 个种子直接数。`samples` 那一维不能省:采样越少,
+     * 随机游走越没机会飘出 ±0.5 的取整带,越容易被抹平。
+     */
+    const seeds = 2000;
+    const rows: string[] = [];
+    for (const samples of [31, 61, 201]) {
+      for (const wobble of [0, 0.05, 0.1, 0.2, 0.5]) {
+        const fp = snapFalsePositiveRate(samples, wobble, seeds);
+        rows.push(
+          `samples=${samples} wobble=${wobble}px -> 误判 ${fp}/${seeds}` +
+            ` (${((fp / seeds) * 100).toFixed(2)}%)`,
+        );
+      }
+    }
+    report(rows);
+    expect(rows).toHaveLength(15);
+
+    /*
+     * 钉住两端,别让阈值以后被人调松:
+     *
+     * - **长笔画 + 手抖明显(201 采样 / 0.2px):一次误判都不该有。**
+     * - **短笔画 + 手抖轻微(31 采样 / 0.2px):必然大量误判。**
+     *
+     * 后一条是这次验证真正的结论 —— 它不是"阈值没调好",是判据在浏览器给的
+     * 量化数据上**天生分不开**这两种笔画。谁要把它调回去,先看这两个数。
+     */
+    expect(snapFalsePositiveRate(201, 0.2)).toBe(0);
+    expect(snapFalsePositiveRate(201, 0.5)).toBe(0);
+    expect(snapFalsePositiveRate(31, 0.2)).toBeGreaterThan(400);
+    expect(snapFalsePositiveRate(31, 0.1)).toBeGreaterThan(1500);
+  });
+
+  it('45 度对角线救不了:亚像素手抖同样会被取整抹平', () => {
+    /*
+     * 想过的一条退路:很多固件的吸附**也管 45 度**,而对角线要求
+     * `dx == dy` **逐点严格相等** —— 两个独立的量化量,听起来手做不到。
+     *
+     * 事实证明这是错觉:手抖是**亚像素**的,取整之后两个轴都落在同一个整数上,
+     * 对角的"严格相等"照样成立。所以这条路和水平那条一样窄。
+     */
+    const seeds = 2000;
+    const rows: string[] = [];
+    for (const samples of [31, 61, 201]) {
+      for (const wobble of [0, 0.05, 0.2]) {
+        let fp = 0;
+        for (let s = 1; s <= seeds; s++) {
+          const { x, y } = diagonalOf(samples - 1, 4, wobble, s * 2654435761);
+          if (diagonalDeviation(x, y) < 0.5) fp++;
+        }
+        rows.push(`45° samples=${samples} wobble=${wobble}px -> 误判 ${fp}/${seeds}`);
+      }
+    }
+    report(rows);
+
+    // 吸附的对角线偏离恰好是 0 —— 这一端钉死
+    const ideal = diagonalOf(200, 4);
+    expect(diagonalDeviation(ideal.x, ideal.y)).toBe(0);
+
+    // 但手画的 45 度在短笔画上同样会落进 0.5 以内(实测 31 采样 / 0.2px 是 7.45%)
+    let shortFp = 0;
+    for (let s = 1; s <= seeds; s++) {
+      const { x, y } = diagonalOf(30, 4, 0.2, s * 2654435761);
+      if (diagonalDeviation(x, y) < 0.5) shortFp++;
+    }
+    expect(shortFp).toBeGreaterThan(100);
+    expect(shortFp).toBeLessThan(300);
+  });
+});
+
+describe('summarizeReaction', () => {
+  const timed = (ms: number): ReactionTrial => ({ outcome: 'timed', ms });
+
+  it('一次都没有时全部为 null,而不是 0', () => {
+    const s = summarizeReaction([]);
+    expect(s.medianMs).toBeNull();
+    expect(s.fastestMs).toBeNull();
+    expect(s.valid).toBe(0);
+    expect(s.foul).toBe(0);
+    expect(s.timeout).toBe(0);
+    expect(s.void).toBe(0);
+    expect(s.suspect).toBe(0);
+  });
+
+  it('有效次数不足 MIN_VALID_TRIALS 时不给中位数', () => {
+    const trials = [timed(220), timed(240)];
+    const s = summarizeReaction(trials);
+    expect(s.valid).toBe(2);
+    expect(s.medianMs).toBeNull();
+    // 但"最快一次"对 n>=1 是有定义的 —— 它只是观察到的最小值
+    expect(s.fastestMs).toBe(220);
+  });
+
+  it('刚好够 MIN_VALID_TRIALS 次就出中位数', () => {
+    const trials = [timed(200), timed(250), timed(220), timed(300), timed(210)];
+    const s = summarizeReaction(trials);
+    expect(s.valid).toBe(MIN_VALID_TRIALS);
+    expect(s.medianMs).toBe(220);
+  });
+
+  it('报的是中位数,不是平均值', () => {
+    // 一次 600ms 的失神:平均值被推高到 388,中位数几乎不动
+    const trials = [timed(200), timed(210), timed(215), timed(225), timed(600)];
+    const s = summarizeReaction(trials);
+    const mean = (200 + 210 + 215 + 225 + 600) / 5;
+    expect(s.medianMs).toBe(215);
+    expect(s.medianMs).not.toBeCloseTo(mean, 0);
+  });
+
+  it('快得不可能的按下算"可疑":排除出中位数,但照样计数', () => {
+    const trials = [timed(30), timed(200), timed(210), timed(220), timed(230), timed(240)];
+    const s = summarizeReaction(trials);
+    expect(s.suspect).toBe(1);
+    expect(s.valid).toBe(5);
+    // 那 30ms 没有进来
+    expect(s.medianMs).toBe(220);
+    expect(s.medianMs).not.toBe(30);
+    // 而且它不是"没测到" —— 条数报得出来
+    expect(s.fastestMs).toBe(200);
+  });
+
+  it('门槛数的是**有效**次数,不是尝试次数', () => {
+    // 6 次尝试,但一条被排除、一条抢跑 → 只剩 4 次有效,仍然不给中位数。
+    // 这正是不把"做了 6 次"当分子的理由。
+    const trials: ReactionTrial[] = [
+      timed(30),
+      { outcome: 'foul' },
+      timed(200),
+      timed(210),
+      timed(220),
+      timed(230),
+    ];
+    const s = summarizeReaction(trials);
+    expect(s.valid).toBe(4);
+    expect(s.suspect).toBe(1);
+    expect(s.foul).toBe(1);
+    expect(s.medianMs).toBeNull();
+  });
+
+  it('恰好落在 RT_IMPLAUSIBLE_MS 上的算有效(判据是严格小于)', () => {
+    const s = summarizeReaction([
+      timed(RT_IMPLAUSIBLE_MS),
+      timed(200),
+      timed(210),
+      timed(220),
+      timed(230),
+    ]);
+    expect(s.suspect).toBe(0);
+    expect(s.valid).toBe(5);
+  });
+
+  it('时钟无效(ms <= 0)归入作废,不夹到 0', () => {
+    const s = summarizeReaction([timed(0), timed(-5), timed(200), timed(210)]);
+    expect(s.void).toBe(2);
+    expect(s.valid).toBe(2);
+    expect(s.medianMs).toBeNull();
+  });
+
+  it('非有限值也算作废,不会把中位数污染成 NaN', () => {
+    const s = summarizeReaction([
+      timed(Number.NaN),
+      timed(200),
+      timed(210),
+      timed(220),
+      timed(230),
+      timed(240),
+    ]);
+    expect(s.void).toBe(1);
+    expect(s.valid).toBe(5);
+    expect(s.medianMs).toBe(220);
+  });
+
+  it('抢跑 / 超时 / 作废三类各自计数,一律不进中位数', () => {
+    const trials: ReactionTrial[] = [
+      { outcome: 'foul' },
+      { outcome: 'foul' },
+      { outcome: 'timeout' },
+      { outcome: 'void' },
+      timed(200),
+      timed(220),
+      timed(240),
+      timed(260),
+      timed(280),
+    ];
+    const s = summarizeReaction(trials);
+    expect(s.foul).toBe(2);
+    expect(s.timeout).toBe(1);
+    expect(s.void).toBe(1);
+    expect(s.valid).toBe(5);
+    expect(s.medianMs).toBe(240);
+    expect(s.fastestMs).toBe(200);
+  });
+
+  it('全是作废时,一个数都不给', () => {
+    const s = summarizeReaction([
+      { outcome: 'foul' },
+      { outcome: 'timeout' },
+      { outcome: 'void' },
+    ]);
+    expect(s.valid).toBe(0);
+    expect(s.medianMs).toBeNull();
+    expect(s.fastestMs).toBeNull();
+    expect(s.foul + s.timeout + s.void).toBe(3);
+  });
+});
+
+describe('summarizeAim', () => {
+  const hit = (offsetPx: number): AimShot => ({ hit: true, offsetPx });
+  const miss: AimShot = { hit: false };
+
+  it('一次没点:命中率是 null 而不是 0', () => {
+    const s = summarizeAim([], 10_000);
+    expect(s.clicks).toBe(0);
+    expect(s.hits).toBe(0);
+    expect(s.accuracy).toBeNull();
+    expect(s.meanOffsetPx).toBeNull();
+    // 时长是有的,所以"每秒命中"算出 0 是诚实的
+    expect(s.hitsPerSecond).toBe(0);
+  });
+
+  it('脱靶算进点击数,但算不进平均偏离', () => {
+    // 一次 300px 的脱靶:如果算进平均值,均值会从 10 变成 155
+    const shots: AimShot[] = [hit(10), hit(10), miss];
+    const s = summarizeAim(shots, 10_000);
+    expect(s.hits).toBe(2);
+    expect(s.clicks).toBe(3);
+    expect(s.meanOffsetPx).toBe(10);
+    expect(s.accuracy).toBeCloseTo(2 / 3, 10);
+  });
+
+  it('全脱靶:平均偏离是 null,命中率是 0', () => {
+    const s = summarizeAim([miss, miss], 10_000);
+    expect(s.hits).toBe(0);
+    expect(s.accuracy).toBe(0);
+    expect(s.meanOffsetPx).toBeNull();
+  });
+
+  it('每秒命中用传入的时长 —— 爆发后空闲不能被时间戳"洗掉"', () => {
+    // 10 秒里只有前 1 秒在点,打了 20 次。分母必须是计时器给的 10 秒。
+    const burst: AimShot[] = [];
+    for (let i = 0; i < 20; i++) burst.push(hit(5));
+
+    const s = summarizeAim(burst, 10_000);
+    expect(s.hits).toBe(20);
+    expect(s.hitsPerSecond).toBe(2); // 20 / 10s,不是 20 / 1s
+    expect(s.hitsPerSecond).not.toBe(20);
+  });
+
+  it('时长无效时不给每秒命中,而不是给 Infinity', () => {
+    const s = summarizeAim([hit(5)], 0);
+    expect(s.hitsPerSecond).toBeNull();
+    expect(summarizeAim([hit(5)], Number.NaN).hitsPerSecond).toBeNull();
+  });
+
+  it('偏离里混进坏值时,平均值变成 NaN 交给 format() 出破折号', () => {
+    // 不悄悄按"命中的条数"去平均 —— 那会把坏值稀释掉,给一个看着正常的数
+    const s = summarizeAim([hit(10), hit(Number.NaN)], 1_000);
+    expect(s.hits).toBe(2);
+    expect(s.meanOffsetPx).toBeNaN();
+  });
+});
+
+describe('aimBestKey', () => {
+  it('三档设置各记各的', () => {
+    const keys = new Set([
+      aimBestKey('multi', 'standard', 10_000),
+      aimBestKey('single', 'standard', 10_000),
+      aimBestKey('multi', 'easy', 10_000),
+      aimBestKey('multi', 'standard', 30_000),
+    ]);
+    expect(keys.size).toBe(4);
+  });
+
+  it('同一组设置永远给同一个键', () => {
+    expect(aimBestKey('multi', 'hard', 60_000)).toBe(aimBestKey('multi', 'hard', 60_000));
+  });
+
+  it('键形带得动 mode / difficulty / duration', () => {
+    expect(aimBestKey('single', 'easy', 10_000)).toBe('mouse-test:aim-best:single:easy:10000');
   });
 });
