@@ -77,20 +77,6 @@ const jsonLd = {
     共收录 {KEY_COUNT} 个键位,含小键盘与编辑键。
   </p>
 
-  <div class="notice notice--info">
-    <ul>
-      <li>
-        有几种组合是浏览器和系统<strong>抢在前面处理掉</strong>的,网页拿不到,别当成按键失灵:
-        <code>Ctrl+W</code>(关标签)、<code>Ctrl+T</code>(新标签)、<code>Alt+Tab</code>(切窗口)、
-        <code>Ctrl+Shift+Esc</code>(任务管理器)以及键盘上的 <code>Win</code> 键。
-      </li>
-      <li>
-        按 <code>F11</code>、<code>F12</code> 之类的功能键时,浏览器可能自己先响应(全屏、开发者工具),
-        这也是正常的。
-      </li>
-    </ul>
-  </div>
-
   <div class="workbench">
     <div class="workbench__stage">
       <div class="keyboard well" id="keyboard">
@@ -160,6 +146,31 @@ const jsonLd = {
           </div>
         </div>
       </div>
+
+      {/*
+        这段「浏览器抢在前面处理掉的组合」原本长在导语和 `.workbench` **之间** ——
+        于是它把整页往下推了一屏,而键盘那块井的右边空着一大片(读数栏比井高)。
+
+        现在它挪到井**下面**,成了舞台里的第二块。这不算新结构:`button-test` 的舞台
+        本来就是「按键示意图 + 采样区」两块,`.workbench__stage` 自己是一列,收得下。
+        视觉上也对 —— 它说的是"这几个键测不到",紧挨着那副键盘比隔着一屏近得多。
+
+        **必须留在 `workbench__stage` 里,不能塞进 `.test-area`** —— 井就是采样面,
+        键盘事件从文档走,但这类"挪进测试区"的改动迟早会踩到那条约束(见 CLAUDE.md)。
+      */}
+      <div class="notice notice--info">
+        <ul>
+          <li>
+            有几种组合是浏览器和系统<strong>抢在前面处理掉</strong>的,网页拿不到,别当成按键失灵:
+            <code>Ctrl+W</code>(关标签)、<code>Ctrl+T</code>(新标签)、<code>Alt+Tab</code>(切窗口)、
+            <code>Ctrl+Shift+Esc</code>(任务管理器)以及键盘上的 <code>Win</code> 键。
+          </li>
+          <li>
+            按 <code>F11</code>、<code>F12</code> 之类的功能键时,浏览器可能自己先响应(全屏、开发者工具),
+            这也是正常的。
+          </li>
+        </ul>
+      </div>
     </div>
 
     <div class="workbench__readout">
@@ -180,19 +191,26 @@ const jsonLd = {
         <StatPanel id="max-held" label="同时按住最多" unit="键" hint="反映无冲能力" />
         <StatPanel id="stuck" label="仍未松开" hint="失焦导致的不算" />
       </div>
+
+      {/*
+        重置 和 按键记录 原本长在键盘**下面**,于是要按一下重置得先往下滚一屏 ——
+        而它俩说的正是这块读数栏里的事。现在并进读数栏:列在桌面是并排的,
+        读数栏就在键盘右边、起手第一个视口里,不用滚。
+
+        **`重置` 必须排在 `按键记录` 上面**,不然日志一长(最多 12 条)又把它顶下去。
+      */}
+      <div class="controls">
+        <button type="button" id="reset">重置</button>
+        <span class="test-hint">
+          没亮过的键会保持暗色,一闪即逝的键也来得及看
+        </span>
+      </div>
+
+      <h2>按键记录</h2>
+      <p class="prose tight">最近 12 次按键,新的在上面。</p>
+      <ul class="log-list" id="log"></ul>
     </div>
   </div>
-
-  <div class="controls">
-    <button type="button" id="reset">重置</button>
-    <span class="test-hint">
-      没亮过的键会保持暗色,一闪即逝的键也来得及看
-    </span>
-  </div>
-
-  <h2>按键记录</h2>
-  <p class="prose tight">最近 12 次按键,新的在上面。</p>
-  <ul class="log-list" id="log"></ul>
 
   <section class="prose">
     <h2>怎么判断是坏键还是无冲不足</h2>
@@ -248,6 +266,14 @@ const jsonLd = {
       flex-wrap: wrap;
       align-items: flex-start;
       padding: 16px;
+      /*
+       * 让下面那条 @container 量的是**井自己的内容宽**,而不是视口宽。
+       *
+       * 这里非用容器查询不可:同样一条 `flex: 1 1 520px` 的主键区,井的内容宽
+       * 在视口 900 时是 828px(读数栏被挤到下面去了),到了 1100 反而掉回 614px
+       * (读数栏回到右边)——**不是单调的**,媒体查询表达不了"够宽就并排"。
+       */
+      container-type: inline-size;
     }
 
     .keyboard__main {
@@ -255,11 +281,59 @@ const jsonLd = {
       min-width: 0;
     }
 
+    /*
+     * 编辑键区和数字键区**横着并排**,不竖着叠。
+     *
+     * 原来是 `flex-direction: column`:两块各自 180 / 176px 高,叠起来 368px,
+     * 而左边的主键区只有 260px —— 井的高度被这两块撑到 680px,里面空出一大片。
+     * 并排之后取较高的那个(约 180px),整块降到约 490px。
+     *
+     * `flex-wrap: wrap` + `max-width: 100%` 是给窄屏兜底的:两块并排要 332px,
+     * 窄到装不下时自动退回上下两块。**不夹这一下的话 `flex: 0 0 auto`(不收缩)
+     * 会让它直接溢出井外** —— 溢出不会报错,只会让井自己撑宽。
+     */
     .keyboard__side {
       display: flex;
-      flex-direction: column;
+      flex-wrap: wrap;
       gap: 12px;
       flex: 0 0 auto;
+      max-width: 100%;
+    }
+
+    /*
+     * 井够宽(内容宽 ≥ 721px)时改回竖着叠 —— 这时它**整块坐在主键区右边**,
+     * 一行就放下了,井只有 402px 高,比并排着掉到第二行(492px)还矮。
+     * 721 = 主键区 520 + 间距 18 + 编辑键/数字键区 183,三个数都是量出来的
+     * (实测:内容宽 688 时还是两行,748 时已经并成一行,721 落在中间)。
+     *
+     * 只在装不下、横竖都得掉到第二行时,并排才是赢的那一方。
+     */
+    @container (min-width: 721px) {
+      .keyboard__side {
+        flex-direction: column;
+      }
+    }
+
+    /*
+     * 井下面那条说明(见模板里的注释)。`.notice` 自带 `margin: 0 0 20px`,
+     * 而舞台是 flex 列 —— **flex 里 margin 不折叠**,那个 20px 会和 `gap: 20px`
+     * 叠成 40px,井和它之间凭空多出一道空隙。这里只收下边距,`gap` 已经管住了间距。
+     */
+    .workbench__stage > .notice {
+      margin-bottom: 0;
+    }
+
+    /*
+     * 读数栏里那个「按键记录」标题:全站 `h2` 带 3.5rem 上边距,那是给
+     * 3000px 长页排节奏用的;**在 386px 宽的读数栏里它变成一道 56px 的空洞**
+     * ——量过,从上一行的说明文字到"按键记录"四个字之间空出 121px。
+     *
+     * 只收上边距,**那条分节线一根不动**:线才是"这里开始是新的一节"的记号
+     * (见 global.css 里 `h2` 那段注释),而 56px 的间距是页面级的呼吸,
+     * 在已经贴着上一行的侧栏里没有呼吸可给。收完是 44px。
+     */
+    .workbench__readout h2 {
+      margin-top: 0;
     }
 
     .kb-row {

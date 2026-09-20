@@ -3,7 +3,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import MiniCard from '../components/MiniCard.astro';
 import { CONFIDENCE_LABEL, DIAGNOSTIC_TOOLS, FUN_TOOLS, PLANNED_TOOLS } from '../lib/tools';
 import type { Confidence } from '../lib/tools';
-import { CONFIDENCE_NOTE, defaultMiniMode, findMiniCard } from '../lib/mini-cards';
+import { CONFIDENCE_NOTE, defaultMiniMode, findMiniCard, MINI_CARDS } from '../lib/mini-cards';
 import { href } from '../lib/url';
 
 const title = '鼠标测试 - 在线检测鼠标按键、回报率与传感器性能';
@@ -42,13 +42,29 @@ const CONFIDENCE_ORDER: Confidence[] = ['exact', 'estimate', 'shape', 'direction
  * 判据和驱动复位回空态时用的是同一个 `defaultMiniMode`,不写两份。
  *
  * **只从 `DIAGNOSTIC_TOOLS` 建卡片。** 趣味工具不上卡片(理由写在
- * `mini-cards.ts` 的文件头),它们进下面那一节,只给链接。`findMiniCard` 对这
- * 批 slug 一定有值,`!` 是安全的 —— 这份对应关系由 `tests/mini-cards.test.ts`
- * 钉着(它断言的正是 `MINI_CARDS` 与 `DIAGNOSTIC_TOOLS` 一一对应)。
+ * `mini-cards.ts` 的文件头),它们进下面那一节,只给链接。
+ *
+ * **一张卡可以顶几个工具页**(`MiniCard.covers`),所以卡片数**少于**诊断工具数:
+ * 前三张(按键 / 长按拖拽 / 双击)并成了一张。被顶掉的那些只在小注里留两个链接,
+ * 它们的读数槽由主卡那一条负责 —— 这就是下面要先把被覆盖的 slug 挖出来的原因。
+ *
+ * `findMiniCard(tool.slug)!` 那个 `!` **换了担保人**:原来是"一一对应"那条用例,
+ * 现在是 `tests/mini-cards.test.ts` 的覆盖不变量(每个 slug 都是真诊断工具 +
+ * 每个诊断工具恰好被覆盖一次),两者合起来同样保证了这里取得到值。
  */
-const cards = DIAGNOSTIC_TOOLS.map((tool) => {
+const covered = new Set(MINI_CARDS.flatMap((card) => card.covers ?? []));
+
+const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((tool) => {
   const spec = findMiniCard(tool.slug)!;
-  return { tool, spec, prompt: defaultMiniMode(spec)?.prompt ?? spec.prompt };
+  return {
+    tool,
+    spec,
+    prompt: defaultMiniMode(spec)?.prompt ?? spec.prompt,
+    covers: (spec.covers ?? []).flatMap((slug) => {
+      const coveredTool = DIAGNOSTIC_TOOLS.find((item) => item.slug === slug);
+      return coveredTool ? [coveredTool] : [];
+    }),
+  };
 });
 ---
 
@@ -57,7 +73,7 @@ const cards = DIAGNOSTIC_TOOLS.map((tool) => {
     标题下面**一行小字**,然后就是卡片。
 
     原来这里是「导语 → 可用工具 → 名册 → 网格」四段文字,读者要翻过一整屏说明
-    才够得着第一个能点的东西。改成点进来就看见十张卡:想测什么直接上手,
+    才够得着第一个能点的东西。改成点进来就看见卡片:想测什么直接上手,
     「这是什么站、那些标记什么意思」挪到网格下面当说明读。
 
     那行小字只干一件事:**说清卡片和工具页的分工**。少了它,读者会以为卡片
@@ -74,18 +90,22 @@ const cards = DIAGNOSTIC_TOOLS.map((tool) => {
   </p>
 
   <ul class="mini-grid">
-    {cards.map(({ tool, spec, prompt }) => <MiniCard tool={tool} spec={spec} prompt={prompt} />)}
+    {
+      cards.map(({ tool, spec, prompt, covers }) => (
+        <MiniCard tool={tool} spec={spec} prompt={prompt} covers={covers} />
+      ))
+    }
   </ul>
 
   {/*
     第二片:**趣味工具,只给链接,不给卡片。**
 
-    它们和上面十项不是一类东西 —— 上面是诊断(测鼠标坏没坏),这两页是玩。
+    它们和上面那些卡片不是一类东西 —— 上面是诊断(测鼠标坏没坏),这两页是玩。
     正文里把这点说破,免得读者拿瞄准成绩去判断鼠标好坏。
 
     **为什么不发卡片**(判据在 `mini-cards.ts` 的文件头):两页各要一台计时器
     才能结束(反应要等一段随机延迟,瞄准要跑满 10–60 秒),而卡片那台装置是
-    "空闲了就结算",拧着用;而且卡片只有 120px,刺激面和目标直径都得缩,
+    "空闲了就结算",拧着用;而且装置面只有 120px 上下,刺激面和目标直径都得缩,
     缩完量出来的就已经不是那一页的数了 —— 那正是全站最不能做的一件事。
 
     清单从 `FUN_TOOLS` 派生,**不是手写两个 `<li>`**:手写的话加一个趣味工具
@@ -97,7 +117,7 @@ const cards = DIAGNOSTIC_TOOLS.map((tool) => {
   <h2>更多工具</h2>
 
   <p class="prose">
-    上面十项是诊断,测的是"鼠标坏没坏";下面这两页是玩,成绩同样只存在本机,
+    上面的卡片都是诊断,测的是"鼠标坏没坏";下面这两页是玩,成绩同样只存在本机,
     也一样会在页面上说清楚哪些数测不准、为什么。
   </p>
 
@@ -171,10 +191,10 @@ const cards = DIAGNOSTIC_TOOLS.map((tool) => {
    * 而且他会以为是鼠标坏了 —— 和按键测试页遇到的是同一件事(见 `side-buttons.ts`)。
    *
    * **一次装在整个网格上,不是每张卡各装一份。** 判据本来就是"按下点落在哪儿",
-   * 装七份只是让七份各自记一遍同一个事实。网格是这些测试面共同的外框,
+   * 装八份只是让八份各自记一遍同一个事实。网格是这些测试面共同的外框,
    * 落在卡与卡的缝里也还算在测。
    *
-   * 为什么不是整页(工具页那样):首页是一篇正文,十张卡只是它中间的一节。
+   * 为什么不是整页(工具页那样):首页是一篇正文,八张卡只是它中间的一节。
    * 整页拦会把整篇文章的右键菜单和"按侧键回上一页"一起吃掉,那是耍横不是清理。
    * 两个函数都收一个"作用域"参数,判据和工具页共用同一份实现。
    */
@@ -184,7 +204,7 @@ const cards = DIAGNOSTIC_TOOLS.map((tool) => {
   }
 
   /*
-   * 把十张卡里的装置接上。
+   * 把八张卡里的装置接上。
    *
    * **走一遍 DOM 而不是把 `cards` 从 frontmatter 传进来** —— frontmatter 变量在
    * `<script>` 里不存在(脚本被单独打包成外链 module),所以两边是靠 `slug` 挂钩的,

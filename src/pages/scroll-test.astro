@@ -89,6 +89,32 @@ const jsonLd = {
         <div class="test-area__hint" id="hint">把指针放在这里,然后滚动滚轮</div>
         <div class="scroll-dir" id="dir" hidden>↓</div>
       </div>
+
+      {/*
+        「最近 80 格的方向」原本长在工作台**下面**,于是测试区底边到下一个 h2 之间
+        空出 155px —— 这一页的读数栏(375px)比测试区(220px)高,空隙全落在左边。
+        (对照:cps / button 两页测试区本来就比读数栏高,没有这个毛病。)
+
+        现在整块搬进舞台,坐在测试区正下方。**h2、说明段、方向带、重置**一起走:
+        ① 方向带和上面那块读数栏说的是同一件事(方向),分开在两屏读不顺;
+        ② 「重置」跟着上来,不用再往下滚一屏才够得到 —— 和键盘页同一个理由。
+
+        **别塞进 `.test-area` 里**:它不只是盒子,它**就是采样面**(`wheel` 只派发给
+        指针所在元素),塞进去等于鼠标划过方向带也被算成在测试。所以它是兄弟,不是子节点。
+      */}
+      <h2>最近 80 格的方向</h2>
+      <p class="prose tight">
+        向下滚是沉到底部,向上滚是顶到顶部。<span class="mark-danger">红色</span>的是
+        反向毛刺——你一直在朝一个方向滚,它却单独跳了一下。
+      </p>
+      <div class="strip" id="strip"></div>
+
+      <div class="controls">
+        <button type="button" id="reset">重置</button>
+        <span class="test-hint" id="delta-info">
+          当前事件:<span id="delta-raw">—</span>
+        </span>
+      </div>
     </div>
 
     <div class="workbench__readout">
@@ -115,20 +141,6 @@ const jsonLd = {
         <StatPanel id="typical" label="一格原始值" hint="你系统里的 deltaY" />
       </div>
     </div>
-  </div>
-
-  <h2>最近 80 格的方向</h2>
-  <p class="prose tight">
-    向下滚是沉到底部,向上滚是顶到顶部。<span class="mark-danger">红色</span>的是
-    反向毛刺——你一直在朝一个方向滚,它却单独跳了一下。
-  </p>
-  <div class="strip" id="strip"></div>
-
-  <div class="controls">
-    <button type="button" id="reset">重置</button>
-    <span class="test-hint" id="delta-info">
-      当前事件:<span id="delta-raw">—</span>
-    </span>
   </div>
 
   <section class="prose">
@@ -207,6 +219,18 @@ const jsonLd = {
 
     /* .scroll-dir 的定位与配色在 global.css 里(和 CPS / DPI / 拖拽页的
        实时读数共用一套规则),这里只留这个页面独有的东西 */
+
+    /*
+     * 搬进舞台的那个 h2(见模板里的注释)。全站 `h2` 带 3.5rem 上边距,那是给
+     * 3000px 长页排节奏用的;在测试区正下方它变成一道 56px 的空洞 —— 而这里要的
+     * 恰恰是**把空隙填掉**,不是换个地方再空出来。
+     *
+     * 只收上边距,**那条分节线一根不动**:线才是"这里开始是新的一节"的记号
+     * (见 global.css 里 `h2` 那段注释)。键盘页读数栏里那个 h2 是同一个处理。
+     */
+    .workbench__stage > h2 {
+      margin-top: 0;
+    }
 
     #delta-raw {
       font-family: var(--font-mono);

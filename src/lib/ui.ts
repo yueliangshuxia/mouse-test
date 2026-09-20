@@ -150,17 +150,41 @@ function installDefaultSuppression(scope: Element | null): void {
    */
   let pressOrigin: Element | null = null;
 
-  // 用捕获:页面自己的手势代码挂在 window 的冒泡阶段上,这一条必须比它们先跑
+  /**
+   * **那一次按下有没有落在作用域里 —— 在按下的那一刻就定下来,之后不再重算。**
+   *
+   * 这一条是被一个真实的漏网逼出来的,不是性能考虑。首页的卡片装置是**惰性挂载**
+   * 的:右键按在还没碰过的装置面上时,那一下 `pointerdown` 会唤醒它,而
+   * `start()` 里有一句 `surface.replaceChildren(live)` —— 于是"按下时落点那个节点"
+   * 在 `contextmenu` 派发之前就已经**从 DOM 里摘掉了**。
+   *
+   * 而 `Node.contains()` 对一个**游离节点**恒为 `false`(规范如此:contains 走的是
+   * 树的祖先链,不在树里的节点谁也够不着它)。所以凡是"等到 `contextmenu` 时再用
+   * `scope.contains(pressOrigin)` 现算"的写法,在那一瞬间都会判成"不在作用域里",
+   * 拦截静默失效 —— 第一下右键照旧弹出菜单。实测复现过:同一张卡上,装置已经跑着
+   * 的时候拦得住(`detached: false`),空态被右键唤醒的那一次拦不住
+   * (`phase: "running"`、`detached: true`、`blocked: false`)。
+   *
+   * 归属是**按下那一刻**的事实,那就该在那一刻记下来 —— 后面那个节点还在不在,
+   * 和"用户是在哪儿按的"没有关系。`pressOrigin` 仍然要留着,因为放行规则的另一半
+   * (「从控件上按下、又还在同一个控件里松开」)要看的是松手时指针还在不在它里面。
+   */
+  let pressInScope = false;
+
+  // 用捕获:页面自己的手势代码挂在 window 的冒泡阶段上,这一条必须比它们先跑。
+  // 捕获也保证了这里**早于**卡片上那个唤醒装置的探针 —— 所以赋值时那个节点
+  // 一定还在树里,`replaceChildren` 还没轮到。
   window.addEventListener(
     'pointerdown',
     (event) => {
       pressOrigin = event.target instanceof Element ? event.target : null;
+      pressInScope = scope === null || (pressOrigin !== null && scope.contains(pressOrigin));
     },
     true,
   );
 
   function inScope(): boolean {
-    return scope === null || (pressOrigin !== null && scope.contains(pressOrigin));
+    return pressInScope;
   }
 
   function block(event: Event): void {
@@ -201,7 +225,7 @@ export function suppressWorkbenchDefaults(): void {
 /**
  * 同上,但**只在"按下点落在这个元素里"时才拦**。
  *
- * 首页要的是这一版,而且**只能用这一版**。首页是一篇正文:十张卡片只是它中间
+ * 首页要的是这一版,而且**只能用这一版**。首页是一篇正文:八张卡片只是它中间
  * 的一节,其余全是文字。那里调一次全页版,右键菜单会在整篇文章上被吃掉 ——
  * 连"复制"都没了。那不是"把工作台摘干净",那是对读者耍横。
  *

@@ -34,11 +34,46 @@ describe('mini-cards', () => {
    * 对应的是 `DIAGNOSTIC_TOOLS`,不是 `READY_TOOLS`。
    *
    * 趣味工具**不上首页卡片**(理由写在 `mini-cards.ts` 的文件头),首页那一节
-   * 只给两个链接。所以这条判据跟着收窄:拿 `READY_TOOLS` 去比的话,加一个
-   * 不上卡片的工具会红成"少了一张卡",而它本来就不该有卡。
+   * 只给两个链接。所以拿 `READY_TOOLS` 去比的话,加一个不上卡片的工具会红成
+   * "少了一张卡",而它本来就不该有卡。
+   *
+   * **判据是"覆盖",不是"一一对应"。** 首页一张卡可以用 `covers` 顶掉几个工具页
+   * (前三张并成一张),所以卡片数可以少于诊断工具数。但"每个工具恰好被覆盖一次"
+   * 这一条不能松 —— 它才是原来那句"少一条首页就少一张卡"的**准确版本**。
+   * 松成"两边都不为空"等于把闸门拆了:漏配一条、或者 `covers` 里打错一个字母,
+   * 那个工具就从首页**静默消失**,而构建、类型、其余用例全都不会响。
    */
-  it('与 DIAGNOSTIC_TOOLS 一一对应,顺序也一致', () => {
-    expect(MINI_CARDS.map((card) => card.slug)).toEqual(DIAGNOSTIC_TOOLS.map((tool) => tool.slug));
+  it('每个诊断工具恰好被一张卡覆盖,不重不漏', () => {
+    const diagnostic = new Set(DIAGNOSTIC_TOOLS.map((tool) => tool.slug));
+    const claimed: string[] = [];
+
+    for (const card of MINI_CARDS) {
+      expect(diagnostic.has(card.slug), `${card.slug} 不是诊断工具,却占了一张卡`).toBe(true);
+      claimed.push(card.slug);
+      for (const slug of card.covers ?? []) {
+        expect(diagnostic.has(slug), `${card.slug} 声称顶了 "${slug}",但没有这个诊断工具`).toBe(
+          true,
+        );
+        claimed.push(slug);
+      }
+    }
+
+    // 不重。被 `covers` 认领的工具如果自己也有一张卡,同一页的读数槽会被渲染两遍
+    expect(new Set(claimed).size, '有工具被两张卡同时认领').toBe(claimed.length);
+
+    // 不漏。漏掉的那一个会从首页静默消失 —— 这条是整组用例最要紧的一句
+    expect([...claimed].sort()).toEqual([...diagnostic].sort());
+  });
+
+  it('主工具的顺序跟着 DIAGNOSTIC_TOOLS —— 卡片位置只有一份顺序', () => {
+    // 顺序只有一份(`TOOLS`),两片网格是切出来的。合并之后卡片数变了,
+    // 但"卡片顺序 = 主工具在注册表里的顺序"这条还得成立,否则合并一张卡
+    // 就等于把某几项的位置偷偷挪了。
+    const positions = MINI_CARDS.map((card) =>
+      DIAGNOSTIC_TOOLS.findIndex((tool) => tool.slug === card.slug),
+    );
+    expect(positions).not.toContain(-1);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
   it('趣味工具确实没有卡片 —— 有卡片就说明它会被首页当诊断项渲染', () => {
@@ -47,6 +82,28 @@ describe('mini-cards', () => {
       expect(carded.has(tool.slug), `${tool.slug} 是趣味工具,不该有卡片`).toBe(false);
     }
   });
+  /*
+   * 跨格(`MiniCard.wide`)的两条不变量。
+   *
+   * 跨格在 3 列下才生效,而 8 张卡 + 跨 2 格 = **9 个格子,正好铺满三行**。
+   * 多来一张 wide 就是 10 个格子铺 4 行、末尾空出两格 —— 而那正是这条改动想解决
+   * 的问题本身,只是换到了第 4 行。这个失败**不报任何错**:类型、构建、其余用例
+   * 全都不响,只有首页末尾多出一片谁也说不上为什么的空白。
+   */
+  it('至多一张卡声明 wide —— 两张跨格会把空白挪到最后一行', () => {
+    const wide = MINI_CARDS.filter((card) => card.wide);
+    expect(wide.length).toBeLessThan(2);
+
+    // 跨格是给"一张卡顶几页"的集合体的。单页卡跨格等于让它独占一行,
+    // 而它自己并不会因此变好看 —— 只是把同一片空白换了位置。
+    for (const card of wide) {
+      expect(
+        (card.covers ?? []).length,
+        `${card.slug} 只顶一页,不该跨格`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
   it('没有重复的 slug', () => {
     const slugs = MINI_CARDS.map((card) => card.slug);
     expect(new Set(slugs).size).toBe(slugs.length);

@@ -11,8 +11,12 @@
  * `keyboard-layout.ts` / `theme.ts` / `mouse-buttons.ts` 的同一个理由。
  *
  * 本模块**只有纯数据**,不碰 DOM,所以能在 node 里直接单测 —— 那个单测断言
- * 这份表和 `tools.ts` 的 `DIAGNOSTIC_TOOLS` **一一对应**:少一条首页就少一张卡,
- * 多一条就是一张指向不存在页面的卡。
+ * **每个诊断工具恰好被一张卡覆盖**:少一条首页就少一张卡,多一条就是一张指向
+ * 不存在页面的卡。
+ *
+ * **不是一一对应。** 一张卡可以用 `covers` 顶掉几个工具页(首页前三张并成一张),
+ * 所以卡片数可以少于诊断工具数。但"每个工具恰好出现一次"这条比一一对应更要紧:
+ * 它才是"工具不会从首页静默消失"的那道闸门。
  *
  * **对应的是 `DIAGNOSTIC_TOOLS`,不是 `READY_TOOLS`。** 趣味工具(反应速度 /
  * 瞄准)不上首页卡片 —— 它们各要一台**计时器**才能结束(反应要等一段随机延迟,
@@ -22,6 +26,7 @@
  * 首页那一节只给两个链接,不给装置。**加新工具时先问一句:它上不上首页卡片?**
  */
 
+import { CLICK_CHATTER_MS } from './analysis';
 import type { Confidence } from './tools';
 
 /**
@@ -32,11 +37,9 @@ import type { Confidence } from './tools';
  * 不是就老实说不放,别塞一个看着像那么回事的数进去。
  */
 export type MiniKind =
-  | 'buttons'
-  | 'double-click'
+  | 'mouse-buttons'
   | 'cps'
   | 'wheel'
-  | 'hold'
   | 'trail'
   | 'polling'
   | null;
@@ -90,8 +93,50 @@ export interface MiniMode {
 export interface MiniCard {
   /** 与 `Tool.slug` 对齐。两处靠它挂钩,由单测保证不漏不错。 */
   slug: string;
+  /**
+   * 这张卡**还顶了**哪几个工具页。
+   *
+   * 首页一张卡可以覆盖多个工具(按键 / 长按拖拽 / 双击并成一张),但**只有一个
+   * slug 能当主工具** —— `data-mini` 挂钩、卡名、卡摘要、可信度徽章全走上面那个
+   * `slug`,被顶掉的这几项在这里只贡献两个链接(见 `MiniCard.astro` 的小注)。
+   *
+   * 被顶掉的工具**不再有自己的 `MiniCard` 条目**。留一条空壳只为了让"一一对应"
+   * 好看,代价是那条的 `readouts` / `note` 变成没人读的死数据 —— 下一眼看不出
+   * 它已经作废。单测钉的是"每个诊断工具**恰好**被覆盖一次",不是形式上的对齐。
+   */
+  covers?: string[];
+  /**
+   * 够宽时这张卡**跨两格**。
+   *
+   * **只有"一张卡顶了几页"的那种卡该写它** —— 跨格是为了让集合体有地方摊开,
+   * 不是为了给单页卡加尺寸。`tests/mini-cards.test.ts` 因此钉住两条:"至多一张卡
+   * wide"(两张 wide 在 3 列下是 10 个格子铺 4 行、末尾空两格),以及 wide 的卡
+   * 必须真的有 `covers`。
+   *
+   * **这里只管"要不要",不管"什么时候"** —— 生效条件写在 `global.css` 那个
+   * `@container (min-width: 932px)` 里(网格真的排得出三列),因为那是渲染之后
+   * 才有的事实。别把这个判断挪进模板。
+   *
+   * **也不许就地判 `kind === 'mouse-buttons'`**:那样"哪张卡跨格"就成了 `kind`
+   * 的副作用,以后再加一张放鼠标的卡会静默地跟着跨格。
+   */
+  wide?: boolean;
   /** 卡里的装置;`null` 表示放不进来,见 `fallback`。 */
   kind: MiniKind;
+  /**
+   * 卡片正面的名字。不写就用 `Tool.name`。
+   *
+   * 一张卡顶几页时必须写,否则卡名只说了一半(`Tool.name` 是**那一页**的名字,
+   * 而这一张卡现在也管另外两页)。
+   */
+  faceName?: string;
+  /**
+   * 卡片正面那句摘要。不写就用 `Tool.description`。
+   *
+   * 同理:`Tool.description` 是**页面的 meta description**,服务的是那一页的搜索
+   * 结果;卡片顶了几页时那句话对不上卡上的内容。
+   */
+  faceDesc?: string;
   /**
    * 装置槽**空态**里那句话。
    *
@@ -140,34 +185,53 @@ export const CONFIDENCE_NOTE: Record<Confidence, string> = {
 
 export const MINI_CARDS: MiniCard[] = [
   {
+    /*
+     * 一张卡顶三页:按键 / 长按拖拽 / 双击。
+     *
+     * 徽章取的是 `button-test` 的 `exact`,这**不是漏改**:卡上这四个数(按下次数 /
+     * 当前按着 / 双击间隔 / 按住秒数)全是原样计数与原样时间戳。它顶着的
+     * `hold-drag-test` 是 `shape`,而那个 `shape` 的结论("按住期间断没断")
+     * **刻意不上卡** —— 它要拖满一整段才判得出形状,120px 里出不来。
+     * 缺的那一半在小注里说破、并指向那一页。
+     *
+     * **滚轮只上了这台装置的一半,没进 `covers`。** 卡上多的是"轮子亮起来 +
+     * 箭头上/下",而「滚轮」那一页**照旧有自己的卡**(格数、最近 10 次的带子
+     * 都在那边)。所以这里不列 `scroll-test` —— 列了就等于声称那一页也被顶掉,
+     * 而单测的"恰好覆盖一次"会当场红。卡名把滚轮写进去,是因为**这张卡真的会
+     * 响应滚动**,不是因为它顶了那一页。
+     */
     slug: 'button-test',
-    kind: 'buttons',
-    prompt: '在框里按任意一个鼠标键',
+    covers: ['hold-drag-test', 'double-click-test'],
+    /* 一张卡顶三页,所以它该有地方摊开 —— 三列时跨两格。见 `MiniCard.wide` */
+    wide: true,
+    kind: 'mouse-buttons',
+    faceName: '按键 / 滚轮 / 长按 / 双击',
+    faceDesc: '按下哪个键、按住多久、双击间隔有多长、滚轮朝哪边 —— 都在这张卡上。',
+    prompt: '在框里按鼠标键,或滚滚轮',
+    /*
+     * 读数槽。`held` 这个名字有个坑:并进来之前,按键那张把 `held` 写成**按键名**、
+     * 长按那张把 `held` 写成**秒数**。一张卡里一个 key 只能有一个含义,
+     * 所以按键名那一条改叫 `holding` 腾出位置。
+     */
     readouts: [
       { key: 'presses', label: '按下' },
-      { key: 'held', label: '当前按着' },
+      { key: 'holding', label: '当前按着' },
+      { key: 'gap', label: '双击间隔', unit: 'ms' },
+      { key: 'held', label: '按住', unit: 's' },
     ],
-    note: '侧键那一行空着,只说明页面没收到 —— 有些鼠标的侧键根本不走鼠标事件。',
-  },
-  {
-    slug: 'hold-drag-test',
-    kind: 'hold',
-    prompt: '在框里按住不放',
-    readouts: [
-      { key: 'held', label: '已按', unit: 's' },
-      { key: 'breaks', label: '疑似瞬断' },
-    ],
-    note: '中途断一下和真的松手再按完全一样,浏览器分不出来,所以只能叫疑似。',
-  },
-  {
-    slug: 'double-click-test',
-    kind: 'double-click',
-    prompt: '在框里连点两下',
-    readouts: [
-      { key: 'clicks', label: '点击' },
-      { key: 'gap', label: '上次间隔', unit: 'ms' },
-    ],
-    note: '间隔小于 50ms 的会被标出来 —— 那个速度人手做不出来。',
+    /*
+     * 标红的那一处**不是**右上角那个 `双击间隔` 读数,是**下面那一排 chip 里
+     * 对应那个键的计数**(参考图里也是计数在变色)。写文案时按代码写的那一处指,
+     * 指错了读者会盯着一个永远不会变红的数看。
+     *
+     * 阈值从 `analysis.ts` 导入,不手抄一个 50:两处写同一个数,迟早只剩一处
+     * 被改到,而"文案说 50、代码判 60"这种偏差没有任何东西会报错。
+     */
+    note:
+      `双击间隔小于 ${CLICK_CHATTER_MS}ms 时,下面那个键的计数会标红 —— 那个速度人手做不出来。` +
+      '按住期间断没断这张卡看不出:那要拖满一整段才判得出形状,去「长按拖拽」那一页。' +
+      '滚轮只报方向:轮子亮起来、箭头指出朝哪边。格数是估算,要看它去「滚轮」那一页。' +
+      '侧键那一格是 0 只说明页面没收到,有些鼠标的侧键根本不走鼠标事件。',
   },
   {
     slug: 'scroll-test',

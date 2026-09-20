@@ -5,8 +5,8 @@
  *
  * 1. **惰性挂载** —— 卡片插进页面时**一个装置都不建**。装置面上挂着一组探针
  *    事件(哪种事件由 `DEVICES[kind].wake` 声明),用户第一次碰到它才调工厂。
- *    这一条不是优化:七张卡各有一个采样器时,默认容量 120000 条 × 17 字节
- *    ≈ 2MB 一份,七张就是十几 MB,而首页大部分人只是路过。
+ *    这一条不是优化:采样器的默认容量是 120000 条 × 17 字节 ≈ 2MB 一份,首页
+ *    八张卡里有一半挂着采样器,全建起来就是十几 MB —— 而首页大部分人只是路过。
  * 2. **状态机** —— `idle → running → done`,负责 `.well` 的加减和装置内容的清空。
  * 3. **读数** —— `write()` 走 `ui.ts` 的 `setText`(写入前先比较那条约定)。
  *
@@ -40,7 +40,6 @@
  */
 
 import {
-  analyzeDragEpisodesByButton,
   analyzeSegments,
   classifyClickGap,
   computeCps,
@@ -52,7 +51,6 @@ import {
   segmentTimestamps,
   summarizeScroll,
   type CpsStats,
-  type DragEvent,
   type ScrollNotch,
 } from './analysis';
 import { BUTTONS, eachButtonEdge, maskFromButtons } from './mouse-buttons';
@@ -195,116 +193,263 @@ function asPointer(event: Event): PointerEvent | null {
 }
 
 // ---------------------------------------------------------------------------
-// 七个装置
+// 五个装置
 // ---------------------------------------------------------------------------
 
 /**
- * 鼠标按键。框里排五个键帽,按哪个亮哪个,底下记总次数。
+ * 鼠标的俯视图。五个可亮的部分各带一个 `data-mb`,值是**本站编号**
+ * (见 `mouse-buttons.ts`:0 左 / 1 中 / 2 右 / 3 侧键4 / 4 侧键5)。
  *
- * 状态只能从 `event.buttons` 的位掩码逐位 diff 出来 —— `pointerdown` 只在
- * "从无键到有键"时派发一次,组合键的第二次按下走的是 `pointermove`。
+ * 编号既是 `event.button`、又是本站位掩码里的位序,所以 `sync()` 里
+ * `mask & (1 << code)` 和 `[data-mb="${code}"]` 说的是同一个键,不需要换算。
+ *
+ * **这是个固定字面量**,没有任何用户数据拼进来,所以走 `innerHTML` 是安全的。
+ * 它**只能**在 `ctx.live` 里造出来 —— `start()` 会 `surface.replaceChildren(live)`,
+ * 页面渲染进去的东西一开测就被抹掉。因此它的样式也**只能**在 `global.css`:
+ * 运行期 `createElement` 出来的节点拿不到页面 `<style>` 的 `data-astro-cid`。
+ *
+ * ## 那两支滚轮箭头
+ *
+ * 滚轮**没有**自己的读数槽,方向就画在这张图上:轮子亮起来,箭头指出朝哪边。
+ * 参考图(另一家的「按键与滚轮」)就是这套说法,而且它比一个 `↓` 字符更值 ——
+ * 读数行那四格留给数,方向本来就不是有量纲的东西。
+ *
+ * **两条 path 都常驻,靠 `.mini-mouse[data-wheel]` 选中其中一条显示**(默认
+ * `opacity: 0`)——和 `[data-mb]` 那五个部件同一套"数据在属性上、长相在
+ * `global.css` 里"的分工,不靠增减节点。没滚过就什么都不亮,这是全站
+ * "没数据不画空槽"的同一条。
+ *
+ * 两支箭头各 8×8,一上一下:**上箭头在轮子上方(y 8–16)、下箭头跨在按键分缝上
+ * (y 38–46,分缝在 y=44)** —— 下半身那点空间只有 8 个单位,而跨分缝正好是参考图
+ * 里那支下箭头的长相。viewBox 一个单位都没动,所以那几个量出来的高度
+ * (`.mini-mouse` 的 88 / 126 / 52)全部照旧。
  */
-const buttonsMini: MiniFactory = (ctx, seed) => {
+const MOUSE_SVG = `
+<svg class="mini-mouse" viewBox="2 2 52 88" aria-hidden="true" focusable="false">
+  <rect class="mini-mouse__body" x="12" y="4" width="40" height="84" rx="14" />
+  <path class="mini-mouse__part" data-mb="0" d="M32 4 L26 4 A14 14 0 0 0 12 18 L12 44 L32 44 Z" />
+  <path class="mini-mouse__part" data-mb="2" d="M32 4 L38 4 A14 14 0 0 1 52 18 L52 44 L32 44 Z" />
+  <rect class="mini-mouse__part mini-mouse__wheel" data-mb="1" x="28.5" y="20" width="7" height="16" rx="3.5" />
+  <rect class="mini-mouse__part" data-mb="3" x="4" y="38" width="10" height="13" rx="3" />
+  <rect class="mini-mouse__part" data-mb="4" x="4" y="56" width="10" height="13" rx="3" />
+  <path class="mini-mouse__wheel-arrow" data-wheel-dir="up" d="M32 8 L28 16 L36 16 Z" />
+  <path class="mini-mouse__wheel-arrow" data-wheel-dir="down" d="M32 46 L28 38 L36 38 Z" />
+</svg>`;
+
+/**
+ * 按键 / 滚轮 / 长按 / 双击 —— 首页并成一张卡的那台装置。
+ *
+ * 四样一起出:**逐键计数**(鼠标图上按哪瓣亮哪瓣,下面一排 chip 显示各自的次数)、
+ * **双击间隔**、**按住秒数**,以及**滚轮方向**(轮子亮起来 + 箭头上/下)。
+ * 四件事都是由"手上那一下"唤起、由同一条空闲判据结束的(停手 1.2 秒),
+ * 所以这张卡**没有模式行** —— 仓库里那条判据是"模式存在的理由从来不是换个数字
+ * 看看,而是结束的条件真的不一样"。凑数的模式不该加。
+ *
+ * **滚轮只给方向,不给格数、不给带子。** 方向是滚动唯一无需任何假设的那一位;
+ * 格数要经过 `normalizeWheelDelta` 那层启发式换算,而"最近 N 次"是一条要占一行
+ * 读数区的带子 —— 两样都留在「滚轮」那一页,那张卡照旧存在。这里给的是
+ * 鼠标图上的箭头,和参考图同一套说法。
+ *
+ * **长按那一页的头号数字(疑似瞬断)刻意不上这张卡。** 它要拖满一整段才判得出
+ * 形状,120px 里出不来。卡片小注里说破这一点并指向那一页。
+ *
+ * 三个坑照抄旧实现,别"优化":
+ *
+ * - **组合键只能逐位 diff `event.buttons` 的位掩码。** `pointerdown` 只在"从无键
+ *   到有键"时派发一次,`pointerup` 只在**最后一个键**松开时派发,中间那几次
+ *   按下/松开全都走 `pointermove`。用 `event.button` 会漏掉它们。
+ * - **双击间隔取 `event.timeStamp`,按住秒数取 `performance.now()`。** 前者量的
+ *   是**两个事件之间**(浏览器会把攒在一起的事件放进同一个任务里派发,那一刻两个
+ *   处理函数里的 `performance.now()` 会塌到 0,一次正常双击会被报成 0 毫秒);
+ *   后者量的是一段**墙钟**(按住不动不产生任何事件,只有墙钟知道过了多久)。
+ * - **松手的判据是 `event.buttons === 0`,不是"收到了 pointerup"。**
+ */
+const mouseButtonsMini: MiniFactory = (ctx, seed) => {
   let mask = 0;
   let presses = 0;
 
+  /** 每个键上一次按下的时刻。**按编号分开记** —— 左键点一下再用右键点一下,
+   *  这两个事件之间的差没有意义,混在一起会凭空造出一个"间隔"。 */
+  const lastByButton = new Map<number, number>();
+  /** 每个键累计按过几次。chip 上那个数就是它 */
+  const counts = new Map<number, number>();
+
+  // ---- 鼠标图 ----
+  const holder = document.createElement('div');
+  holder.innerHTML = MOUSE_SVG;
+  const mouse = holder.firstElementChild as SVGElement;
+  ctx.live.appendChild(mouse);
+
+  const parts = new Map<number, Element>();
+  for (const node of mouse.querySelectorAll('[data-mb]')) {
+    parts.set(Number(node.getAttribute('data-mb')), node);
+  }
+
+  // ---- 一排 chip ----
   const row = div('mini-live__row');
   ctx.live.appendChild(row);
 
-  const chips = BUTTONS.map((button) => {
+  const chips = new Map<number, { chip: HTMLElement; count: HTMLElement }>();
+  for (const button of BUTTONS) {
     const chip = div('mini-chip');
-    chip.textContent = button.name;
+    chip.dataset.mb = String(button.code);
+    chip.appendChild(document.createTextNode(button.name));
+
+    const count = document.createElement('i');
+    count.className = 'mini-chip__n';
+    /*
+     * 计数**从 0 开始**,不用破折号 —— 这是刻意的,和全站那条规矩不冲突:
+     * 那一条说的是"**算不出来**才给破折号",而这里是真数出来的 0。
+     * (同一张卡上的 `holding` / `gap` / `held` 开头是破折号,那是"此刻还没有"。)
+     */
+    count.textContent = '0';
+
+    chip.appendChild(count);
     row.appendChild(chip);
-    return chip;
+    chips.set(button.code, { chip, count });
+  }
+
+  // ---- 按住计时 ----
+  let holding = false;
+  let heldSince = 0;
+
+  const tick = createTicker(80, () => {
+    if (!holding) return;
+    ctx.write('held', format((performance.now() - heldSince) / 1000, 1));
   });
+  ctx.onCleanup(tick);
+
+  function beginHold(): void {
+    if (holding) return;
+    holding = true;
+    heldSince = performance.now();
+  }
+
+  function endHold(): void {
+    if (!holding) return;
+    holding = false;
+    ctx.write('held', format((performance.now() - heldSince) / 1000, 1));
+  }
 
   function sync(): void {
-    const held: string[] = [];
-    for (let i = 0; i < BUTTONS.length; i++) {
-      const down = (mask & (1 << BUTTONS[i].code)) !== 0;
-      chips[i].classList.toggle('mini-chip--down', down);
-      if (down) held.push(BUTTONS[i].name);
+    const down: string[] = [];
+    for (const button of BUTTONS) {
+      const pressed = (mask & (1 << button.code)) !== 0;
+      // 写 'true' / 'false' 而不是增删属性:属性一增一删会多一次样式重算,
+      // 而这条路径挂在 pointermove 上。
+      parts.get(button.code)?.setAttribute('data-down', pressed ? 'true' : 'false');
+      chips.get(button.code)?.chip.classList.toggle('mini-chip--down', pressed);
+      if (pressed) down.push(button.name);
     }
+    ctx.write('presses', String(presses));
     // 「当前按着」为空时给破折号而不是 0:这不是"算不出来",是"此刻没有"。
     // 全站的破折号在两种场合都用,这里是后一种。
-    ctx.write('presses', String(presses));
-    ctx.write('held', held.length > 0 ? held.join(' + ') : '—');
+    ctx.write('holding', down.length > 0 ? down.join(' + ') : '—');
+  }
+
+  /** 一次按下。`stamp` 是 `event.timeStamp` —— 见上面那段"两个事件之间" */
+  function press(code: number, stamp: number): void {
+    presses++;
+
+    const entry = chips.get(code);
+    if (entry) {
+      const times = (counts.get(code) ?? 0) + 1;
+      counts.set(code, times);
+      entry.count.textContent = String(times);
+    }
+
+    const previous = lastByButton.get(code);
+    lastByButton.set(code, stamp);
+    if (previous === undefined) return;
+
+    const gap = stamp - previous;
+    ctx.write('gap', format(gap, 0));
+    // 触点抖动标在**那个键的计数**上(参考图里也是计数在变色),不是另起一行字
+    entry?.count.classList.toggle('mini-chip__n--chatter', classifyClickGap(gap) === 'chatter');
   }
 
   function handle(event: PointerEvent): void {
     const next = maskFromButtons(event.buttons);
     if (next !== mask) {
-      eachButtonEdge(mask, next, (_code, down) => {
-        if (down) presses++;
+      eachButtonEdge(mask, next, (code, isDown) => {
+        if (isDown) press(code, event.timeStamp);
       });
       mask = next;
       if (mask !== 0) {
+        beginHold();
         // 拖出框外还要收得到 pointerup,否则掩码会一直卡在"按着"
         try {
           ctx.surface.setPointerCapture(event.pointerId);
         } catch {
           /* 已在捕获状态 */
         }
+      } else {
+        endHold();
       }
       sync();
     }
     ctx.settleAfter(IDLE_DONE_MS, mask !== 0);
   }
 
-  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave']) {
-    ctx.on(ctx.surface, type, handle as EventListener);
-  }
-
-  sync();
-  // 唤醒它的那一次按下就是第一次按下,不补这一下会白丢一次
-  const pointer = asPointer(seed);
-  if (pointer) handle(pointer);
-};
-
-/**
- * 双击。记相邻两次**同一个键**的按下间隔,小于 `CLICK_CHATTER_MS` 的标出来。
- *
- * 按同一个键分开记:左键点一下再用右键点一下,这两个事件之间的差没有意义,
- * 混在一起会凭空造出一个"间隔"。
- */
-const doubleClickMini: MiniFactory = (ctx, seed) => {
-  const lastByButton = new Map<number, number>();
-  const big = bigNumber(ctx.live);
-  const captionNode = caption(ctx.live);
-  big.textContent = '—';
-  captionNode.textContent = '连点两下';
-
-  let clicks = 0;
-
-  function press(event: PointerEvent): void {
-    // `pointerdown` 只由"从无键到有键"那一下产生,所以这里的 button 必是具体编号。
-    // 负值理论上不会出现,挡一下免得把 -1 记进表里。
-    if (event.button < 0) return;
-
-    const stamp = event.timeStamp;
-    const previous = lastByButton.get(event.button);
-    lastByButton.set(event.button, stamp);
-
-    clicks++;
-    ctx.write('clicks', String(clicks));
-
-    if (previous !== undefined) {
-      const gap = stamp - previous;
-      const kind = classifyClickGap(gap);
-      const chatter = kind === 'chatter';
-      ctx.write('gap', format(gap, 0));
-      big.textContent = format(gap, 0);
-      big.classList.toggle('mini-live__big--alert', chatter);
-      captionNode.textContent = chatter ? '偏快 —— 人手做不到这个速度' : '间隔正常';
+  /**
+   * 强制收手。`pointercancel`(设备被拔掉、手势被系统接管)和 `blur`
+   * (切走标签页)都**报不了松开**,但按键确实已经不在手上了 —— 不兜住的话
+   * 掩码会一直卡在"按着"、秒数会一直涨下去,看起来像卡死。
+   */
+  function forceRelease(): void {
+    if (mask !== 0) {
+      mask = 0;
+      sync();
     }
-
+    endHold();
     ctx.settleAfter(IDLE_DONE_MS);
   }
 
-  ctx.on(ctx.surface, 'pointerdown', press as EventListener);
+  /**
+   * 滚轮朝哪边。`''` 是"这一轮还没滚过" —— 图上什么都不亮。
+   *
+   * 状态只活这一次测量:鼠标图是工厂每次开测新建的,`wheelDir` 也随工厂重建。
+   * 所以这里不写清除逻辑,`finish()` 之后那个方向**留着**是对的 ——
+   * 和"按过的键还亮着"同一件事,它就是这一轮的读数。
+   */
+  let wheelDir: '' | 'up' | 'down' = '';
 
-  const pointer = asPointer(seed);
-  if (pointer) press(pointer);
+  function onWheel(event: WheelEvent): void {
+    // 不拦的话页面会跟着滚,装置面从指针底下溜走 —— 和「滚轮」那一页同一条理由,
+    // 那边量滚动时记的正是这件事,在卡片上是纯污染。所以要 `passive: false`。
+    event.preventDefault();
+
+    const step = normalizeWheelDelta(event.deltaY, event.deltaMode);
+    // 零位移的那一次没有方向,不翻状态(`summarizeScroll` 也跳过它,两个口径一致)
+    if (step !== 0) {
+      wheelDir = step > 0 ? 'down' : 'up';
+      mouse.dataset.wheel = wheelDir;
+    }
+    ctx.settleAfter(IDLE_DONE_MS, mask !== 0);
+  }
+
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointerleave']) {
+    ctx.on(ctx.surface, type, handle as EventListener);
+  }
+  ctx.on(ctx.surface, 'pointercancel', forceRelease as EventListener);
+  ctx.on(window, 'blur', forceRelease);
+  // 滚轮也在这张卡上(`DEVICES` 的 wake 里两条都有),但判据和上面四条完全不同:
+  // 滚动**不产生 `buttons` 的边沿**,它只翻方向,不进 `mask`、不动计数。
+  ctx.on(ctx.surface, 'wheel', onWheel as EventListener, { passive: false });
+
+  // 开局先清一遍:读数行不在装置面里(`replaceChildren` 换不掉它),
+  // 上一轮留下的数会一直挂在那儿,不写就等于"这一轮已经测出来了"。
+  ctx.write('gap', '—');
+  ctx.write('held', '—');
+  sync();
+
+  // 唤醒它的那一次交互就是第一次,不补这一下会白丢一次。
+  // seed 是两条路里的一条:按下唤起的就是第一次按下,滚轮唤起的就是第一次滚动。
+  if (seed instanceof WheelEvent) onWheel(seed);
+  else {
+    const pointer = asPointer(seed);
+    if (pointer) handle(pointer);
+  }
 };
 
 /** 卡片上那个 5 秒档。整页那边还有 10 / 30 秒,见 `cps-test.astro` 的 `DURATIONS`。 */
@@ -405,100 +550,6 @@ const cpsMini: MiniFactory = (ctx, seed) => {
 
   const pointer = asPointer(seed);
   if (pointer) press(pointer);
-};
-
-/**
- * 长按。给已经按住的秒数,以及**疑似**瞬断次数。
- *
- * 秒数取 `performance.now()` 而不是事件时间戳:按住不动不产生任何事件,
- * 只有墙钟知道过了多久。而事件流那一份仍用 `event.timeStamp`,交给
- * `analyzeDragEpisodesByButton` 去推每个键自己的边沿。
- */
-const holdMini: MiniFactory = (ctx, seed) => {
-  const events: DragEvent[] = [];
-  const big = bigNumber(ctx.live);
-  const captionNode = caption(ctx.live);
-  big.textContent = '0.0';
-  captionNode.textContent = '按住不动';
-
-  let heldSince = 0;
-  let holding = false;
-
-  function record(event: PointerEvent, kind: DragEvent['kind']): void {
-    events.push({
-      t: event.timeStamp,
-      x: event.clientX,
-      y: event.clientY,
-      kind,
-      buttonMask: maskFromButtons(event.buttons),
-    });
-  }
-
-  function onDown(event: PointerEvent): void {
-    record(event, 'down');
-    if (!holding) {
-      holding = true;
-      heldSince = performance.now();
-      try {
-        ctx.surface.setPointerCapture(event.pointerId);
-      } catch {
-        /* 已在捕获状态 */
-      }
-    }
-  }
-
-  function onMove(event: PointerEvent): void {
-    if (event.buttons === 0) return;
-    record(event, 'move');
-  }
-
-  function onUp(event: PointerEvent): void {
-    record(event, 'up');
-    // 组合键下松开一个键不会有 pointerup,所以判据是"还有没有键按着",
-    // 不是"收到了 pointerup"。
-    if (event.buttons !== 0) return;
-    release();
-  }
-
-  function release(): void {
-    if (!holding) return;
-    holding = false;
-
-    const seconds = (performance.now() - heldSince) / 1000;
-    big.textContent = format(seconds, 1);
-    ctx.write('held', format(seconds, 1));
-
-    let breaks = 0;
-    for (const episodes of analyzeDragEpisodesByButton(events).values()) {
-      for (const episode of episodes) breaks += episode.drops;
-    }
-    // 这里收到过事件,所以 0 是真的 0,不是"没测到" —— 不用破折号
-    ctx.write('breaks', String(breaks));
-    captionNode.textContent = breaks > 0 ? '按住期间疑似断过' : '全程没有断开';
-
-    ctx.finish();
-  }
-
-  const tick = createTicker(80, () => {
-    if (!holding) return;
-    const seconds = (performance.now() - heldSince) / 1000;
-    big.textContent = format(seconds, 1);
-    ctx.write('held', format(seconds, 1));
-  });
-  ctx.onCleanup(tick);
-
-  // 拖到窗口外面松手、或者切走标签页,pointerup 可能永远不来。
-  // 不兜住的话秒数会一直涨下去,看起来像卡死了。
-  ctx.on(window, 'blur', () => release());
-
-  ctx.on(ctx.surface, 'pointerdown', onDown as EventListener);
-  ctx.on(ctx.surface, 'pointermove', onMove as EventListener);
-  ctx.on(ctx.surface, 'pointerup', onUp as EventListener);
-  // 取消(设备被拔掉、手势被系统接管)时报不了松开,但它确实结束了
-  ctx.on(ctx.surface, 'pointercancel', () => release());
-
-  const pointer = asPointer(seed);
-  if (pointer) onDown(pointer);
 };
 
 /**
@@ -626,10 +677,13 @@ const pollingMini: MiniFactory = (ctx) => {
  * 每种装置一张表。漏一项 `typecheck` 就会报错(见文件头)。
  */
 const DEVICES: Record<Exclude<MiniKind, null>, MiniDevice> = {
-  buttons: { wake: ['pointerdown'], run: buttonsMini },
-  'double-click': { wake: ['pointerdown'], run: doubleClickMini },
+  /*
+   * 两条 wake **都要**:这张卡上滚轮也是一等公民,只挂 `pointerdown` 的话
+   * 空态下滚滚轮什么都不会发生 —— 而"空态"正是它第一次被用到的样子。
+   * (`wheel` 加进来的代价只有一条:卡片装置面上的滚动不再带动页面,那是想要的。)
+   */
+  'mouse-buttons': { wake: ['pointerdown', 'wheel'], run: mouseButtonsMini },
   cps: { wake: ['pointerdown'], run: cpsMini },
-  hold: { wake: ['pointerdown'], run: holdMini },
   wheel: { wake: ['wheel'], run: wheelMini },
   trail: { wake: ['pointermove'], run: trailMini },
   polling: { wake: ['pointermove'], run: pollingMini },
