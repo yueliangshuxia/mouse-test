@@ -54,6 +54,7 @@ import {
   type ScrollNotch,
 } from './analysis';
 import { BUTTONS, eachButtonEdge, maskFromButtons } from './mouse-buttons';
+import { MOUSE_FIGURE_SVG } from './mouse-figure';
 import { defaultMiniMode, type MiniCard, type MiniKind } from './mini-cards';
 import { createTrailRenderer, observeResize } from './renderer';
 import { createMoveSampler } from './sampler';
@@ -214,46 +215,6 @@ function asPointer(event: Event): PointerEvent | null {
 // ---------------------------------------------------------------------------
 
 /**
- * 鼠标的俯视图。五个可亮的部分各带一个 `data-mb`,值是**本站编号**
- * (见 `mouse-buttons.ts`:0 左 / 1 中 / 2 右 / 3 侧键4 / 4 侧键5)。
- *
- * 编号既是 `event.button`、又是本站位掩码里的位序,所以 `sync()` 里
- * `mask & (1 << code)` 和 `[data-mb="${code}"]` 说的是同一个键,不需要换算。
- *
- * **这是个固定字面量**,没有任何用户数据拼进来,所以走 `innerHTML` 是安全的。
- * 它**只能**在 `ctx.live` 里造出来 —— `start()` 会 `surface.replaceChildren(live)`,
- * 页面渲染进去的东西一开测就被抹掉。因此它的样式也**只能**在 `global.css`:
- * 运行期 `createElement` 出来的节点拿不到页面 `<style>` 的 `data-astro-cid`。
- *
- * ## 那两支滚轮箭头
- *
- * 滚轮**没有**自己的读数槽,方向就画在这张图上:轮子亮起来,箭头指出朝哪边。
- * 参考图(另一家的「按键与滚轮」)就是这套说法,而且它比一个 `↓` 字符更值 ——
- * 读数行那四格留给数,方向本来就不是有量纲的东西。
- *
- * **两条 path 都常驻,靠 `.mini-mouse[data-wheel]` 选中其中一条显示**(默认
- * `opacity: 0`)——和 `[data-mb]` 那五个部件同一套"数据在属性上、长相在
- * `global.css` 里"的分工,不靠增减节点。没滚过就什么都不亮,这是全站
- * "没数据不画空槽"的同一条。
- *
- * 两支箭头各 8×8,一上一下:**上箭头在轮子上方(y 8–16)、下箭头跨在按键分缝上
- * (y 38–46,分缝在 y=44)** —— 下半身那点空间只有 8 个单位,而跨分缝正好是参考图
- * 里那支下箭头的长相。viewBox 一个单位都没动,所以那几个量出来的高度
- * (`.mini-mouse` 的 88 / 126 / 52)全部照旧。
- */
-const MOUSE_SVG = `
-<svg class="mini-mouse" viewBox="2 2 52 88" aria-hidden="true" focusable="false">
-  <rect class="mini-mouse__body" x="12" y="4" width="40" height="84" rx="14" />
-  <path class="mini-mouse__part" data-mb="0" d="M32 4 L26 4 A14 14 0 0 0 12 18 L12 44 L32 44 Z" />
-  <path class="mini-mouse__part" data-mb="2" d="M32 4 L38 4 A14 14 0 0 1 52 18 L52 44 L32 44 Z" />
-  <rect class="mini-mouse__part mini-mouse__wheel" data-mb="1" x="28.5" y="20" width="7" height="16" rx="3.5" />
-  <rect class="mini-mouse__part" data-mb="3" x="4" y="38" width="10" height="13" rx="3" />
-  <rect class="mini-mouse__part" data-mb="4" x="4" y="56" width="10" height="13" rx="3" />
-  <path class="mini-mouse__wheel-arrow" data-wheel-dir="up" d="M32 8 L28 16 L36 16 Z" />
-  <path class="mini-mouse__wheel-arrow" data-wheel-dir="down" d="M32 46 L28 38 L36 38 Z" />
-</svg>`;
-
-/**
  * 按键 / 滚轮 / 长按 / 双击 —— 首页并成一张卡的那台装置。
  *
  * 四样一起出:**逐键计数**(鼠标图上按哪瓣亮哪瓣,下面一排 chip 显示各自的次数)、
@@ -292,8 +253,9 @@ const mouseButtonsMini: MiniFactory = (ctx, seed) => {
   const counts = new Map<number, number>();
 
   // ---- 鼠标图 ----
+  // `/button-test/` 画的是同一只(`mouse-figure.ts`),改那边就是改这里。
   const holder = document.createElement('div');
-  holder.innerHTML = MOUSE_SVG;
+  holder.innerHTML = MOUSE_FIGURE_SVG;
   const mouse = holder.firstElementChild as SVGElement;
   ctx.live.appendChild(mouse);
 

@@ -117,11 +117,16 @@ export const CONFIDENCE_LABEL: Record<Confidence, string> = {
 export const TOOLS: Tool[] = [
   {
     slug: 'button-test',
-    name: '鼠标按键测试',
+    /*
+     * 页面名字和首页那张合并卡的 `faceName` 是同一句话 —— 两边说的是同一件事。
+     * `slug` 不动(链接不会 404),`navLabel` 也**一个字都不能动**:报头那笔宽度账
+     * 是按量出来的那串短名算的,见本文件末尾那段。
+     */
+    name: '鼠标按键 / 滚轮 / 长按 / 双击测试',
     navLabel: '按键',
-    title: '鼠标按键测试 - 在线检测左右中键与侧键是否失灵',
+    title: '鼠标按键 / 滚轮 / 长按 / 双击测试 - 在线检测左右中键与侧键是否失灵',
     description:
-      '免费在线鼠标按键测试,实时检测左键、右键、中键及侧键的点击响应,记录按下次数与按住时长,帮助判断微动开关是否老化。无需安装任何软件。',
+      '免费在线鼠标测试:实时检测左键、右键、中键及侧键的点击响应,记录按下次数、按住时长、双击间隔与滚轮方向,帮助判断微动开关是否老化。无需安装任何软件。',
     confidence: 'exact',
     group: 'diagnostic',
     ready: true,

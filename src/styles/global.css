@@ -1048,6 +1048,15 @@ html:has(.site-dock:not([hidden])) .site-footer {
   color: var(--accent);
 }
 
+/*
+ * 判定为**故障**的那一格读数。和 `--primary` 是同一个位置的两个档,互斥。
+ * 纸面的 `--danger` 是赭红(`#c2410c`),不是井里那个亮红 —— 这一格住在纸面上,
+ * 走纸面的语义色,和 `.badge--poor`、判定横幅同源。
+ */
+.stat--fault .stat__value {
+  color: var(--danger);
+}
+
 .stat__hint {
   color: var(--text-faint);
   font-size: 0.75rem;
@@ -1173,64 +1182,157 @@ html:has(.site-dock:not([hidden])) .site-footer {
   color: var(--accent);
 }
 
-/* ---------- 按键测试 ---------- */
+/* ---------- 按键 / 滚轮 / 长按 / 双击 ---------- */
 
 /*
- * 五张按键卡片本身就是**实时指示灯**,所以整块是仪器窗。
- * button-test.astro 没有 <style> 块,这里的每一条都只能在 global.css 里改。
- */
-/*
- * 五个按键的示意。
+ * 这一页的测试面不是一块 380px 的空框,而是**一只鼠标 + 五块按键牌**。
+ * button-test.astro 没有 <style> 块,这里每一条都只能在 global.css 里改。
  *
- * 列宽下限取 110px 而不是更大,是为了让**五张卡在工作台的窄栏里仍然排成一行**
- * ——150px 时 646px 的栏只放得下 3 张,于是变成 3+2(左右不对称),右侧还空出一片。
- * 110px 在 646px 栏里正好 5 列(5×110+4×10 = 590 ≤ 626),在 420px 的窄屏里
- * 是 3 列,都比原来好。卡片内容只有两行小字加一个数,110px 装得下。
+ * 整块就是仪器窗:按下的那一瓣亮、对应的按键牌变绿,它们都是**正在出数的那个面**,
+ * 按全站那句判据(它是"波形的实时呈现",还是文字与结论?)该落在井里。
+ *
+ * 高度交还给内容 —— `.test-area` 那条 380px 是给画轨迹/看形状的面留坐标系用的,
+ * 这里没有坐标系要留,**连刻度栅格也一起关掉**(理由在下面那一条里)。
+ *
+ * **`padding` 加在这一条修饰类上,不加到 `.test-area` 上。** 那条规矩的理由是
+ * `renderer.ts` 拿外框 `getBoundingClientRect()` 定画布原点,而原点在
+ * `border-box` 角落、不随 padding 移动 —— 本页没有画布,但"加间距只用外层容器 +
+ * gap"这句话在这里照样成立,破一次就会有人照着破第二次。
+ *
+ * **竖排(鼠标居中在上、按键牌一行在下),不是横排。** 横排试过一版:鼠标被顶到
+ * 最左、牌队飘在右边,两边各空出一大块,而且一排牌被压得只剩 100px 上下。
+ * 鼠标是这一页的主角,给它自己一行。
  */
-.mouse-diagram {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 10px;
-  padding: 10px;
-  margin: 0;
+.test-area--figure {
+  height: auto;
+  min-height: 0;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+
+  /*
+   * **这里不要刻度栅格。** `.test-area` 自带的那套是给"画轨迹/看形状的面"
+   * 提供坐标系的(见 `.test-area` 那条注释),而这一面是**一只鼠标图 + 五块按键牌**,
+   * 没有任何坐标要读。
+   *
+   * 更硬的理由是**它会把鼠标吃掉**,这是量出来的:井底 `rgb(16,22,28)`,
+   * 鼠标身 `--bg-elevated` 在井里是 `rgb(24,33,42)` —— 两者只有 **1.12:1**,
+   * 和 CLAUDE.md 里那条"井与纸面近黑区间靠填充分不开"是同一个量级;真正画出
+   * 轮廓的只有那圈 1.6px 的 `--border-strong` 描边。而栅格线(0.07 白)压在井底上
+   * 是 **`rgb(33,38,44)`,比鼠标身还亮** —— 于是鼠标在读图的人眼里只剩
+   * "一块没有栅格的补丁",旁边那圈描边反而成了栅格的一部分。
+   *
+   * 首页那张卡上的同一只鼠标**没有这个问题,因为卡的井是平的**
+   * (实测 `.mini-device--running` 的 `background-image` 是 `none`)。所以这条不是
+   * "顺手关掉装饰",是把这一页的面**恢复成和卡片同一个面**。
+   */
+  background-image: none;
 }
 
-.mouse-button {
+/*
+ * 页面上的鼠标尺寸。**只有这一条是页面自己的** —— 卡片那三处尺寸全部挂在
+ * `.mini-device[data-mini-kind='mouse-buttons']` 上,各走各的,互不影响。
+ */
+.test-area--figure .mouse-figure {
+  height: 200px;
+}
+
+/*
+ * 五块按键牌。**这是老「按键测试」那五张卡的复刻**,不是首页卡片上那一排
+ * `mini-chip` —— 那两样东西看着像,尺寸差着一倍多(牌高 ~95,chip 高 36),
+ * 而且各有各的用途:chip 是缩在卡片里的一枚计数器,牌是这一页的主要操作面。
+ * 共用一个类名就得靠修饰类把每一处尺寸都覆写一遍,不如各写一份。
+ *
+ * 列宽下限 96px:1440 下是 5 列(5×96+4×10 = 520 ≤ 614),420 下是 **3 列**
+ * (3×96+2×10 = 308 ≤ 333),排成 3+2。取 110 的话 420 只剩 2 列,五块牌要占
+ * 三行,末尾孤零零吊着一块。**分母是面板的内边距盒,不是视口宽** —— 想调这个数
+ * 先量 `.test-area--figure` 的 clientWidth。
+ */
+.mouse-keys {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.mouse-key {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 18px;
+  padding: 14px 8px;
   text-align: center;
+  color: var(--text-dim);
   transition: background 0.06s linear, border-color 0.06s linear;
 }
 
-.mouse-button[data-active='true'] {
+/*
+ * 这一条**特意把颜色也一并改掉**(写 `color` 而不是只管底和框),下面那个数字
+ * 才能靠**继承**跟着变 —— 见 `.mouse-key__n` 那条"刻意不写 color"。
+ */
+.mouse-key[data-down='true'] {
   background: var(--accent-dim);
   border-color: var(--accent);
+  color: var(--accent);
 }
 
-.mouse-button__name {
+/*
+ * **故障的那一块把绿整个换成红**,和鼠标图上那一瓣是同一条规矩。
+ * (0,3,0) 压过上面那条 (0,2,0),不依赖源码顺序。
+ */
+.mouse-key[data-down='true'][data-fault='true'] {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.mouse-key__name {
   font-size: 0.95rem;
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
-.mouse-button__code {
+.mouse-key__note {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--text-faint);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
-.mouse-button__count {
+/*
+ * 故障:红替绿。这一条走**两个类**写成 (0,2,0),因为 `.mouse-key__note` 也是
+ * (0,1,0) —— 同特异度就只能靠源码顺序,而这条是"故障要看得见"的判据,
+ * 不该建立在"我恰好写在后面"上。
+ */
+.mouse-key__note.mouse-key__note--fault {
+  color: var(--danger);
+}
+
+/*
+ * 牌上那个计数。**刻意不写 `color`** —— 和卡片上那个 `.mini-chip__n` 同一个道理:
+ * 写死一个色的话,「正按着」那一刻牌变绿而数字留在纸面色,同一块牌里两个颜色。
+ * **这一条不是风格问题,是继承的规矩**:子元素自己声明了 `color` 就赢过父元素的,
+ * 上面那条 `[data-down='true'] { color: var(--accent) }` 便再也传不下来 ——
+ * 而 `.mouse-key` 上那句 `color: var(--text-dim)` 正是为这条继承准备的底。
+ */
+.mouse-key__n {
   font-family: var(--font-mono);
-  font-size: 1.5rem;
   font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
+  font-size: 1.5rem;
+  line-height: 1.2;
 }
 
-.mouse-button[data-active='true'] .mouse-button__count {
-  color: var(--accent);
+/*
+ * 间隔短到人手做不到。朱砂是全站三个有颜色的地方之一,专门给"故障"。
+ *
+ * 这一条是**直接写在数字上**的,而「正按着」那个绿是靠继承来的 ——
+ * 直接声明压过继承,所以手还按着、同时又抖了一次的时候,数字是红的(
+ * 边框和底仍然是绿的,和卡片上"chip 绿框 + 红数字"是同一个长相)。
+ */
+.mouse-key__n--chatter {
+  color: var(--danger);
 }
 
 /* ---------- 柱状图 / 色带 / 坐标轴 ---------- */
@@ -1614,7 +1716,7 @@ input[type='number'] {
   }
 
   /* 鼠标 88 → 126。宽自动跟到 ~74.5 */
-  .mini-card--wide .mini-device[data-mini-kind='mouse-buttons'] .mini-mouse {
+  .mini-card--wide .mini-device[data-mini-kind='mouse-buttons'] .mouse-figure {
     height: 126px;
   }
 
@@ -1957,34 +2059,60 @@ input[type='number'] {
 }
 
 /*
- * 卡片上的鼠标俯视图。五个可亮的部分由 `mini-devices.ts` 的 `MOUSE_SVG` 给出,
+ * 鼠标俯视图。**两个消费者**:首页那张合并卡(建在 `ctx.live` 里)和
+ * `/button-test/` 这一页(写在标记里)。字面量在 `mouse-figure.ts`,
  * `data-mb` 是**本站编号**(见 `mouse-buttons.ts`)。
  *
- * 它建在 `ctx.live` 里(装置面一开测就被 `replaceChildren` 换掉),所以这些规则
- * **只能待在 `global.css`**:运行期 `createElement` 出来的节点身上没有页面
+ * 卡片那半边只能待在这里:运行期 `createElement` 出来的节点身上没有页面
  * `<style>` 的 `data-astro-cid`,写在那儿的规则一条都不会命中,而且是静默的
  * (元素在、事件在、尺寸也对,就是没有长相 —— 瞄准页的靶子踩过)。
+ *
+ * **高度不在这一条里。** 两个消费者要的尺寸差着好几倍,而卡片那三条尺寸规则
+ * 全部挂在 `.mini-device[data-mini-kind='mouse-buttons']` 这个钩子上 ——
+ * 挂在共用的 `.mouse-figure` 上,改名那一刻本页就会跟着卡片一起变成 88px。
+ * 共用部分只留"怎么画",不留"多大"。
  *
  * 填色一律走**会被 `.well` 重映射的通用令牌**,不写死颜色 —— 这就是它一进井
  * 自动变绿的原因,不需要第二套配色。
  */
-.mini-mouse {
-  height: 88px;
+.mouse-figure {
   width: auto;
   flex: none;
 }
 
-.mini-mouse__body,
-.mini-mouse__part {
+/* 卡片里的基高 (0,2,0)。窄档另有一条同特异度的收回,靠源码顺序取胜 */
+.mini-device[data-mini-kind='mouse-buttons'] .mouse-figure {
+  height: 88px;
+}
+
+.mouse-figure__body,
+.mouse-figure__part {
   fill: var(--bg-elevated);
   stroke: var(--border-strong);
   stroke-width: 1.6;
 }
 
 /* 按下的那一瓣。绿是仪器窗的,而这只鼠标只在井里出现 */
-.mini-mouse__part[data-down='true'] {
+.mouse-figure__part[data-down='true'] {
   fill: var(--accent-dim);
   stroke: var(--accent);
+}
+
+/*
+ * **查出来有故障的那一瓣,亮起来是红的。**
+ *
+ * 绿是本站在"这一瓣正在出数"时唯一的长相,所以"红替绿"这句话必须落在**同一处**:
+ * 用户已经学会"亮起来 = 这个键在工作",故障时那一瓣换个颜色,不需要第二套解释。
+ * 井里 `--danger-bg` 是 `#3a1d1d`、`--danger` 是 `#f87171`,和绿那一对的深浅关系
+ * 完全一致(暗底亮边),所以两种状态在视觉上是**同一个形状的两种填色**,不是两套东西。
+ *
+ * (0,3,0) 压过上面那条 (0,2,0)。**`data-fault` 是常驻的**(`syncVisuals()` 每次都写),
+ * 所以"故障键没按下时也不亮",亮不亮仍然只由 `data-down` 说了算 —— 和「没数据不画空槽」
+ * 是同一条:面板空着的时候不该有一块红在那儿冒充读数。
+ */
+.mouse-figure__part[data-down='true'][data-fault='true'] {
+  fill: var(--danger-bg);
+  stroke: var(--danger);
 }
 
 /*
@@ -1998,13 +2126,13 @@ input[type='number'] {
  * 「没数据不画空槽」落到 SVG 上的样子:空态下漂着两支灰箭头会被读成"组件坏了",
  * 而不是"还没滚"。
  */
-.mini-mouse__wheel-arrow {
+.mouse-figure__wheel-arrow {
   fill: var(--accent);
   opacity: 0;
 }
 
-.mini-mouse[data-wheel='up'] [data-wheel-dir='up'],
-.mini-mouse[data-wheel='down'] [data-wheel-dir='down'] {
+.mouse-figure[data-wheel='up'] [data-wheel-dir='up'],
+.mouse-figure[data-wheel='down'] [data-wheel-dir='down'] {
   opacity: 1;
 }
 
@@ -2018,9 +2146,23 @@ input[type='number'] {
  * 这里说了算,而且**不依赖源码顺序**。键帽那两档(`data-tested` / `data-held`)的
  * 处境正好相反:那两处特异度相同,顺序就是判据,顺序反了会一起塌掉。
  */
-.mini-mouse[data-wheel] .mini-mouse__wheel {
+.mouse-figure[data-wheel] .mouse-figure__wheel {
   fill: var(--accent-dim);
   stroke: var(--accent);
+}
+
+/*
+ * 滚轮那一支的故障:**没有复用 `data-fault`**。
+ *
+ * 滚轮就是中键,图上同一块 `[data-mb='1']`,而"中键连击"和"滚轮跳格"是**两件不同的事**,
+ * 挤在同一个属性上会互相抹掉对方(中键连击的状态会被滚轮那一次覆盖,反过来也一样)。
+ * 所以滚轮故障挂在 `.mouse-figure` 自己的 `data-wheel-fault` 上,和 `data-wheel` 作伴。
+ *
+ * (0,4,0) 压过上面那条 (0,3,0)。
+ */
+.mouse-figure[data-wheel][data-wheel-fault='true'] .mouse-figure__wheel {
+  fill: var(--danger-bg);
+  stroke: var(--danger);
 }
 
 /*
@@ -2660,6 +2802,19 @@ code {
     height: 260px;
   }
 
+  /*
+   * 上面那条会把**本页的测试面一起钉死** —— `.test-area--figure` 的 `height: auto`
+   * 和它同为 (0,1,0) 而源码靠前,所以窄屏下面板停在 260px,而它的内容要 375px。
+   * 溢出是**静默的**:`.test-area` 有 `overflow: hidden`,多出来的部分直接裁掉,
+   * 看上去像"五块按键牌少排了一行",报错、构建、其余用例都不响。
+   *
+   * 用**两个类**写成 (0,2,0),刻意不靠源码顺序 —— 这条比 `.mini-device[data-mini-kind=…]`
+   * 那两处覆写更稳:那两处靠 (0,2,0) 压 (0,1,0),而这里两边同源同特异度。
+   */
+  .test-area.test-area--figure {
+    height: auto;
+  }
+
   .stat-grid {
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   }
@@ -2718,7 +2873,14 @@ code {
     height: 140px;
   }
 
-  .mini-mouse {
+  /*
+   * 第三处、也是最后一处鼠标尺寸。**必须显式挂回卡片那个钩子**:上面那条基高
+   * `[data-mini-kind='mouse-buttons'] .mouse-figure` 是 (0,2,0),这里同样是
+   * (0,2,0) 而源码靠后,所以它压得住;写成裸 `.mouse-figure` 的话特异度只有
+   * (0,1,0),**压不住基高**(这条会静默失效,卡片窄档仍是 88px),
+   * 却会顺手把 `/button-test/` 那一页的鼠标也改成 52px。
+   */
+  .mini-device[data-mini-kind='mouse-buttons'] .mouse-figure {
     height: 52px;
   }
 

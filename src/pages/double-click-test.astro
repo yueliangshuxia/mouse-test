@@ -99,6 +99,13 @@ const jsonLd = {
           在这里点击,建议先正常速度单击十几次,再故意快速双击几次
         </div>
       </div>
+
+      <h2>间隔记录</h2>
+      <p class="prose tight">
+        最近 20 次点击的间隔,新的在上面。<span class="mark-danger">红色</span>的那几条
+        就是微动在抖——如果你并没有连续快速点击却出现了红色条目,那只鼠标的微动已经开始老化了。
+      </p>
+      <ul class="log-list" id="log"></ul>
     </div>
 
     <div class="workbench__readout">
@@ -125,13 +132,6 @@ const jsonLd = {
       </div>
     </div>
   </div>
-
-  <h2>间隔记录</h2>
-  <p class="prose tight">
-    最近 20 次点击的间隔,新的在上面。<span class="mark-danger">红色</span>的那几条
-    就是微动在抖——如果你并没有连续快速点击却出现了红色条目,那只鼠标的微动已经开始老化了。
-  </p>
-  <ul class="log-list" id="log"></ul>
 
   <section class="prose">
     <h2>怎么测才有意义</h2>
@@ -178,6 +178,18 @@ const jsonLd = {
   <style>
     #area {
       cursor: crosshair;
+    }
+
+    /*
+     * 「间隔记录」搬进 `.workbench__stage` 之后,顶上还挂着 h2 自己的 `margin: 3.5rem`
+     * ——它在 flex 列里**不会和 gap 合并**,两条叠起来就是 76px 的空档,
+     * 会把刚搬上来的这块又推下去。
+     * 只顶掉外边距:那条 1px 上边框和 padding 留着,正好把装置和这块记录隔开,
+     * 装置是仪器窗、日志是纸面上的文字,那道线画在这儿是对的。
+     * (长按拖拽页的同一条规则,两页说的是同一件事。)
+     */
+    .workbench__stage > h2 {
+      margin-top: 0;
     }
   </style>
 

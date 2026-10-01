@@ -80,6 +80,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 | `src/lib/capabilities.ts` | 启动时能力探测,产出面向用户的告警。收一个 `CapabilityOptions` —— 目前只有 **`timing`** 一个开关,问的是"这一页的结论吃不吃**两个事件之间差多久**";`false` 时四条与时间戳精度有关的告警全部不发(手稳度 / 涂鸦板 / 换算器 / 坏点 / 刷新率目视这五页都不该收) | 真机手测 |
 | `src/lib/side-buttons.ts` | 拦截侧键触发的前进/后退。收一个可选的 `scope`:给了就只在"按下点落在它里面"时拦(首页),不给就是整页(工具页) | 真机手测 |
 | `src/lib/mouse-buttons.ts` | 按键编号 ↔ 位掩码的翻译表(`BUTTONS` / `BIT_FOR_CODE` / `maskFromButtons`),`button-test` 与 `hold-drag-test` 共用 | `tests/mouse-buttons.test.ts` |
+| `src/lib/mouse-figure.ts` | 鼠标俯视图那一段**内联 SVG 字面量**(`MOUSE_FIGURE_SVG`),`/button-test/` 写在标记里、首页那张合并卡由 `mouseButtonsMini` 用 `innerHTML` 造进 `ctx.live`。**两个消费者的尺寸不同,所以高度不在共用规则里** —— 卡片的三个高度挂在 `.mini-device[data-mini-kind='mouse-buttons']` 上,页面的挂 `.test-area--figure` 上 | `tests/mouse-figure.test.ts` |
 | `src/lib/ruler.ts` | **"沿尺子推一段固定距离"的手势流程**,DPI 测试与加速度测试共用 | 真机手测 |
 | `src/lib/keyboard-layout.ts` | 键位布局数据,键盘页的 frontmatter(画键帽)和 `<script>`(`code` → 标签)共用 | — |
 | `src/lib/theme.ts` | 主题常量。同上,**被两个世界同时消费**:`<head>` 里那个阻塞脚本(不能 `import`)和 `ui.ts` 的开关 | — |
@@ -105,7 +106,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 
 `saveBest(key, value, options)` 的第三位是**选项对象**(`{ lowerIsBetter: true }`),不是位置布尔——读出 `saveBest(k, v, true)` 的调用点没人知道那个 `true` 是什么。反应时间是**越小越好**,所以它必须传;传错这一位**两个方向都是静默的**:纪录要么永远不更新,要么每次都被覆盖。`tests/ui-best.test.ts` 用 `vi.stubGlobal('localStorage', …)` 钉着这条,也是全仓库**第一个 import `ui.ts` 的单测**(`ui.ts` 模块级不碰 DOM,只在 `try` 里摸 `localStorage`,所以 node 环境够用,不需要 jsdom)。
 
-**运行期用 `document.createElement()` 造出来的节点,拿不到页面 `<style>` 的样式。** Astro 的 `<style>` 默认作用域化,它给选择器挂的那个 `.foo[data-astro-cid-x]` 里的 cid 是**构建时**加到模板元素上的,而脚本造出来的节点身上没有这个属性 —— 规则一条都不命中,而且**是静默的**:元素还在、事件还在、`getBoundingClientRect()` 照样准,只是没有长相。瞄准页的 `.aim-target` 就踩过:三个靶子在深色井里是**透明的**(`position: static`、`border: 0 none`),被 `.test-area` 的 grid 排成一列贴在左上角,一个都看不见,而命中判定完全正常 —— 也就是"游戏能玩,只是没有靶子"。**截图一眼就看出来了,读代码一行都没看出来。** 两个出口:规则写进 `global.css`(它的规则不带 cid,所以 `ui.ts` 拼的 `.notice` 住在那里),或者在页面里写 `:global(.aim-target)`(只有这一页用就选这个)。**凡是脚本 `createElement` 出来的类名,先去 `global.css` 里确认它真的在。** 首页那张合并卡的鼠标图和那排 chip 是**同一个坑的第二个实例**(它们由 `mouseButtonsMini` 造进 `ctx.live`,而 `start()` 会 `surface.replaceChildren(live)` —— 想靠页面渲染进去是留不住的)。所以 `.mini-mouse*` / `.mini-chip*` 全部住在 `global.css`,一条页面 `<style>` 都够不着它们。
+**运行期用 `document.createElement()` 造出来的节点,拿不到页面 `<style>` 的样式。** Astro 的 `<style>` 默认作用域化,它给选择器挂的那个 `.foo[data-astro-cid-x]` 里的 cid 是**构建时**加到模板元素上的,而脚本造出来的节点身上没有这个属性 —— 规则一条都不命中,而且**是静默的**:元素还在、事件还在、`getBoundingClientRect()` 照样准,只是没有长相。瞄准页的 `.aim-target` 就踩过:三个靶子在深色井里是**透明的**(`position: static`、`border: 0 none`),被 `.test-area` 的 grid 排成一列贴在左上角,一个都看不见,而命中判定完全正常 —— 也就是"游戏能玩,只是没有靶子"。**截图一眼就看出来了,读代码一行都没看出来。** 两个出口:规则写进 `global.css`(它的规则不带 cid,所以 `ui.ts` 拼的 `.notice` 住在那里),或者在页面里写 `:global(.aim-target)`(只有这一页用就选这个)。**凡是脚本 `createElement` 出来的类名,先去 `global.css` 里确认它真的在。** 首页那张合并卡的鼠标图和那排 chip 是**同一个坑的第二个实例**(它们由 `mouseButtonsMini` 造进 `ctx.live`,而 `start()` 会 `surface.replaceChildren(live)` —— 想靠页面渲染进去是留不住的)。所以 `.mouse-figure*` / `.mini-chip*` 全部住在 `global.css`,一条页面 `<style>` 都够不着它们。
 
 **贯穿全站的原则:测不准就明说,不要给一个看起来精确的假数字。** 这是这类工具站的信誉所在。
 
@@ -159,7 +160,8 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - 放不进:**DPI、加速度**(要沿尺子推固定物理距离,卡片里没有那把尺子)、**键盘**(首页的按键会滚动页面、撞浏览器快捷键)。这三张卡的装置槽里放的是一段**说明**,不是空框 —— 说清楚为什么放不进来,再指向那一页。
 - **四张并成一张是用户定的**,不是没来得及做。理由是那张卡量到的几样东西(按下哪个键 / 按住多久 / 双击间隔)本来就是同一串 pointer 事件推出来的,拆成几张卡等于让用户按几种方式按同一个键。**被顶掉的四页照旧存在**:小注末尾那行「独立页面:」就是它们的入口,少那行就是几个没有首页入口的孤页。
 - **滚轮是后来**整页**并进来的**:`covers` 里现在**有** `scroll-test`,方向、格数、方向带三样都上卡 —— 卡名和 `covers` 这次说的是同一件事,不再有"卡名写了滚轮、`covers` 没写"那种半上不上的状态。原来的「滚轮」卡和它那个工厂(`wheelMini`)一起删掉了(`MiniKind` 里没有 `'wheel'`),那三件事并进 `mouseButtonsMini` 的 `onWheel`,`normalizeWheelDelta` / `summarizeScroll` / `markScrollGlitches` 一行没改。**别去找 `wheelMini`。**
-  方向**仍然不占读数槽**:轮子亮起来 + 一支箭头上/下,两样都长在**那张鼠标图**上(`MOUSE_SVG` 的 `data-wheel-dir`,状态挂在 `.mini-mouse[data-wheel]`),因为方向不是有量纲的量,给它一格等于把它说成一件可以比大小的东西。腾出来的那一格给了 `格数`,再往右是 `最近 10 次`那条方向带。
+  方向**仍然不占读数槽**:轮子亮起来 + 一支箭头上/下,两样都长在**那张鼠标图**上(`mouse-figure.ts` 的 `data-wheel-dir`,状态挂在 `.mouse-figure[data-wheel]`),因为方向不是有量纲的量,给它一格等于把它说成一件可以比大小的东西。腾出来的那一格给了 `格数`,再往右是 `最近 10 次`那条方向带。
+  **这张卡的整页版是 `/button-test/`**(见「按键 / 滚轮 / 长按 / 双击那一页」)。
 - 合并卡上读数行里的「按下」是**所有键合计**,逐键的计数在那排 chip 里。参考图里变红的是 **chip 上的计数**,**不是**旁边那个「双击间隔」读数 —— 写文案时按代码真正改色的那一处指,指错了读者会盯着一个永远不会变红的数看。
 - **趣味工具不放卡片还有一条独立的理由,记在 `mini-cards.ts` 的文件头**:反应页的结束条件由**计时器**给(和 `settleAfter` 那套"空闲检测"是两码事),而 120px 的小框会把瞄准靶子的直径缩小 —— 于是卡片里那个数**不再是那一页的那个量**,正好违反上面那句判据。
 - 回报率那张的读数**只能当下限**:每秒报文数 = 每秒移动的英寸数 × DPI,小框里推不开。卡片说明和正文都照实写了。
@@ -232,8 +234,8 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
   - **窄档必须显式写回 `auto`。** 那条 `(0,2,0)` 的规则比断点里的 `.mini-device { height: auto }` `(0,1,0)` 高 —— 不收回来的话,"窄屏空态收成一行"这条**对这张卡静默失效**。运行态在窄档另给 `140px`。
   `168` / `140` / 窄档鼠标 `52px` **都是量出来的**(`probe-merge2.mjs` / `probe-merge3.mjs`),不是按图形估的:`168` 下内容 130.1px、上下各余 6.9px;窄档 `140` 下内容 98.1px。**别按"鼠标多高 + chip 多高"去算。**
 - **轨迹卡那条 `@container` 里的 `[data-mini-kind='trail'] { height: 160px }` 是同理的第二例**,但它和上面那条有一处关键差别:**窄档不用写收回**。那条规则住在 `@container (min-width: 932px)` 里,而窄档是 1 列(容器 < 656 < 932),整块压根不生效 —— 实测 420 下把它改回 120,总高差 **0**。鼠标卡必须收回,是因为它那条基高**不依赖容器**(`(0,2,0)` 写在容器查询外面)。**加第三条同类规则之前先问一句:它住在容器查询里面还是外面?**
-- **滚轮那两支箭头是画在同一张 `MOUSE_SVG` 里的**(上箭头 y 8–16 在轮子上方;下箭头 y 38–46 **跨在按键分缝 y=44 上** —— 下半身那点空间只有 8 个单位,而跨分缝正好是参考图里那支下箭头的长相)。**viewBox 一个单位都没动,所以上面那三个量出来的高度全部照旧**。两条 path 都常驻,靠 `.mini-mouse[data-wheel]` 选中一条 `opacity: 1`(默认 0):方向只有两档,而"这一轮还没滚过"就是两条都不亮 —— 空态下漂着两支灰箭头会被读成"组件坏了",这是全站「没数据不画空槽」落到 SVG 上的样子。
-  轮子的高亮写在 `.mini-mouse[data-wheel] .mini-mouse__wheel` 上,**特异度 (0,3,0)**,压过"按下的那一瓣"那条 (0,2,0) —— 所以"中键正按着"和"正在滚"同时成立时它说了算,而且**不依赖源码顺序**。键帽那两档(`data-tested` / `data-held`)的处境正好相反:那两处特异度相同、顺序就是判据。井里 `--accent-dim` 是深绿、`--accent` 是磷光绿,所以轮子是"暗底亮边"而不是参考图那种实心饱和色 —— 实心亮块在本站是**选中药丸**的长相(`button[aria-pressed='true']`),借过来会让轮子读成一枚按钮。**一个颜色令牌都没加**,所以 `.well` 那份重映射表不用动。
+- **滚轮那两支箭头是画在同一张 `MOUSE_FIGURE_SVG`(`mouse-figure.ts`)里的**(上箭头 y 8–16 在轮子上方;下箭头 y 38–46 **跨在按键分缝 y=44 上** —— 下半身那点空间只有 8 个单位,而跨分缝正好是参考图里那支下箭头的长相)。**viewBox 一个单位都没动,所以上面那三个量出来的高度全部照旧**。两条 path 都常驻,靠 `.mouse-figure[data-wheel]` 选中一条 `opacity: 1`(默认 0):方向只有两档,而"这一轮还没滚过"就是两条都不亮 —— 空态下漂着两支灰箭头会被读成"组件坏了",这是全站「没数据不画空槽」落到 SVG 上的样子。
+  轮子的高亮写在 `.mouse-figure[data-wheel] .mouse-figure__wheel` 上,**特异度 (0,3,0)**,压过"按下的那一瓣"那条 (0,2,0) —— 所以"中键正按着"和"正在滚"同时成立时它说了算,而且**不依赖源码顺序**。键帽那两档(`data-tested` / `data-held`)的处境正好相反:那两处特异度相同、顺序就是判据。井里 `--accent-dim` 是深绿、`--accent` 是磷光绿,所以轮子是"暗底亮边"而不是参考图那种实心饱和色 —— 实心亮块在本站是**选中药丸**的长相(`button[aria-pressed='true']`),借过来会让轮子读成一枚按钮。**一个颜色令牌都没加**,所以 `.well` 那份重映射表不用动。
 
 **接线时踩过的一个坑,写得明明白白:装置是在"第一次交互"那个事件的派发过程中挂载的,而工厂的监听也只能在那期间才装上。** DOM 规范说派发期间新增的监听收不到这一次事件,**实测 Chrome 会收到**。信规范就丢第一次点击,信 Chrome 就把第一次点击数两遍(实测:两次双击报 3 次、四次连点报 5 次、三个滚轮事件报 4 格)。解法是两边都不靠 —— 驱动把 seed **显式**交给工厂,同时保证工厂的监听**永远看不到这个事件对象**(`mountMiniCard` 里那个 `seeding` 比对)。改这段之前先读 `mini-devices.ts` 里 `MiniFactory` 那段注释。
 
@@ -276,6 +278,40 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - **「工具箱」的下拉开合是纯 CSS,一行 JS 都不写**(`.site-nav__tools:hover .site-nav__panel` / `:focus-within`)。`更多` 那套需要 JS,是因为触发器是 `<button>`(点击不导航),"开着没有"是一个 JS 真正拥有的状态,`aria-expanded` 必须跟着它。**而工具箱是 `<a>`**:能打开它的只有悬停和焦点,点击就是导航 —— **没有状态就没有会漂的 `aria-expanded`**,所以这里**不写 `aria-haspopup`、也不写 `aria-expanded`**,不是漏了,是从来没有声称过。触屏没有悬停,点一下直接去工具箱页(那里是完整清单),这正是 `<a>` 该有的行为。
   一个接受下来的边角:键盘焦点开着 `更多`、同时鼠标悬停在工具箱上,会同时出现两块面板。纯鼠标路径不可能出现(移到工具箱会触发 `更多` 的 `pointerleave`),只在"鼠标 + 键盘一起用"时才有。实测 1440 下面板高 259.7、右界 1087.6,**在视口内、没有被裁**;`focus()` 到那一项面板出现,移开复位。
 - `.site-nav__item` 上的 `flex: none` **不是可选项**:允许收缩的话窗口一窄每项就各被压扁一点,而"量出来的宽度"正是折叠判据的输入。网格列上的 `minmax(0, 1fr)` 同理 —— 没有它导航列不会收缩到内容宽度以下,折叠永远不会触发。
+
+### 按键 / 滚轮 / 长按 / 双击那一页
+
+`/button-test/` 是**首页那张合并卡(`mini-cards.ts` 的 `mouse-buttons`)的整页版**:同一只鼠标图、同一批纯函数、同一套口径,只是把"卡片里那几秒"摊开成一整页。
+
+- **`Tool.name` / `title` / `<h1>` 是「鼠标按键 / 滚轮 / 长按 / 双击测试」,而 `slug` 仍是 `button-test`、`navLabel` 仍是「按键」。** 前者是因为它和卡的 `faceName` 说同一件事;后两者**一个字都不能动** —— 报头那笔宽度账是按量出来的那串短名算的,改短名会让折叠边界整个漂。
+- **读数刻意只有六项**:按下 / 当前按着 / 双击间隔 / 按住 / 格数 / 故障。**不做**方向带、不做逐次日志表、不出 `.verdict`。滚轮的方向只体现在图上(轮子亮 + 一支箭头)。这是用户选的档,不是没做完。(第六项「故障」是后加的,见下。)
+- **共享三个纯函数(`classifyClickGap` / `normalizeWheelDelta` / `summarizeScroll`),不共享状态机。** 页面和卡片的生命周期本来就不同(惰性挂载 + `.well` 随状态开关 vs. 常开),而 `mouse-buttons.ts` 文件头早就定下这条先例。滚轮事件数组照 `scroll-test.astro` 设 `MAX_EVENTS = 4000` 上限 —— 卡片那台装置只活几秒,这一页会开一整天。
+- 口径逐条对齐卡片:**间隔取 `event.timeStamp`**(两个事件之间),**按住取 `performance.now()`**(一段墙钟);按下计数开局是 0(真数出来的),其余四项开局是 `—`。实测:同一段合成滚动之后页面与卡片的「格数」一致(5 = 5),组合键下 `当前按着` 是「左键 + 右键」。
+
+**面板 `.test-area--figure`(竖排:鼠标居中在上、五块按键牌在下)。** 这一页**没有 `<style>` 块**,所以每一条都只能在 `global.css` 里改。
+
+- 鼠标图与卡片**同一份字面量**(`mouse-figure.ts`),但**高度各写各的**:页面 `.test-area--figure .mouse-figure { height: 200px }`,卡片那三处全挂在 `.mini-device[data-mini-kind='mouse-buttons']` 上。共用那条 `.mouse-figure` 只留"怎么画",不留"多大"。
+- 五块牌是 `.mouse-key`,**不是卡片上那排 `mini-chip`** —— 两样看着像,尺寸差着一倍多(牌 ~95px,chip 36px)。老 `.mouse-button*` 那套只有这一页一个消费者,已经删掉,样子在这里以 `.mouse-key` 复活。
+- 实测:1440 面板 **646×368.5**、鼠标 **118.2×200**、按键牌 **612×114.5** 排成 5 列;420 面板 **365×493.1**、牌 **331×239.1** 排成 **3+2**。两侧 `scrollWidth === clientWidth`,**不溢出**。列宽下限 96px 的分母是**面板的内边距盒,不是视口宽**。
+- **`.mouse-key__n` 刻意不写 `color`**(和 `.mini-chip__n` 同一个道理):子元素自己声明了 `color` 就赢过父元素的,写了的话「正按着」那一刻牌变绿而数字留在纸面色。底色那句 `color: var(--text-dim)` 挂在 `.mouse-key` 上,正是为这条继承准备的底。
+
+**两条都是"读代码看不出来"的坑,已经踩过:**
+
+1. **窄档必须把高度显式写回来,而且要用两个类。** `@media (max-width: 760px)` 里那条 `.test-area { height: 260px }` 和 `.test-area--figure { height: auto }` **同为 (0,1,0) 而前者源码靠后**,于是窄屏面板停在 260px、内容是 375px,**静默溢出 115px**(`.test-area` 有 `overflow: hidden`,裁掉之后看着像"按键牌少排了一行")。收回写成 `.test-area.test-area--figure`(0,2,0),**不依赖源码顺序** —— 比 `.mini-device[data-mini-kind=…]` 那两处覆写更稳,因为那两处是拿 (0,2,0) 压 (0,1,0),这里两边同源。
+2. **这一面不要刻度栅格**(`background-image: none`)。`.test-area` 自带的那套是给"画轨迹/看形状的面"提供坐标系的;更硬的理由是**它会把鼠标吃掉**,而且能算出来:井底 `rgb(16,22,28)`,鼠标身 `--bg-elevated` 在井里是 `rgb(24,33,42)` —— 只有 **1.12:1**,和"井与纸面在近黑区间靠填充分不开"是同一个量级,真正画出轮廓的只有那圈 1.6px 描边;而栅格线(0.07 白)压在井底上是 **`rgb(33,38,44)`,比鼠标身还亮**。于是鼠标只剩"一块没有栅格的补丁"。首页那张卡上的同一只鼠标没这个问题,**因为卡的井是平的**(实测 `.mini-device--running` 的 `background-image` 是 `none`)—— 所以这条是把这一页的面**恢复成和卡片同一个面**,不是关掉装饰。
+
+**故障检测:判两件,而"绿变红"是它唯一的图上出口。**
+
+- **只判两件**:疑似连击(`classifyClickGap(gap) === 'chatter'`,即同一个键两次按下的间隔 < `CLICK_CHATTER_MS`)与疑似跳格(`summarizeScroll(...).glitches > 0`,判据仍是 `markScrollGlitches()` 那一份,页面不另数一遍)。**共享同一个阈值常量**,页面的 `<ul>` 里那个 `< 50ms` 是从 `analysis.ts` import 进去插进文案的,不手抄 —— 和反应页那几个常量同一个办法。
+- **判出来是"累计"而不是"当下这一次"。** 连击是**偶发**的(微动刚老化时十次里抖一次),只标当下那一次的话用户松手回头一看什么都没有。所以 `faulted: Set<number>` 一旦判出就留到重置;滚轮那边是一个单独的 `wheelFault` 布尔(滚轮没有"哪个键"可言)。
+- **图上"绿变红"用的是两条各自独立的规则,而不是把 `data-down` 和 `data-fault` 挤在一个属性上。** 亮不亮只由 `data-down` 说了算,红不红只由 `data-fault` 说了算 —— 两件事分开,`syncVisuals()` 里两个属性都**常驻写**(写 `'true'`/`'false'` 而不是增删,因为这条路径挂在 `pointermove` 上)。所以"判出故障"之后,那一瓣要**下一次按下去**才变红;判出故障的那一刻图上是不会自己红起来的,这是对的:空态下一瓣红的会被读成"你正按着左键"。
+- **滚轮的故障必须挂在 `.mouse-figure` 自己的 `data-wheel-fault` 上,不能借那一瓣的 `data-fault`。** 滚轮**就是**中键(`data-mb='1'`,同一块 rect),两个故障挤在同一个属性上会互相抹掉。所以 CSS 是三档而不是两档:`.mouse-figure__part[data-down][data-fault]` (0,3,0) 管按键瓣,`.mouse-figure[data-wheel][data-wheel-fault] .mouse-figure__wheel` (0,4,0) 管轮子。实测:左键判连击后按下去,那一瓣 `fill rgb(58,29,29)` / `stroke rgb(248,113,113)`(井里的 `--danger-dim` / `--danger`);滚轮判跳格后轮子取到同一组值 —— **浅色深色同值**,因为井的前景令牌本来就是两个主题共用一份。
+- **按键牌那句小注是被"替换"掉的,不是又加了一行。** 牌高是量过的(1440 下 114.5px),加一行会把整行卡片顶高,而那一行本来就是解释这块牌的那句话。红字靠 `.mouse-key__note--fault` —— **用两个类写成 (0,2,0)**,压过 `.mouse-key__note` 的 (0,1,0),不依赖源码顺序。
+- **「故障」那一格是三档,和全站一致**:没测过给 `—`(还没资格说"未发现")、测过没毛病给「未发现」、判出来给「`N` 处」并把细节写进 `setHint`(「左键 疑似连击 · 滚轮 疑似跳格」)。那一格变红是挂在外层 `.stat` 上的 `.stat--fault`(和 `.stat--primary` 同一个位置),不是一个给数字加颜色的规则。
+- **`renderFault()` 只在故障状态真的变了时调,不挂在 `syncVisuals()` 上** —— 后者要走 `pointermove`,而这里动的是文本节点。滚轮那条路径上它是**无条件**调的(不手工追踪"什么时候该重画",那正是三档分界最容易漏岔路的地方),`setText` 会先比较再写,状态没变就是一个整数比较。
+- 实测(合成输入,浅色 1440):开局 `—` → 点一下「未发现」→ 30ms 间隔的两次点击 → 「1 处」+ 牌上小注变「疑似连击」+ 计数变红 + 那一格 `stat--fault`;按住左键那一瓣 `rgb(58,29,29)`/`rgb(248,113,113)`;同方向滚三格**不**判故障;`d,d,u,d` → 「2 处」+「滚轮 疑似跳格」+ 轮子变红且 `.mouse-figure[data-wheel-fault="true"]`;重置六项全回 `—`/`0`,图上的红、箭头、轮子高亮一起清掉。
+
+**`tests/mouse-figure.test.ts` 钉住图与 `mouse-buttons.ts` 的契约**(纯字面量,node 里直接可测):`data-mb` 恰好五个、编号集合 === `BUTTON_CODES`;两支 `data-wheel-dir` 都在;类名一律 `mouse-figure` 前缀。**加第六个键却忘了画那一瓣**从此是一条红的用例,而不是页面上少一处高亮。
 
 ## 回报率测量的硬约束
 
@@ -343,7 +379,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 - **侧键能不能测,取决于鼠标固件和浏览器策略,页面说了不算。** 有些鼠标的侧键**根本不是以鼠标按键的形式上报**的——厂商驱动把它发成键盘事件或一段宏,浏览器收不到任何鼠标事件;另一些浏览器**不允许网页取消**侧键的前进/后退,一按整页就跳走、成绩全丢。`side-buttons.ts` 的 `suppressSideButtonNavigation()` 只能挡住后者,挡不住前者。所以侧键那一行显示破折号时,**只说明"页面没收到",不等于"按了 0 次"**——两者混成一个数字正是这类测试最容易骗人的地方,页面和 FAQ 都照实写了。另外:CDP 合成的 `Input.dispatchMouseEvent` **绕过**了操作系统和驱动层,所以"CDP 里侧键能测"**不能**证明一只装了厂商驱动的实体鼠标也能测,这条只能上手验。
   同一条限制还有两个后果,都吃过亏:**(a)** 合成的**右键**压下去时**根本不派发 `pointerdown`**(只发 `pointerrawupdate` + `mousedown`)。所以凡是**靠 `pointerdown` 记状态**的判据(比如 `suppressWorkbenchDefaults()` 里那个"按下时落在哪个元素上")在 CDP 里对右键**测不出来**,会看到"链接上右键也被拦掉了"这种假故障——**别照着它改代码**,只能真机点一下。**(b)** 合成的输入起不了 Edge 的鼠标手势,所以"手势拦没拦住"也测不了。
   (顺带:在 `hold-drag-test` 里合成的**左键**只有 `pointerdown` / `pointerup`、没有 `mousedown` / `mouseup`。那不是 CDP 的怪癖,是**页面自己**在 `pointerdown` 里 `preventDefault()`(为的是挡掉拖拽带起的原生拖放),按规范这会把兼容的鼠标事件一并压掉。)
-- **Edge 自带的「鼠标手势」网页端拦不掉,不要再试。** 中文区的 Edge 默认开着它(`edge://settings/mouseGesture`),按住右键拖动时会在屏幕上画一条蓝线,凑够形状还会**直接执行前进/后退**——`hold-drag-test`(五个键都要测,含右键)和 `button-test`(右键那张卡)两页因此受影响。它属于浏览器进程那一侧的功能,**没有任何网页 API 能关掉**;微软官方的 WebView2 议题(MicrosoftEdge/WebView2Feedback#3737)里,开发者把 `--disable-features=msEdgeMouseGestureSupported,msEdgeMouseGestureDefaultEnabled` 和 `--enable-features=kEdgeMouseGestureDisabledInCN` 试遍了**全部无效**,最后确认唯一有效的是那个设置项加**按站点的「阻止列表」**。
+- **Edge 自带的「鼠标手势」网页端拦不掉,不要再试。** 中文区的 Edge 默认开着它(`edge://settings/mouseGesture`),按住右键拖动时会在屏幕上画一条蓝线,凑够形状还会**直接执行前进/后退**——`hold-drag-test`(五个键都要测,含右键)和 `button-test`(五块按键牌,含右键)两页因此受影响。它属于浏览器进程那一侧的功能,**没有任何网页 API 能关掉**;微软官方的 WebView2 议题(MicrosoftEdge/WebView2Feedback#3737)里,开发者把 `--disable-features=msEdgeMouseGestureSupported,msEdgeMouseGestureDefaultEnabled` 和 `--enable-features=kEdgeMouseGestureDisabledInCN` 试遍了**全部无效**,最后确认唯一有效的是那个设置项加**按站点的「阻止列表」**。
   网页这一侧能试的只有一条:`mousedown` 里 `preventDefault()`。**实测无效**(中键自动滚动就是靠这套机制被挡住的,所以它看起来很像——但手势是在浏览器进程读完事件之后才轮到渲染进程回话,够不着)。`ui.ts` 的 `blockMiddle` 因此**只管中键**,别再改成连右键一起拦。
   能探测到"手势开着"吗?**不能**——只能靠 UA 认出 Edge,而那会把所有关着手势的 Edge 用户一起吓一遍。所以两页都只在正文/FAQ 里如实交代 + 告诉用户怎么关,不做能力告警。
 - **两次输入事件之间的间隔必须取 `event.timeStamp`,不能取处理函数里的 `performance.now()`。** 浏览器会把攒在一起的事件放进**同一个任务**里派发,那一刻两个处理函数几乎是同时跑的,`performance.now()` 的差会塌到 0。对本站这直接等于造假:一次正常的人手双击会被算成 0 毫秒报成"连击",一次正常的松手再按会落进 30ms 窗口报成"瞬断"。`event.timeStamp` 是事件自己带的时刻,不吃这份派发延迟(剩下的批处理涂抹在 0.6ms 量级,对本站几十毫秒起的门槛可以忽略)。

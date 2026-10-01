@@ -126,7 +126,37 @@ const jsonLd = {
             <span id="live-button">左键</span> 按住中 · 已拖动 <span id="live-distance">0</span> px
           </div>
         </div>
+        <div class="drag-dot" id="dot" hidden></div>
       </div>
+
+      <h2 class="minor">按按键分开看</h2>
+      <p class="prose tight">
+        五个键都在下面列着。破折号表示<strong>这个键一个事件都没收到</strong>——可能是没测它,
+        也可能是鼠标或驱动根本没把它当成鼠标按键上报,<strong>不等于按了 0 次</strong>。
+        按住期间,对应的那一行会高亮。
+      </p>
+      <table class="ref-table by-button">
+        <thead>
+          <tr>
+            <th>按键</th>
+            <th>按住次数</th>
+            <th>疑似瞬断</th>
+            <th>最长一次 (ms)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            BUTTONS.map((button) => (
+              <tr id={`btn-row-${button.code}`} data-current="false">
+                <td>{button.name}</td>
+                <td id={`btn-count-${button.code}`}>—</td>
+                <td id={`btn-drops-${button.code}`}>—</td>
+                <td id={`btn-longest-${button.code}`}>—</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
     </div>
 
     <div class="workbench__readout">
@@ -154,35 +184,6 @@ const jsonLd = {
     </div>
   </div>
 
-  <h2>按按键分开看</h2>
-  <p class="prose tight">
-    五个键都在下面列着。破折号表示<strong>这个键一个事件都没收到</strong>——可能是没测它,
-    也可能是鼠标或驱动根本没把它当成鼠标按键上报,<strong>不等于按了 0 次</strong>。
-    按住期间,对应的那一行会高亮。
-  </p>
-  <table class="ref-table by-button">
-    <thead>
-      <tr>
-        <th>按键</th>
-        <th>按住次数</th>
-        <th>疑似瞬断</th>
-        <th>最长一次 (ms)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {
-        BUTTONS.map((button) => (
-          <tr id={`btn-row-${button.code}`} data-current="false">
-            <td>{button.name}</td>
-            <td id={`btn-count-${button.code}`}>—</td>
-            <td id={`btn-drops-${button.code}`}>—</td>
-            <td id={`btn-longest-${button.code}`}>—</td>
-          </tr>
-        ))
-      }
-    </tbody>
-  </table>
-
   <div class="controls">
     <button type="button" id="reset">重置</button>
     <span class="test-hint" id="hint2">
@@ -190,7 +191,7 @@ const jsonLd = {
     </span>
   </div>
 
-  <h2>每次拖拽的记录</h2>
+  <h2 class="minor">每次拖拽的记录</h2>
   <p class="prose tight">
     最近 10 次,新的在上面。<span class="mark-danger">红色</span>的那几次里检测到了瞬断。
   </p>
@@ -255,6 +256,82 @@ const jsonLd = {
       border-color: var(--accent);
     }
 
+    /*
+     * 跟着指针走的那颗圆点 —— 按住期间才有,用来把"正在跟踪"这件事画出来。
+     *
+     * 三条都不是随手写的:
+     *
+     * 1. **`position: fixed`**,不是 absolute。`.test-area` 是 `overflow: hidden`,
+     *    而这一页明说了"指针拖出区域外也会继续跟踪" —— 圆点要是在区域里绝对定位,
+     *    指针一离开就被裁掉,恰好在你最需要它证明"还在跟"的时候消失。
+     *    (定宽定位让这里不需要任何 getBoundingClientRect,也就没有缓存失效那类 bug。)
+     * 2. **负外边距居中**,不是 `translate(-50%, -50%)` —— 偏移量要留给下面那句
+     *    由脚本写的 `translate3d(x, y, 0)`,一条 transform 里混两种语义读起来会打架。
+     *    代价是"尺寸的一半"和"偏移"必须一起改,所以尺寸抽成了 `--drag-dot-size`,
+     *    由 `calc()` 除法推出来 —— 只改尺寸忘了改偏移的话,圆点会**偏出指针半颗**,
+     *    看着"差不多在附近",但那是错的,而且并不报错。
+     * 3. **颜色走 `--accent`**:它长在 `.well` 里面,拿到的就是井里的磷光绿。
+     *    自定义属性按 DOM 树继承,和 containing block 无关,fixed 不会让它掉出井外。
+     * 4. **那圈 `var(--bg)` 的 box-shadow 不是装饰。** 井里居中的实时读数是同一种绿,
+     *    圆点飘到它上面时(实测就撞上了"已拖动 N px"那一行)会和它糊成一片、
+     *    读成那行字的项目符号。垫一圈井底色等于把圆点从背景里切出来 ——
+     *    压在字上时它"挖掉"字,这正是覆盖物该有的样子。
+     */
+    .drag-dot {
+      /* 一处的尺寸:宽高和居中偏移都从它推,两者不会再各走各的 */
+      --drag-dot-size: 22px;
+
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 5;
+      width: var(--drag-dot-size);
+      height: var(--drag-dot-size);
+      margin: calc(var(--drag-dot-size) / -2) 0 0 calc(var(--drag-dot-size) / -2);
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 2px var(--bg);
+      pointer-events: none;
+    }
+
+    /*
+     * 《按按键分开看》和《每次拖拽的记录》是**测试的附表**,不是文档章节 ——
+     * 它们跟的是上面那个装置,而「这项测试测不到什么」那几个 h2 跟的是这篇文章。
+     * 所以就地降一档:字号落到阶梯的 19px 那一级,上下留白一起收。
+     *
+     * **仍然写 `h2`,不换成 `h3`**:那条 1px 分节线是 h2 在承担的(见 global.css
+     * 里"写在 h2 上而不是 .prose h2 上"那一段),换标签会把"从这里开始是一块"
+     * 连同那条线一起弄丢。降的是字号,不是层级。
+     *
+     * 实测(改前):28px / 高 60px。这两节加起来原本占 120px 的版面。
+     */
+    .minor {
+      font-size: 1.1875rem;
+      margin: 2rem 0 0.4rem;
+      padding-top: 1rem;
+    }
+
+    /*
+     * 说明段跟着收一档。不收的话,表已经是 13.4px、日志是 13.1px,而这句说明
+     * 还是 16px —— 整块里最大的一行字会落在"注解"上,读起来像正文被挤到了脚注里。
+     *
+     * 用相邻兄弟而不是再挂一个类:这两段的**结构位置**就是"紧跟在自己的小标题后面",
+     * 那正是这条规则要表达的意思。
+     */
+    .minor + .prose {
+      font-size: 0.9rem;
+    }
+
+    /*
+     * 第一块住在装置列里,顶上不要再叠一层外边距 —— flex 列里 margin 和 gap
+     * **不会合并**,两条叠起来就是 76px 的空档。
+     * 只顶掉外边距:那条 1px 上边框和 padding 留着,正好把"装置"和"读数"隔开,
+     * 而装置是仪器窗、这张表是纸面,那道线画在这儿是对的。
+     */
+    .workbench__stage > .minor {
+      margin-top: 0;
+    }
+
     /* .drag-live 的定位、[hidden]、大字和标签都在 global.css 里
        (和 CPS / DPI / 滚轮三页共用) */
 
@@ -268,6 +345,50 @@ const jsonLd = {
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
+    }
+
+    /*
+     * 表只剩四列、每行一个键,没必要占正文表那一档的行高。
+     * 字号取 0.84rem —— 就是 global.css 在 760px 那一档给 `.ref-table` 的值,
+     * 不是新造的数:宽屏上这两处因此长得一样。
+     *
+     * **只写上下内边距,不写 `padding` 简写**:左右那两格由 global.css 的
+     * `.ref-table td:last-child { padding-right: 0 }` 决定,简写会连同它一起
+     * 覆盖掉 —— 而那条规则和这条特异度相同,谁赢只看源码顺序,不该赌。
+     */
+    .by-button {
+      font-size: 0.84rem;
+    }
+
+    .by-button th,
+    .by-button td {
+      padding-top: 7px;
+      padding-bottom: 7px;
+    }
+
+    /*
+     * 日志条目是 `renderLog()` 里 `createElement` 出来的,**页面 `<style>` 够不着**
+     * —— Astro 的 cid 长在模板元素上,运行期造的节点身上没有(见 CLAUDE.md
+     * 「运行期用 createElement 造出来的节点」那一段,瞄准页的靶子踩过)。
+     * 而 `.log-item` 另外三页(反应 / 键盘 / 双击)也在用,不能改写 global.css,
+     * 所以走 `:global()` —— 这份 CSS 只在本页加载,作用域天然就限制住了。
+     */
+    .log-list :global(.log-item) {
+      padding: 5px 12px;
+      font-size: 0.82rem;
+    }
+
+    .log-list :global(.log-item__index) {
+      font-size: 0.72rem;
+    }
+
+    .log-list :global(.log-item__note) {
+      font-size: 0.78rem;
+    }
+
+    .log-list :global(.log-empty) {
+      font-size: 0.82rem;
+      padding: 10px;
     }
 
     /* 拖拽必然带文字选中,测试期间抑制掉 */
@@ -333,6 +454,7 @@ const jsonLd = {
     const area = el('area');
     const hint = el('hint');
     const live = el('live');
+    const dot = el('dot');
     const logHost = el('log');
 
     /** 完整的按下/松开/移动序列,所有统计都从它派生 */
@@ -351,6 +473,45 @@ const jsonLd = {
      * 的活,页面只负责如实记录每一次事件的掩码。
      */
     let downMask = 0;
+
+    /**
+     * 跟着指针走的那颗圆点。
+     *
+     * **坐标在这里只记两个变量,`transform` 交给 rAF 去写。** 上面那条
+     * `pointermove` 每秒最多跑 1000 次,在里面碰 DOM 就是让绘制去挤采样 ——
+     * 和采样层必须薄是同一条纪律(见 CLAUDE.md)。而它也不能像别的读数那样
+     * 挂在 100ms 的 ticker 上:10fps 的圆点看起来是"卡住了",不是"跟着走"。
+     *
+     * 循环是**自终止**的:`armed` 一落,下一帧它自己就停了 —— 所以不需要
+     * 谁记得去 stop 它,`arm()` 只负责"确保它在跑"。
+     */
+    let dotX = 0;
+    let dotY = 0;
+    let dotRaf = 0;
+    let dotRunning = false;
+    let dotWrittenX = Number.NaN;
+    let dotWrittenY = Number.NaN;
+
+    function pumpDot(): void {
+      if (!armed || !dot) {
+        dotRunning = false;
+        dotRaf = 0;
+        return;
+      }
+      // 没动就不写:每帧无条件写 transform 等于让合成器一直有事做
+      if (dotX !== dotWrittenX || dotY !== dotWrittenY) {
+        dotWrittenX = dotX;
+        dotWrittenY = dotY;
+        dot.style.transform = `translate3d(${dotX}px, ${dotY}px, 0)`;
+      }
+      dotRaf = requestAnimationFrame(pumpDot);
+    }
+
+    function ensureDotLoop(): void {
+      if (dotRunning) return;
+      dotRunning = true;
+      dotRaf = requestAnimationFrame(pumpDot);
+    }
 
     /**
      * 记一条事件。
@@ -378,6 +539,8 @@ const jsonLd = {
       document.documentElement.classList.add('is-testing');
       hint?.setAttribute('hidden', '');
       live?.removeAttribute('hidden');
+      dot?.removeAttribute('hidden');
+      ensureDotLoop();
     }
 
     function scheduleDisarm(): void {
@@ -572,6 +735,10 @@ const jsonLd = {
        */
       if ((mask & 0b1) !== 0) event.preventDefault();
 
+      // 圆点从按下的那一点起步 —— 不然它要等第一条 pointermove 才现身
+      dotX = event.clientX;
+      dotY = event.clientY;
+
       arm();
       downMask = mask;
       record(event.timeStamp, event.clientX, event.clientY, 'down', mask);
@@ -582,6 +749,13 @@ const jsonLd = {
       'pointermove',
       (event) => {
         if (!armed) return;
+
+        /*
+         * 圆点的坐标在抽稀**之前**记 —— 它是给眼睛看的,不是给统计看的。
+         * 放在下面那道 8ms 门槛之后的话,慢速拖动时圆点会一跳一跳。
+         */
+        dotX = event.clientX;
+        dotY = event.clientY;
 
         const mask = maskFromButtons(event.buttons);
         const changed = mask !== downMask;
@@ -616,6 +790,7 @@ const jsonLd = {
        */
       record(event.timeStamp, event.clientX, event.clientY, 'up', 0);
       downMask = 0;
+      dot?.setAttribute('hidden', '');
       scheduleDisarm();
       render();
     }
@@ -635,6 +810,7 @@ const jsonLd = {
       }
       armed = false;
       downMask = 0;
+      dot?.setAttribute('hidden', '');
       area?.setAttribute('data-holding', 'false');
       document.documentElement.classList.remove('is-testing');
       render();
@@ -654,6 +830,7 @@ const jsonLd = {
       document.documentElement.classList.remove('is-testing');
       hint?.removeAttribute('hidden');
       live?.setAttribute('hidden', '');
+      dot?.setAttribute('hidden', '');
       setBadge(el('state-badge'), '等待拖拽', 'idle');
       setText(el('verdict-note'), DEFAULT_NOTE);
       render();
@@ -662,6 +839,8 @@ const jsonLd = {
     window.addEventListener('pagehide', () => {
       stopTicker();
       window.clearTimeout(armTimer);
+      cancelAnimationFrame(dotRaf);
+      dotRunning = false;
       document.documentElement.classList.remove('is-testing');
     });
 

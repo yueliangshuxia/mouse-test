@@ -3,6 +3,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import StatPanel from '../components/StatPanel.astro';
 import { findTool } from '../lib/tools';
 import { BUTTONS } from '../lib/mouse-buttons';
+import { MOUSE_FIGURE_SVG } from '../lib/mouse-figure';
+import { href } from '../lib/url';
+import { CLICK_CHATTER_MS } from '../lib/analysis';
 
 const tool = findTool('button-test')!;
 
@@ -23,51 +26,53 @@ const jsonLd = {
   current={tool.slug}
   jsonLd={jsonLd}
 >
-  <h1>鼠标按键测试</h1>
+  <h1>鼠标按键 / 滚轮 / 长按 / 双击测试</h1>
 
   <p class="prose">
-    在按键卡片上或下方的测试区域内按下鼠标的任意按键,对应的卡片会实时高亮。用来检查左键、右键、
-    中键和两个侧键是否都能正常响应,以及微动开关有没有出现需要按很重才有反应的迹象。
-    <strong>同时按多个键也可以</strong>——按住左键再按右键,两张卡片各自点亮、各自计时。
+    在下面的鼠标图上按任意一个键,对应的那一瓣会实时亮起来;滚滚轮,轮子会亮并指出方向。
+    按下哪个键、按住多久、同一个键两次点击隔了多少毫秒、滚轮一共转了几格——
+    <strong>四样都在这一页上</strong>,读数是粗的,够判断"这个键有没有反应"。
+    另外它还会<strong>顺手判故障</strong>:按键出现连击、滚轮出现疑似跳格时,
+    对应的那一块会<strong>由绿变红</strong>,读数栏那一格「故障」也会写明是哪一处。
   </p>
 
   <div id="cap-notice"></div>
 
   <div class="workbench">
     <div class="workbench__stage">
-      <div class="mouse-diagram well" id="diagram">
-        {
-          BUTTONS.map((button) => (
-            <div class="mouse-button" data-button={button.code} data-active="false">
-              <div class="mouse-button__name">{button.name}</div>
-              <div class="mouse-button__code">{button.note}</div>
-              <div class="mouse-button__count" data-count={button.code}>
-                0
-              </div>
-            </div>
-          ))
-        }
-      </div>
+      <div class="test-area test-area--figure well" id="area">
+        <Fragment set:html={MOUSE_FIGURE_SVG} />
 
-      <div class="test-area well" id="area">
-        <div class="test-area__hint" id="hint">
-          在这个区域内按下鼠标的任意按键
+        <div class="mouse-keys">
+          {
+            BUTTONS.map((button) => (
+              <div class="mouse-key" data-key={button.code} data-down="false">
+                <div class="mouse-key__name">{button.name}</div>
+                <div class="mouse-key__note">{button.note}</div>
+                <div class="mouse-key__n" data-count={button.code}>
+                  0
+                </div>
+              </div>
+            ))
+          }
         </div>
       </div>
     </div>
 
     <div class="workbench__readout">
       <div class="stat-grid">
-        <StatPanel id="total" label="累计点击次数" primary />
-        <StatPanel id="holding" label="当前按住" unit="ms" hint="松开后归零" />
-        <StatPanel id="last-hold" label="上次按住时长" unit="ms" />
-        <StatPanel id="unique" label="已触发的按键" hint="共 5 个" />
+        <StatPanel id="presses" label="按下" primary hint="所有键合计" />
+        <StatPanel id="holding" label="当前按着" hint="松开后清空" />
+        <StatPanel id="gap" label="双击间隔" unit="ms" hint="同一个键的相邻两次" />
+        <StatPanel id="held" label="按住" unit="s" hint="这次按住持续了多久" />
+        <StatPanel id="notches" label="格数" hint="滚轮,估算值" />
+        <StatPanel id="fault" label="故障" hint="还没测到能下判断的东西" />
       </div>
     </div>
   </div>
 
   <div class="controls">
-    <button type="button" id="reset">重置计数</button>
+    <button type="button" id="reset">重置</button>
   </div>
 
   <section class="prose">
@@ -80,23 +85,64 @@ const jsonLd = {
         <strong>需要很用力才有反应</strong>——微动弹片疲劳的典型表现,通常是失灵的前兆。
       </li>
       <li>
-        <strong>侧键触发的是浏览器后退/前进</strong>——侧键在浏览器里被硬绑定成「后退 / 前进」,
-        本页已拦截这个默认行为,整页生效而不是只在测试区内。如果按下去仍然跳转,
-        说明你的浏览器不允许网页拦截侧键:属于浏览器层面的限制,网页改不了,
-        只能靠鼠标厂商的驱动软件把侧键改成别的功能。
+        <strong>某个键的计数变红</strong>——同一个键的相邻两次点击间隔短于人手的机械极限,
+        也就是微动在抖(俗称连击)。你没有连点却出现红色,那只鼠标的微动已经开始老化了。
+        <strong>这一处会一直留着</strong>,并同时反映到鼠标图上:那个键再按下去时,
+        那一瓣是<strong>红的</strong>,不是绿的。
       </li>
       <li>
-        <strong>只按一个键却亮了多个卡片</strong>——信号串扰或微动粘连。注意要和你自己按的
-        组合键区分开:同时按下左右键、两个键都会亮,那是正常的。判断方法是<strong>抬起手指
-        逐个松开</strong>,看每张卡片是不是跟着自己的那根手指熄灭。
+        <strong>只按一个键却亮了多瓣</strong>——信号串扰或微动粘连。注意要和你自己按的
+        组合键区分开:同时按下左右键、两瓣都会亮,那是正常的。判断方法是<strong>抬起手指
+        逐个松开</strong>,看每一瓣是不是跟着自己的那根手指熄灭。
+      </li>
+      <li>
+        <strong>滚轮那里只有一个方向亮了,或者格数看着不对</strong>——方向是可靠的,
+        格数是<strong>估算</strong>:不同浏览器和设备的每一格代表多少像素并不一致,
+        只能按一个经验值换算。想知道原始数值,用「滚轮」那一页。
+      </li>
+      <li>
+        <strong>读数栏里「故障」那一格有数</strong>——这一页自己判出来了,
+        小字里写明是哪一处。它只判<strong>两样</strong>,判据和对应详情页完全同一份实现:
+        <ul>
+          <li>
+            <strong>疑似连击</strong>:同一个键的相邻两次间隔 < {CLICK_CHATTER_MS}ms。
+            人手的机械极限做不到这么快,所以这个间隔基本只可能是微动在抖。
+          </li>
+          <li>
+            <strong>疑似跳格</strong>:一直朝一个方向滚,中间<strong>单独</strong>反向跳了一下
+            又立刻回来。真换方向是一连串反着滚,不算。
+          </li>
+        </ul>
+        <strong>两样都带「疑似」,这不是客套。</strong>跳格的波形,手指打滑、触控板误触、
+        甚至你自己慢速来回滚,都能造出一个一模一样的 —— 判读方法是<strong>只朝一个方向
+        匀速滚二十几格</strong>,看有没有冒出毛刺。「滚轮」那一页有一整段专门讲这个。
+        所以这一格说的是"有东西值得看一眼",不是"你的鼠标坏了"。
+      </li>
+    </ul>
+
+    <h2>想看细的,去这三页</h2>
+    <p>
+      这一页是汇总,四样都只给一个粗数。要逐项读,对应的页面各有一页:
+    </p>
+    <ul>
+      <li>
+        <a href={href('hold-drag-test/')}>长按拖拽测试</a>——按住不放拖一段距离,
+        它判的是"中途有没有莫名断过一次"(疑似瞬断),那要拖满一整段才看得出形状,这里给不了。
+      </li>
+      <li>
+        <a href={href('double-click-test/')}>双击测试</a>——逐次记下每一次间隔并分类,
+        还统计中位数。这里只留最近两次的那个数。
+      </li>
+      <li>
+        <a href={href('scroll-test/')}>滚轮测试</a>——方向带、原始 delta、每一次的格数估算,
+        以及"反向毛刺"的判定。
       </li>
     </ul>
 
     <h2>组合按键</h2>
     <p>
-      同时按下多个键是支持的:按住左键不放再按右键,两张卡片会<strong>各自独立</strong>点亮,
-      松开哪一个哪一个熄灭,按住时长也分别计算。这对判断微动是否粘连很有用——
-      真正的粘连是"你没按它,它自己亮着"。
+      同时按下多个键是支持的:按住左键不放再按右键,两瓣会<strong>各自独立</strong>点亮,
+      松开哪一个哪一个熄灭。这对判断微动是否粘连很有用——真正的粘连是"你没按它,它自己亮着"。
     </p>
     <p>
       实现上这里有个坑值得说明:指针事件规范规定,只有<strong>第一个</strong>按下的键会触发
@@ -108,9 +154,9 @@ const jsonLd = {
 
     <h2>注意事项</h2>
     <p>
-      中键按下时浏览器默认会启动自动滚动,右键会弹出菜单,侧键会触发前进后退——本页都已拦截
-      (页面上的链接和按钮除外,那里右键「在新标签页中打开」是正常操作),所以可以放心逐个按过去。
-      触屏设备没有这些物理按键,请在电脑上使用。
+      中键按下时浏览器默认会启动自动滚动,右键会弹出菜单,侧键会触发前进后退,滚滚轮页面会跟着滚——
+      本页都已拦截(页面上的链接和按钮除外,那里右键「在新标签页中打开」是正常操作),
+      所以可以放心逐个按过去。触屏设备没有这些物理按键,请在电脑上使用。
     </p>
     <p>
       有一条<strong>本页拦不住</strong>:Edge 自带的“鼠标手势”会把<strong>按住右键拖动</strong>
@@ -119,212 +165,412 @@ const jsonLd = {
       <strong>中文区的 Edge 里默认开着</strong>,要用右键那一项的话,先在地址栏进
       edge://settings/mouseGesture 关掉它,或把本站加进“配置鼠标手势”的阻止列表。
     </p>
+    <p>
+      还有一条要照实说:<strong>侧键那一栏显示破折号或者不亮,只说明"页面没收到"</strong>,
+      不等于"按了 0 次"。有些鼠标的侧键根本不是以鼠标按键的形式上报的——厂商驱动把它发成
+      键盘事件或一段宏,浏览器收不到任何鼠标事件。这种情况网页无从判断,只能靠驱动软件把它改回普通按键。
+    </p>
   </section>
 
   <script>
-    import { el, mountCapabilityNotices, setStat, suppressWorkbenchDefaults } from '../lib/ui';
-    import { BUTTON_COUNT, eachButtonEdge, maskFromButtons } from '../lib/mouse-buttons';
+    import {
+      classifyClickGap,
+      normalizeWheelDelta,
+      summarizeScroll,
+      type ScrollNotch,
+    } from '../lib/analysis';
+    import { BUTTONS, BUTTON_COUNT, eachButtonEdge, maskFromButtons } from '../lib/mouse-buttons';
     import { suppressSideButtonNavigation } from '../lib/side-buttons';
+    import {
+      createTicker,
+      el,
+      format,
+      mountCapabilityNotices,
+      setHint,
+      setStat,
+      setText,
+      statNode,
+      suppressWorkbenchDefaults,
+    } from '../lib/ui';
 
     const area = el('area');
-    const diagram = el('diagram');
-    const hint = el('hint');
-    const noticeHost = el('cap-notice');
     const resetButton = el('reset');
+    const figure = area?.querySelector<SVGElement>('.mouse-figure') ?? null;
 
-    // ---- 能力探测与提示 ----
+    mountCapabilityNotices(el('cap-notice'));
 
-    mountCapabilityNotices(noticeHost);
+    // ---- 图与按键牌的节点表 ----
 
-    // ---- 计数状态 ----
+    /** 图上那五个可亮的部分,按本站编号索引 */
+    const parts = new Map<number, Element>();
+    /** 五块按键牌、各自的计数,以及**那句小注的原文**,按本站编号索引 */
+    const keys = new Map<
+      number,
+      { card: HTMLElement; count: HTMLElement; note: HTMLElement; noteText: string }
+    >();
 
+    if (area) {
+      for (const node of area.querySelectorAll('[data-mb]')) {
+        parts.set(Number(node.getAttribute('data-mb')), node);
+      }
+      for (const card of area.querySelectorAll<HTMLElement>('.mouse-key')) {
+        const count = card.querySelector<HTMLElement>('.mouse-key__n');
+        const note = card.querySelector<HTMLElement>('.mouse-key__note');
+        // 小注的原文**从 DOM 上读回来**,不在脚本里另写一份 —— 和 `cps-test` 的按钮
+        // 标签、`aim-test` 的选项同一个办法:frontmatter 变量在 `<script>` 里不存在。
+        if (count && note) {
+          keys.set(Number(card.dataset.key), { card, count, note, noteText: note.textContent ?? '' });
+        }
+      }
+    }
+
+    // ---- 状态 ----
+
+    /** 每个键累计按过几次。chip 上那个数就是它 */
     const counts = new Array<number>(BUTTON_COUNT).fill(0);
-    const activeSince = new Array<number | null>(BUTTON_COUNT).fill(null);
+    /** 每个键上一次按下的时刻。**按编号分开记** —— 左键点一下再用右键点一下,
+     *  这两个事件之间的差没有意义,混在一起会凭空造出一个"间隔"。 */
+    const lastByButton = new Map<number, number>();
     let total = 0;
-    let lastHoldMs: number | null = null;
 
-    function renderCount(code: number): void {
-      const node = document.querySelector(`[data-count="${code}"]`);
-      if (node) node.textContent = String(counts[code]);
-    }
+    let downMask = 0;
+    /** 正在跟踪的指针。只有从测试面上按下的那一次才开始记账。 */
+    let armedPointerId: number | null = null;
 
-    function renderActive(code: number, active: boolean): void {
-      const node = document.querySelector(`[data-button="${code}"]`);
-      if (node) node.setAttribute('data-active', active ? 'true' : 'false');
-    }
+    let holding = false;
+    let heldSince = 0;
 
-    function renderSummary(): void {
-      setStat('total', String(total));
-      const triggered = counts.filter((c) => c > 0).length;
-      setStat('unique', `${triggered} / ${BUTTON_COUNT}`);
-      setStat('last-hold', lastHoldMs === null ? '—' : lastHoldMs.toFixed(0));
-    }
-
-    // ---- 交互 ----
+    // ---- 故障 ----
 
     /**
-     * 当前认为按下的键(本站的 0–4 编号,不是 DOM 的位序)。
-     *
-     * 按键状态**只能**从 `buttons` 位掩码推,不能用 `event.button`。
-     * 指针事件规范里的"组合按键"模型规定:`pointerdown` 只在指针
-     * **从"没有任何键按下"进入"有键按下"**时派发一次,`pointerup` 只在**最后一个键**
-     * 松开时派发一次。中间的每一次按下和松开都走 `pointermove`:
-     *
-     *     pointerdown  (左键, buttons=1)
-     *     pointermove  (右键按下, buttons=3)   ← 没有第二个 pointerdown
-     *     pointermove  (左键松开, buttons=2)   ← 没有对应的 pointerup
-     *     pointerup    (右键松开, buttons=0)
-     *
-     * 早先的实现读 `event.button`,于是组合键的第二次按下和第一次松开全是隐形的——
-     * 左右键一起按,一个都点不亮。`mousedown` / `mouseup` 倒是每个键都派发,
-     * 但它们捕捉不到"在窗口外按下"这类情况,位掩码才是权威来源。
-     *
-     * 掩码的翻译表(`BIT_FOR_CODE`,中键和右键的位是反的)搬去了
-     * `src/lib/mouse-buttons.ts` —— 拖拽页也要用同一张表,而它原先在这里
-     * 跟 frontmatter 靠人肉同步。
+     * 判出故障的键(按本站编号)。**这是一个累计的集合**,不是"这一次是不是故障" ——
+     * 连击是**偶发**的:微动刚开始老化时十次里抖一次,只标"当下那一次"的话,
+     * 用户松手回头一看,什么都看不到。所以一旦判出来就留着,直到按重置。
      */
-    let downMask = 0;
+    const faulted = new Set<number>();
+    /** 滚轮判出过疑似跳格。**单独一个标志**,因为滚轮和中键在图上同一块,不是一回事 */
+    let wheelFault = false;
+    /** 这一轮到底有没有收到过可判的东西。"没测"和"测了没事"是两句话 */
+    let sawPress = false;
+    let sawScroll = false;
 
-    /** 正在跟踪的指针。只有从工作台上按下的那一次才开始记账。 */
-    let armedPointerId: number | null = null;
+    // ---- 渲染 ----
+
+    /**
+     * 把按键状态画到图和按键牌上。
+     *
+     * 写 `'true'` / `'false'` 而不是增删属性:属性一增一删会多一次样式重算,
+     * 而这条路径挂在 `pointermove` 上,1000Hz 的鼠标每秒要调上千次。
+     */
+    function syncVisuals(): void {
+      const down: string[] = [];
+      for (const button of BUTTONS) {
+        const pressed = (downMask & (1 << button.code)) !== 0;
+        const bad = faulted.has(button.code);
+        parts.get(button.code)?.setAttribute('data-down', pressed ? 'true' : 'false');
+        // `data-fault` 是**常驻**写上去的:亮不亮只由 `data-down` 说了算,
+        // 而这一个决定"亮起来是绿还是红"。两件事分开,图上的规则才不会互相打架。
+        parts.get(button.code)?.setAttribute('data-fault', bad ? 'true' : 'false');
+        keys.get(button.code)?.card.setAttribute('data-down', pressed ? 'true' : 'false');
+        keys.get(button.code)?.card.setAttribute('data-fault', bad ? 'true' : 'false');
+        if (pressed) down.push(button.name);
+      }
+      // 空的时候给破折号而不是 0:这不是"算不出来",是"此刻没有"
+      setStat('holding', down.length > 0 ? down.join(' + ') : '—');
+    }
+
+    function renderCount(code: number): void {
+      const entry = keys.get(code);
+      if (entry) entry.count.textContent = String(counts[code]);
+    }
+
+    /**
+     * 把「故障」那一格、以及判出故障的按键牌,重画一遍。
+     *
+     * **只在故障状态真的变了的时候调**(判出一处、或者重置),不挂在 `syncVisuals()`
+     * 上 —— 那一条要走 `pointermove`,而这里动的是文本节点。
+     *
+     * 三档分界和全站一致:**没测过给破折号**(不是"未发现",那时候还没资格说这句话)、
+     * 测过没毛病给"未发现"、判出来给"`N` 处"并把细节写在小注里。
+     */
+    function renderFault(): void {
+      const names: string[] = [];
+      for (const button of BUTTONS) {
+        if (faulted.has(button.code)) names.push(`${button.name} 疑似连击`);
+      }
+      if (wheelFault) names.push('滚轮 疑似跳格');
+
+      const tested = sawPress || sawScroll;
+      const count = names.length;
+
+      if (count > 0) {
+        setStat('fault', `${count} 处`);
+        setHint('fault', names.join(' · '));
+      } else if (tested) {
+        setStat('fault', '未发现');
+        setHint('fault', '按过的键和滚轮都没出问题');
+      } else {
+        setStat('fault', '—');
+        setHint('fault', '还没测到能下判断的东西');
+      }
+
+      // 那一格变红是"这一页判出了故障"唯一的汇总信号,所以和 `--primary` 一样是
+      // 挂在外层 `.stat` 上的一个档,而不是给数字加个颜色了事
+      statNode('fault')?.closest('.stat')?.classList.toggle('stat--fault', count > 0);
+
+      // 牌上那句小注**替换**成故障名,不是另起一行 —— 加一行会把这一行卡片顶高,
+      // 而卡片高度是量过的(1440 下 114.5px)。信息量也确实该在这儿:「左键」就在上面,
+      // 这一行本来就是解释这块牌的那句话。
+      for (const button of BUTTONS) {
+        const entry = keys.get(button.code);
+        if (!entry) continue;
+        const bad = faulted.has(button.code);
+        setText(entry.note, bad ? '疑似连击' : entry.noteText);
+        entry.note.classList.toggle('mouse-key__note--fault', bad);
+      }
+    }
+
+    /** 判出一处故障。去重:同一个键抖第二次不再重复报 */
+    function markFault(code: number): void {
+      if (faulted.has(code)) return;
+      faulted.add(code);
+      renderFault();
+    }
+
+    /**
+     * 一次按下。`stamp` 必须是 `event.timeStamp`。
+     *
+     * 间隔量的是**两个事件之间**:浏览器会把攒在一起的事件放进同一个任务里派发,
+     * 那一刻两个处理函数里的 `performance.now()` 会塌到 0,一次完全正常的人手双击
+     * 会被算成 0 毫秒、直接报成连击。`event.timeStamp` 是事件自己带的时刻,不吃这份
+     * 派发延迟。(下面按住秒数反过来,量的是墙钟,所以用 `performance.now()`。)
+     */
+    function press(code: number, stamp: number): void {
+      counts[code]++;
+      total++;
+      sawPress = true;
+      renderCount(code);
+
+      const previous = lastByButton.get(code);
+      lastByButton.set(code, stamp);
+      if (previous === undefined) {
+        // 第一个按下的键也是"测过了",这一句不能漏 —— 否则按一次再停手,
+        // 「故障」那一格会一直停在破折号上,而它其实已经有资格说"未发现"了
+        renderFault();
+        return;
+      }
+
+      const gap = stamp - previous;
+      setStat('gap', format(gap, 0));
+      // 触点抖动标在**那个键的计数**上(参考图里也是计数在变色),不是另起一行字
+      const chatter = classifyClickGap(gap) === 'chatter';
+      keys.get(code)?.count.classList.toggle('mouse-key__n--chatter', chatter);
+
+      // 同一个判据,第二处出口:图上那一瓣、那块牌,以及「故障」那一格
+      if (chatter) markFault(code);
+      else renderFault();
+    }
+
+    // ---- 按住计时 ----
+
+    const stopTicker = createTicker(80, () => {
+      if (!holding) return;
+      setStat('held', format((performance.now() - heldSince) / 1000, 1));
+    });
+
+    function beginHold(): void {
+      if (holding) return;
+      holding = true;
+      heldSince = performance.now();
+    }
+
+    function endHold(): void {
+      if (!holding) return;
+      holding = false;
+      setStat('held', format((performance.now() - heldSince) / 1000, 1));
+    }
+
+    // ---- 按键状态 ----
 
     /**
      * 对齐一次真实状态,把中间发生的按下/松开都补记上。
      *
-     * 时刻统一取 `performance.now()` 而不是 `event.timeStamp`:下面按住时长的
-     * 实时刷新走的是 rAF,那边只有 `performance.now()`。两者虽然同源,但混用
-     * 一旦遇上时间原点不同源的实现,时长会算成天文数字——这里不值得为亚毫秒的
-     * 精度差去冒这个险。
-     * (拖拽页反过来,那边一律用 `event.timeStamp` —— 它量的是"两个事件之间",
-     * 见 CLAUDE.md。判断标准就这一句:量的是间隔还是墙钟。)
+     * 按键状态**只能**从 `buttons` 位掩码推,不能用 `event.button`:
+     * `pointerdown` 只在指针**从"没有任何键按下"进入"有键按下"**时派发一次,
+     * `pointerup` 只在**最后一个键**松开时派发一次,中间的每一次按下和松开都走
+     * `pointermove`。早先读 `event.button` 的写法漏掉了组合键的第二次按下和
+     * 第一次松开 —— 左右键一起按,一个都点不亮。翻译表在 `mouse-buttons.ts`。
      *
      * `eachButtonEdge` 自己也会在掩码没变时早退,但**外面这一层早退是必需的**:
-     * 它会挂在 `pointermove` 上,1000Hz 的鼠标每秒要调上千次,而下面还有
-     * `performance.now()` 和三次 `setStat`。
+     * 它挂在 `pointermove` 上,而下面还有三次 DOM 写入。
      */
-    function syncButtons(buttons: number): void {
+    function syncButtons(buttons: number, stamp: number): void {
       const next = maskFromButtons(buttons);
       if (next === downMask) return;
-      const now = performance.now();
-
       eachButtonEdge(downMask, next, (code, isDown) => {
-        if (isDown) {
-          counts[code]++;
-          total++;
-          activeSince[code] = now;
-          renderCount(code);
-          renderActive(code, true);
-        } else {
-          const startedAt = activeSince[code];
-          if (startedAt !== null) {
-            lastHoldMs = now - startedAt;
-            activeSince[code] = null;
-          }
-          renderActive(code, false);
-        }
+        if (isDown) press(code, stamp);
       });
-
       downMask = next;
-      renderSummary();
+
+      if (downMask !== 0) beginHold();
+      else endHold();
+
+      syncVisuals();
+      setStat('presses', String(total));
     }
 
-    /** 窗口失焦:按键状态已不可信,清空但不记时长。 */
-    function clearButtons(): void {
-      if (downMask === 0) return;
-      downMask = 0;
-      armedPointerId = null;
-      activeSince.fill(null);
-      for (let code = 0; code < BUTTON_COUNT; code++) renderActive(code, false);
-      renderSummary();
-    }
-
-    // 按下必须发生在工作台(卡片或测试区)上才开始记账,否则在页面上随便点一下
-    // 也会计数。松开则要在窗口上收——指针很可能已经拖出去了。
-    function onWorkbenchPointerDown(event: PointerEvent): void {
-      if (hint) hint.hidden = true;
+    function onAreaPointerDown(event: PointerEvent): void {
       armedPointerId = event.pointerId;
-      syncButtons(event.buttons);
+      syncButtons(event.buttons, event.timeStamp);
     }
 
     function onWindowPointerMove(event: PointerEvent): void {
       if (event.pointerId !== armedPointerId) return;
       // 组合键的按下和松开都藏在这里,见上面 syncButtons 的注释
-      syncButtons(event.buttons);
+      syncButtons(event.buttons, event.timeStamp);
     }
 
     function onWindowPointerUp(event: PointerEvent): void {
       if (event.pointerId !== armedPointerId) return;
-      syncButtons(event.buttons);
+      syncButtons(event.buttons, event.timeStamp);
       // 最后一个键也松开了,这一轮结束
       if (event.buttons === 0) armedPointerId = null;
     }
 
-    // 侧键的后退/前进是浏览器级的默认行为,拦不住就会把用户弹回上一页,
-    // 计数全部清零。必须整页拦,和指针停在哪个元素上无关。
-    //
-    // **刻意不接它返回的还原函数。** 曾经在 `pagehide` 里摘过一次:页面进
-    // bfcache 时 `pagehide` 照样触发,用户按返回键回来之后就再也没人拦侧键了,
-    // 而这一页的全部意义就是让用户逐个按过去 —— 和 `suppressWorkbenchDefaults()`
-    // 是同一条规矩,见 CLAUDE.md。
-    suppressSideButtonNavigation();
-
-    // 右键菜单、中键自动滚动、中键 auxclick。判据是"落点是不是控件",
-    // 实现和理由都在 ui.ts —— 和其余几个有手势的页面共用同一份。
-    suppressWorkbenchDefaults();
-
-    // 按键卡片本身也要能按。用户盯着卡片看的时候,指针就停在卡片上——
-    // 只有测试区响应的话,按下去什么反应都没有,而那正是这个页面要测的东西。
-    if (area) area.addEventListener('pointerdown', onWorkbenchPointerDown);
-    diagram?.addEventListener('pointerdown', onWorkbenchPointerDown);
-
-    // 后续一律在窗口上收:指针按下之后移出工作台是常事。
-    //
-    // `pointermove` 不是可选项——组合键的按下和松开都在它里面(见 syncButtons)。
-    // 好在 syncButtons 开头就是一次整数比较,普通移动会被立刻挡掉,不会因为
-    // 每秒上千次的 mousemove 拖慢页面。
-    window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
-    window.addEventListener('pointerup', onWindowPointerUp);
-    window.addEventListener('pointercancel', onWindowPointerUp);
-
-    // 窗口失焦时按键状态不再可信——用户在别处松开鼠标,这里收不到 pointerup,
-    // 卡片会一直亮着。清掉,但不记时长。
-    window.addEventListener('blur', clearButtons);
-
-    // ---- 按住时长的实时刷新 ----
-
-    let rafId = 0;
-
-    function tick(): void {
-      rafId = requestAnimationFrame(tick);
-
-      let earliest: number | null = null;
-      for (const startedAt of activeSince) {
-        if (startedAt !== null && (earliest === null || startedAt < earliest)) {
-          earliest = startedAt;
-        }
-      }
-
-      setStat('holding', earliest === null ? '0' : (performance.now() - earliest).toFixed(0));
+    /**
+     * 窗口失焦:按键状态已不可信(用户在别处松开鼠标,这里收不到 `pointerup`,
+     * 图会一直亮着),清掉,但不记时长。
+     */
+    function clearButtons(): void {
+      if (downMask === 0) return;
+      downMask = 0;
+      armedPointerId = null;
+      holding = false;
+      syncVisuals();
     }
 
-    rafId = requestAnimationFrame(tick);
+    // ---- 滚轮 ----
+
+    /** 滚轮朝哪边。`''` 是"还没滚过" —— 图上什么都不亮 */
+    let wheelDir: '' | 'up' | 'down' = '';
+
+    /**
+     * 收到的滚动事件。**必须逐次留下**,不能只记一个净值:
+     * 格数是若干次滚动累加出来的(`summarizeScroll` 会在内部跳过零位移的那些)。
+     *
+     * `MAX_EVENTS` 这条上限是**从「滚轮」那一页搬过来的**:首页那台装置只活几秒,
+     * 而这一页会开一整天,不设上限的话这个数组会一直长下去。
+     */
+    const MAX_EVENTS = 4000;
+    let notches: ScrollNotch[] = [];
+
+    function onWheel(event: WheelEvent): void {
+      // 不拦的话页面会跟着滚,面板从指针底下溜走 —— 和「滚轮」那一页同一条理由。
+      // 所以要 `passive: false`
+      event.preventDefault();
+
+      const step = normalizeWheelDelta(event.deltaY, event.deltaMode);
+      notches.push({ notches: step, raw: event.deltaY, deltaMode: event.deltaMode });
+      if (notches.length > MAX_EVENTS) notches = notches.slice(MAX_EVENTS / 2);
+
+      // 零位移的那一次没有方向,不翻状态(`summarizeScroll` 也跳过它,两个口径一致)
+      if (step !== 0) {
+        wheelDir = step > 0 ? 'down' : 'up';
+        if (figure) figure.dataset.wheel = wheelDir;
+        sawScroll = true;
+      }
+
+      // 格数取**净值**的绝对值,和「滚轮」那一页那个大数字同一个口径。
+      // 故障也读**同一个结果**——`glitches` 就是 `markScrollGlitches()` 那一份判据,
+      // 这里不再自己数一遍(和 `summarizeScroll` 逐字同源,见 analysis.ts)。
+      const scroll = summarizeScroll(notches);
+      setStat('notches', format(Math.abs(scroll.netNotches), 0));
+
+      if (scroll.glitches > 0) wheelFault = true;
+      // 滚轮故障挂在图自己身上,不占用那一瓣的 `data-fault`(滚轮 = 中键,会互相抹掉)
+      if (wheelFault && figure) figure.dataset.wheelFault = 'true';
+
+      // 每次滚动都重画:里面每一处写入都先比较再赋值(`setText`),状态没变就是一个
+      // 整数比较。**不要为了省这一次调用去手工追踪"什么时候该重画"** —— 那正是
+      // 三档分界(破折号 / 未发现 / N 处)最容易漏掉一条岔路的地方。
+      renderFault();
+    }
+
+    // ---- 接线 ----
+
+    // 侧键的后退/前进是浏览器级的默认行为,拦不住就会把用户弹回上一页,计数全部清零。
+    // 必须整页拦,和指针停在哪个元素上无关。
+    //
+    // **刻意不接它返回的还原函数。** 曾经在 `pagehide` 里摘过一次:页面进 bfcache 时
+    // `pagehide` 照样触发,用户按返回键回来之后就再也没人拦侧键了 —— 和
+    // `suppressWorkbenchDefaults()` 是同一条规矩,见 CLAUDE.md。
+    suppressSideButtonNavigation();
+
+    // 右键菜单、中键自动滚动、中键 auxclick。判据是"落点是不是控件",实现和理由都在 ui.ts。
+    suppressWorkbenchDefaults();
+
+    if (area) {
+      // 按下必须落在测试面上才开始记账,否则在页面上随便点一下也会计数。
+      // 松开则要在窗口上收——指针很可能已经拖出去了。
+      area.addEventListener('pointerdown', onAreaPointerDown);
+      // `pointermove` 不是可选项——组合键的按下和松开都在它里面。
+      // 好在 syncButtons 开头就是一次整数比较,普通移动会被立刻挡掉。
+      window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
+      window.addEventListener('pointerup', onWindowPointerUp);
+      window.addEventListener('pointercancel', onWindowPointerUp);
+      area.addEventListener('wheel', onWheel, { passive: false });
+    }
+
+    window.addEventListener('blur', clearButtons);
+
+    // ---- 重置 ----
 
     resetButton?.addEventListener('click', () => {
       counts.fill(0);
-      activeSince.fill(null);
+      lastByButton.clear();
       total = 0;
-      lastHoldMs = null;
+      downMask = 0;
+      armedPointerId = null;
+      holding = false;
+      notches = [];
+      wheelDir = '';
+      // 故障也是这一轮的结果,重置要一起清 —— 判据一直是同一句:「重置回到没测过的样子」
+      faulted.clear();
+      wheelFault = false;
+      sawPress = false;
+      sawScroll = false;
+
       for (let code = 0; code < BUTTON_COUNT; code++) {
+        const entry = keys.get(code);
         renderCount(code);
-        renderActive(code, false);
+        entry?.card.setAttribute('data-down', 'false');
+        entry?.count.classList.remove('mouse-key__n--chatter');
       }
-      renderSummary();
-      if (hint) hint.hidden = false;
+      if (figure) {
+        delete figure.dataset.wheel;
+        delete figure.dataset.wheelFault;
+      }
+
+      // 先清干净再 `syncVisuals()`:后者只按 `faulted` 写 `data-fault`,
+      // 它是"此刻的事实",不会替我们把上一轮的残留摘掉
+      syncVisuals();
+      renderFault();
+      setStat('presses', '0');
+      setStat('gap', '—');
+      setStat('held', '—');
+      setStat('notches', '—');
     });
 
+    // 开局:计数是真数出来的 0,其余四项是"此刻还没有",给破折号
+    setStat('presses', '0');
+    setStat('gap', '—');
+    setStat('held', '—');
+    setStat('notches', '—');
+    syncVisuals();
+    // 「故障」开局是破折号,不是「未发现」—— 还没测过就没资格说这句话
+    renderFault();
+
     // 页面离开前停止动画循环。侧键拦截**不在这里还原**,理由见上面。
-    window.addEventListener('pagehide', () => {
-      cancelAnimationFrame(rafId);
-    });
+    window.addEventListener('pagehide', stopTicker);
   </script>
 </BaseLayout>
