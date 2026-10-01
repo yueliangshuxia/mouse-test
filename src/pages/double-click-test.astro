@@ -191,6 +191,83 @@ const jsonLd = {
     .workbench__stage > h2 {
       margin-top: 0;
     }
+
+    /*
+     * 点击处的波纹。**这是全站唯一的动画** —— 全站的纪律是"不加非用户触发的
+     * 动效",而这一条恰好相反:每一圈都由一次真实的按下触发,它报的是
+     * "这一下被收到了",和读数栏里那个数字是同一条信息的两种形态。
+     *
+     * 必须写成 `:global(...)`:这些节点是 `<script>` 里 createElement 造的,
+     * 而 Astro 的作用域化把 cid 加在**选择器**上、元素身上没有那个属性 ——
+     * 规则一条都不命中,而且是静默的。和瞄准页的 `.aim-target` 同一个出口。
+     */
+    :global(.ripple) {
+      /*
+       * 直径由脚本按面板**短边**的比例给(见 `<script>` 的 `RIPPLE_RATIO`)。
+       * 圆该跟短边走:同一份代码要伺候 1440 下的 646×380 和 420 下的 365×260,
+       * 一个写死的直径不是在小面板上顶到上下两条边,就是在大面板上小得看不见。
+       * 下面这个 200px 只是**兜底** —— 真正的值每次都从脚本写进来,两者要同值
+       * (同 `renderer.ts` 那个 `--trail-color` 兜底常量)。
+       */
+      --ripple-size: 200px;
+      position: absolute;
+      width: var(--ripple-size);
+      height: var(--ripple-size);
+      /* 用负外边距把圆心对到 left/top 上,而不是 `transform: translate(-50%, -50%)`
+         ——这样关键帧里就只剩一个纯 scale,不用把 translate 抄两遍。 */
+      margin: calc(var(--ripple-size) / -2) 0 0 calc(var(--ripple-size) / -2);
+      /* 井里 `--accent` 就是磷光绿,纸面那两个主题值在这里都用不上 */
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      opacity: 0;
+      /* 命中判定靠 `event.target === #area`,飘一层东西上去就变了 */
+      pointer-events: none;
+      /* 没有 animation-delay,所以不需要 `both` 去锁延迟期那一帧 —— `forwards`
+         就够:动画一上来就跑,0% 那一帧(透明、缩到最小)本来就会立刻生效。 */
+      animation: ripple-out 620ms ease-out forwards;
+    }
+
+    /*
+     * 两个类写成 (0,2,0),刻意不靠源码顺序 —— 和 `.mouse-key__note--fault`
+     * 同一条规矩。朱砂说的是"这一下结掉了一个疑似连击",和日志里那条红条目
+     * 是同一个判据(`classifyClickGap`),不是两种说法。
+     */
+    :global(.ripple.ripple--fault) {
+      border-color: var(--danger);
+    }
+
+    /*
+     * 一次按下**一圈**,不是一列波。单圈就已经把"这一点被收到了"说完了,
+     * 多圈只是同一条信息的重复,而且在这个以"快速连点"为主题的页面上,
+     * 一次点击铺开三圈会密得看不清是哪一下。
+     *
+     * 描边**故意不加粗**:`transform: scale()` 会把边框一起缩放,所以这圈环是
+     * 从细到粗长出来的。看着像缺点,其实是这一版要的:开头那点亚像素的线正好
+     * 让环"浮"出来,而不是"啪"地出现一个圈。
+     */
+    @keyframes ripple-out {
+      0% {
+        transform: scale(0.12);
+        opacity: 0;
+      }
+      /*
+       * 峰值压在 15%、然后一路慢降到 60% —— **不是**"亮一下再淡出"。
+       * 环的"看得见"是 `描边宽 × 不透明度`,而描边宽跟着 scale 走:开头那圈
+       * 只有 0.4px 粗,那时就算给满不透明度也还是看不见。所以要它**在长到
+       * 中途时最亮**,两头收 —— 峰值摆在开头等于把这份亮度浪费在一片亚像素上,
+       * 朱砂尤其明显:半透明压在那个近黑的井底上会变成一坨发暗的褐色。
+       */
+      15% {
+        opacity: 1;
+      }
+      60% {
+        opacity: 0.7;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 0;
+      }
+    }
   </style>
 
   <script>
@@ -249,6 +326,55 @@ const jsonLd = {
       double: 'log-item log-item--warn',
       separate: 'log-item',
     };
+
+    // ---- 点击处的波纹 ----
+
+    /**
+     * 同时活着的波纹上限。一次按下只有一个节点,而这一页要测的故障恰恰是
+     * "一秒钟点二十下" —— 那正是波纹叠得最快的时候,不能让它把 DOM 撑爆。
+     * 二十连击 × 0.62s 的寿命 ≈ 13,取 24 留一倍余量(坏鼠标报出上百 CPS 也兜得住)。
+     */
+    const RIPPLE_LIMIT = 24;
+
+    /**
+     * 波纹的直径 = 面板**短边**的这个比例。1440 下约 209px、420 下约 143px
+     * (面板 646×380 / 365×260,两个数都是量出来的)。
+     *
+     * 挂短边而不是写死像素,是因为面板的**高度**在窄档会从 380 掉到 260 ——
+     * 写死 200px 在 420 下会顶到上下两条边。CSS 里那份 200px 只是兜底。
+     */
+    const RIPPLE_RATIO = 0.55;
+
+    /**
+     * 在指针处放一圈波纹。`fault` 为真时是朱砂色。
+     *
+     * 每一下现读一次 rect,不缓存:用户中途滚动会让缓存的矩形失效 ——
+     * 和瞄准页"一枪读一次"是同一条理由。`clientLeft` / `clientTop` 是边框宽,
+     * 而绝对定位的包含块是**内边距盒**,不减掉这 1px,波纹就整体偏一格。
+     */
+    function spawnRipple(clientX: number, clientY: number, fault: boolean): void {
+      if (!area) return;
+      const box = area.getBoundingClientRect();
+
+      const ring = document.createElement('span');
+      ring.className = fault ? 'ripple ripple--fault' : 'ripple';
+      ring.setAttribute('aria-hidden', 'true');
+      ring.style.left = `${clientX - box.left - area.clientLeft}px`;
+      ring.style.top = `${clientY - box.top - area.clientTop}px`;
+      ring.style.setProperty(
+        '--ripple-size',
+        `${Math.round(Math.min(box.width, box.height) * RIPPLE_RATIO)}px`,
+      );
+      // 自清:环走完自己摘掉,不靠计时器也不靠下一次点击去扫。
+      // **注意 `prefers-reduced-motion` 下它会被全站那条夹子压成 0.01ms,
+      // 于是立刻结束、立刻被摘掉 —— 波纹就等于没有。这是那个设置该有的样子,
+      // 不是漏做:波纹是装饰,真正的反馈是日志和计数,它们一条都不会少。**
+      ring.addEventListener('animationend', () => ring.remove());
+      area.appendChild(ring);
+
+      const live = area.querySelectorAll('.ripple');
+      for (let i = 0; i < live.length - RIPPLE_LIMIT; i++) live[i].remove();
+    }
 
     /** 当前目标键的间隔序列 */
     function currentGaps(): number[] {
@@ -339,7 +465,19 @@ const jsonLd = {
       // 双击会被算成 0 毫秒,直接报成"连击"。这是本站最不该出的错:把一个
       // 假数字当成故障结论。`event.timeStamp` 是事件自己带的时刻,不吃这份
       // 派发延迟(剩下的批处理涂抹在 0.6ms 量级,对 50ms 的门槛可以忽略)。
-      timesFor(targetCode).push(event.timeStamp);
+      const times = timesFor(targetCode);
+      const previous = times.length > 0 ? times[times.length - 1] : null;
+      times.push(event.timeStamp);
+
+      // 波纹的成色跟着**这一下结出来的间隔**走,和日志里那条的颜色是同一个
+      // 判据、同一个纯函数。第一下没有"之间",所以永远是绿的。
+      const gap = previous === null ? null : event.timeStamp - previous;
+      spawnRipple(
+        event.clientX,
+        event.clientY,
+        gap !== null && classifyClickGap(gap) === 'chatter',
+      );
+
       render();
     });
 
@@ -360,6 +498,9 @@ const jsonLd = {
     el('reset')?.addEventListener('click', () => {
       pressTimes.clear();
       hint?.removeAttribute('hidden');
+      // **故意不在这里摘波纹。** 它不是读数,是一次按下的回执:半路被摘掉会
+      // 当场"啪"地消失。剩下的半圈说的事情(刚才那一下真的收到了)也并没有
+      // 因为重置而变成假的,让它自己走完,不到一秒。
       render();
     });
 
