@@ -879,14 +879,30 @@ html:has(.site-dock:not([hidden])) .site-footer {
 /* ---------- 底部悬浮条 ---------- */
 
 /*
- * 视口底部正中央的一条深色浮层,**现在里面是空的** —— 以后放二维码 / 图片。
+ * 视口底部正中央的一条深色浮层 —— **鼠标维修的入口**。
  *
  * 它挂 `.well`:这是一块深色浮层,和仪器窗是同一个东西,底色、边框、
  * 前景色、`color-scheme: dark` 全部现成。而且仪器窗的配色在深浅两套主题下
  * 几乎不变(见上面「深色纸面」那一节),所以这颗悬浮条**不用写第二套规则
- * 就自动在两个主题下都对**。
+ * 就自动在两个主题下都对** —— 下面这一整块因此一个颜色字面量都没有
+ * (除了二维码那块浅底,那一条单独解释)。
  *
  * z-index 取 5:高过回报率页那个 `z-index: 2` 的虚线视口边框,低过任何弹层。
+ *
+ * ## 收起 / 展开
+ *
+ * 收起态只有一枚药丸,展开由纯 CSS 的 `:hover` / `:focus-within` 管
+ * (理由和那两条"不写 aria-expanded"的判决写在 `BaseLayout.astro` 里)。
+ * **面板不进绝对定位、排在触发器前面** —— `bottom: 18px` 锚定,内容长出来
+ * 自然向上顶。绝对定位会留出一条缝,鼠标跨过去 `:hover` 就断了。
+ */
+/*
+ * **`.well` 不在这条上,在面板上。** 收起时脚下只有一枚裸图标 —— 底板、
+ * 边框、圆角一概没有(用户定的)。展开时那张卡片才需要一块深色衬托
+ * (上面有二维码和说明),所以 `.well` 跟着面板走。
+ *
+ * 代价是这一层**没有 padding**:面板自己带(见下),图标自己带。
+ * 原来那 10px 是给 `.well` 的边框留的边距,现在没有边框可留。
  */
 .site-dock {
   position: fixed;
@@ -894,17 +910,202 @@ html:has(.site-dock:not([hidden])) .site-footer {
   transform: translateX(-50%);
   bottom: 18px;
   z-index: 5;
-  padding: 12px 16px;
   text-align: center;
 }
 
-.site-dock__placeholder {
+/*
+ * 这里原来还有 `padding: 10px` —— `.well` 只有底色、边框、圆角,**不带内边距**,
+ * 所以面板的内边距得自己写,否则二维码会贴着那圈边框。
+ */
+.site-dock__panel {
+  display: none;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 14px 16px 12px;
+  /* 这条 8px 是**面板与图标之间的桥**,不是装饰 —— 它在 `.site-dock` 的
+     盒子里,所以鼠标停在那儿仍然算 hover 在整条上,面板不会中途收掉 */
+  margin-bottom: 8px;
+}
+
+.site-dock:hover .site-dock__panel,
+.site-dock:focus-within .site-dock__panel {
+  display: block;
+}
+
+.site-dock__title {
   margin: 0;
-  padding: 26px 34px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-lg);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.site-dock__codes {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin: 10px 0 12px;
+}
+
+/* ---------- 二维码 ---------- */
+
+/*
+ * 一格二维码:浅底方块 + 一行标签。
+ *
+ * **两个消费者**:底部悬浮条(`.site-dock`)和维修页的「联系」那一节。
+ * 抽成共用的不是为了省几行 —— 是因为这里有一个**必须一致**的东西:
+ * 二维码那格浅底是**硬写颜色值**的(理由见下)。两处各写一份的话,
+ * 迟早一处改了另一处旧着,而"二维码扫不出来"这个后果**在页面上看不出来**
+ * —— 和 `mouse-buttons.ts` / `keyboard-layout.ts` 是同一条理由。
+ *
+ * 尺寸走 `--qr-size`,默认 128px:悬浮窗里要小,维修页上要大好扫。
+ *
+ * **那块浅底硬写 `#fff`、占位字硬写 `#55636e`,是全站第二处硬写颜色值的地方**
+ * (第一处是坏点页那五片纯色),理由同一种:它是**内容,不是界面色**。
+ * 二维码必须压在浅底、四周留静默区才扫得出来;铺成井里的近黑,手机认不出。
+ * 那行占位字取 `#55636e` 是因为它压在这块白底上,而井里的 `--text-dim`
+ * 是浅灰,白底上读不出来。
+ *
+ * 真码到位时把 `<span>` 里的字换成 `<img>`,外面那层一个字不用动。
+ */
+.qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  /* 有些格子是链接,全局 `a:hover` 会给它加下划线 —— 它裹的是图,很难看 */
+  text-decoration: none;
+}
+
+/*
+ * **那圈 1px 边框不是装饰,是这一格在浅色下唯一的轮廓。**
+ *
+ * 截图看出来的:白底 `#fff` 压在纸面 `#f1f3f4` 上约 1.1:1,占位那格
+ * 在白纸上几乎看不见 —— 只有"二维码位"四个字浮在半空。工具箱那格
+ * `.box-item__preview` 记的是同一条(底色在浅色下也几乎看不见,得两样叠起来)。
+ *
+ * 边框压在盒子边缘、不吃掉二维码的静默区(`box-sizing: border-box` 是全局的,
+ * 图片缩到内边距盒里),所以有真码时它就是一封相框,不会影响扫。
+ */
+.qr__box {
+  display: grid;
+  place-items: center;
+  width: var(--qr-size, 128px);
+  height: var(--qr-size, 128px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: #55636e;
+  font-size: 0.72rem;
+}
+
+/*
+ * `border-radius: inherit` 不是可选项:白底那圈圆角在外层盒子上,
+ * 而二维码是**方图**,不继承的话四个角会顶出圆角外面,像贴歪了。
+ */
+.qr__box img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.qr__label {
+  font-size: 0.72rem;
   color: var(--text-faint);
+}
+
+/*
+ * 是链接的那一格,悬停给白底一圈描边 —— 这是"它可点"唯一的提示。
+ *
+ * **不能用颜色提示**:井里的前景色令牌在两个主题下是同一份,而再往上加
+ * 一层色相会撞上「有颜色的地方就是在出数」那条 —— 描边是纸面和井里
+ * 唯一可用的记号。`text-decoration: none` 两处都要写(常态和 hover 各一条),
+ * 因为下划线会画在图片底下。
+ */
+.qr[href] {
+  text-decoration: none;
+}
+
+.qr[href]:hover {
+  text-decoration: none;
+}
+
+.qr[href]:hover .qr__box {
+  outline: 2px solid var(--text-faint);
+  outline-offset: 2px;
+}
+
+.qr[href]:hover .qr__label {
+  color: var(--text);
+}
+
+/*
+ * 面板底下那行。**它从"细字号的声明"变成了一句招呼,所以字号和字色都提了一档**
+ * (0.72 → 0.8rem,`--text-faint` → `--text-dim`)—— 沿用声明那一档的话,
+ * 一句招呼会被读成免责小字,而它现在正是这个面板里唯一一句对着人说的话。
+ */
+.site-dock__note {
+  margin: 0;
   font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/*
+ * 触发器。**药丸形**,和全站按钮同一档圆角。
+ *
+ * 颜色一律取 `--text*` 而**不取 `--accent`** —— 井里的 `--accent` 是磷光绿,
+ * 而绿在这个站只有一个含义:"这里正在出数"。这是一枚导航入口,不是读数。
+ */
+/*
+ * 触发器:**一枚裸图标**,没有边框、没有文字、没有底板。
+ *
+ * 盒子比图标大一圈(44 对 36),那 4px 是**命中区**不是留白 —— 一个只有
+ * 图标、没有底色的链接,肉眼分不出哪儿能点,盒子给足就补上了这一点。
+ * 44 也在 WCAG 2.5.8 那条 24×24 的下限之上。
+ *
+ * 悬停时给一层**淡淡的底**,这是"它可点"唯一的提示(不能用颜色提示,
+ * 也不能加边框 —— 边框是用户明确不要的)。
+ */
+.site-dock__trigger {
+  display: block;
+  width: 44px;
+  height: 44px;
+  /*
+   * **`margin: 0 auto` 不是可选的。**
+   *
+   * 整条 dock 是 `left: 50%` + `translateX(-50%)` 居中的,而它的宽度会变:
+   * 收起时只有这 44px,面板一展开就变成 304px。**居中的基准跟着一起变**,
+   * 而一个 `display: block` 的定宽块是靠左对齐的 —— 于是悬停那一刻图标
+   * 横向跳 130px((304 − 44) / 2)。
+   *
+   * 实测:面板展开时图标的左边界 561、收起时 691。加上这一行之后两边都是 691。
+   */
+  margin: 0 auto;
+  padding: 4px;
+  border-radius: var(--radius);
+  text-decoration: none;
+}
+
+.site-dock__trigger:hover,
+.site-dock__trigger:focus-visible {
+  background: var(--bg-inset);
+  /* 全局 `a:hover` 会给它加下划线,而它里面只有一张图 —— 下划线会画在图底下 */
+  text-decoration: none;
+}
+
+/*
+ * 图标本体。`public/repair-icon.png` 是**真 RGBA**(从一张近白棋盘底的图抠出来
+ * 再缩到 220px 宽的),所以它在深色纸上不会是一块白方块。
+ *
+ * `object-fit: contain` 保证它按原比例落进那个方盒 —— 源图是 220×247,
+ * 竖着比横着长一点,强行拉成正方形那几个零件会变形。
+ */
+.site-dock__trigger-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 /* ---------- 提示条 ---------- */
@@ -2651,6 +2852,43 @@ code {
   color: var(--text-dim);
   margin: 0;
   line-height: 1.75;
+}
+
+/*
+ * `<dl>` 版的 FAQ —— **补一份缺的规则,不是新增一套样式。**
+ *
+ * 站上 FAQ 有两种写法:`<div class="faq">` + `.faq__item`(14 个工具页),
+ * 和 `<dl class="faq">` + `<dt>/<dd>`(`toolbox.astro`、`mouse-repair.astro`)。
+ * 后者**语义更对**(一问一答本来就是定义关系),但上面那三条规则只覆盖了
+ * 前者 —— `<dd>` 于是落回浏览器默认的 `margin-inline-start: 40px`,
+ * 而条目之间**一条分隔线都没有**,整段问答糊成一片。
+ *
+ * 这是**截图看出来的**,读代码看不出来:CSS 里 `.faq` 明明有规则,
+ * 而缺的那部分是浏览器默认值,不写就没有、也不会报错。
+ *
+ * 补齐的口径是**和 `.faq__item` 那一套一模一样**:问句上方一条 1px 线、
+ * 答句缩进收回、字色和行高对齐。所以两版现在只有结构不同,长相是同一份。
+ *
+ * **不碰那 14 页**,而且首页没有任何 FAQ —— 所以文档里记的首页总高
+ * (2147 / 3338)一格都不会动。
+ */
+.faq > dt {
+  border-top: 1px solid var(--border);
+  padding-top: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.faq > dd {
+  margin: 6px 0 0;
+  padding-bottom: 15px;
+  color: var(--text-dim);
+  line-height: 1.75;
+}
+
+/* 收尾那条线。`.faq__item` 每一项都带下边框,含最后一项 —— 这里对齐它 */
+.faq > dd:last-child {
+  border-bottom: 1px solid var(--border);
 }
 
 /* ---------- 操作步骤 ---------- */

@@ -1,0 +1,518 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { REPAIR_HERO_SVG } from '../lib/repair-motifs';
+import { REPAIR } from '../lib/tools';
+import { faqHtml, faqText } from '../lib/faq';
+import { href } from '../lib/url';
+
+/*
+ * 鼠标维修 —— **第二个不是"一件测量工具"的页面**(第一个是 `/toolbox/`)。
+ *
+ * 和工具箱一样,它不进 `tools.ts` 的注册表:注册表是**工具**的地方,而这一页
+ * 一个数都不出。所以它拿不到 `ready` 那道"不许链接到不存在的页面"的保护,
+ * 由 `tests/nav.test.ts` 的 `existsSync` 补回来 —— 和工具箱同一条。
+ *
+ * ## 这一页最要紧的一条设计约束
+ *
+ * **故障判定区永远不出现服务信息。** 测出"疑似连击"的地方只许有结论和
+ * "怎么办",不许有"找我修"。理由不是洁癖:用户看到"检测到故障"旁边就是
+ * 维修入口,第一反应是"它是不是想卖我东西" —— 而全站的信誉就建立在这类
+ * 判断不被怀疑上。服务信息一律放在**与测出什么无关**的位置。
+ *
+ * 同一件事的另一半是**披露**:本站作者就是维修方,这句话写在正文最前面,
+ * 不藏进页脚。藏起来的代价远大于一开始就说 —— 而且它和全站"测不准就明说"
+ * 是**同一条纪律**,只不过这次要明说的是立场,不是误差。
+ */
+
+const FAQ = [
+  {
+    q: '测出来双击了,就一定是微动坏了吗?',
+    a:
+      '不一定,先别急着修。软件层能造出一模一样的现象:驱动里的按键设置、系统的指针加速、' +
+      '无线鼠标的电量或 2.4G 干扰、USB 口供电不足、甚至一个脏了的鼠标垫。' +
+      '**先按顺序排除掉这些**:换个 USB 口、换台机器、关掉驱动里的按键宏,再测一次。' +
+      '站上的加速度页和回报率页能帮你排掉其中一部分。排完还在,才轮到硬件。',
+  },
+  {
+    q: '为什么不直接标价格?',
+    a:
+      '因为一只鼠标修多少钱,取决于型号、坏在哪、要换什么件,标一个"起"价只会误导 ——' +
+      '**所有寄修都是收到后免费检测、免费报价,你同意了我们才动手**。不同意就原样寄回,' +
+      '只收你自己那一段的运费。这样一来价格这件事在你签字之前都不成立。',
+  },
+  {
+    q: '修完又坏了怎么办?',
+    a:
+      '换上去的微动和编码器有质保期,期内同一处再出问题免费返修。但要说清楚质保**不覆盖什么**:' +
+      '进液、摔过、自己拆过、以及在别处动过手脚的,都不在范围内 —— 这类情况我们会在报价时' +
+      '直接告诉你,不会先收了钱再说。',
+  },
+  {
+    q: '哪些鼠标你会劝我别修?',
+    a:
+      '三种。**还在保修期内的** —— 直接找厂商,免费换新,这钱不该花;' +
+      '**进水很久、主板已经明显腐蚀的** —— 修完也撑不久,不如把预算留给下一只;' +
+      '**价格太低的** —— 一只几十块的鼠标,换微动的工时费已经接近它本身。' +
+      '这三种我们都会直说,而不是先接下来。',
+  },
+  {
+    q: '修前修后的读数是怎么来的?',
+    a:
+      '用这个站自己的工具测的 —— 就是上面那排诊断工具里的双击页和按键页。' +
+      '**它不构成任何"证明"**:一次测试只反映那一次的状态,而微动故障本来就是偶发的。' +
+      '它有用在**同一个工具、同一套口径、同一台机器上的前后对比**,那是它能说的;' +
+      '跨机器比大小,它说不了,我们也不会拿它说。',
+  },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebPage',
+      name: '鼠标维修',
+      description:
+        '鼠标按键失灵与双击、滚轮回滚与异响、侧键故障、不充电等问题的维修:微动与编码器更换、免费清洁、寄修前免费报价、同意再动手。',
+      url: new URL(Astro.url.pathname, Astro.site).href,
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+
+/** 能修的。每条一句"什么现象 → 换什么",不写形容词。 */
+const REPAIRABLE = [
+  ['按键', '失灵、按下去没反应、单击变双击、轻轻一碰就误触、手感发涩 —— 换微动'],
+  ['滚轮', '失灵、回滚、跳格、没有阻尼、异响 —— 换编码器,或清理与更换阻尼件'],
+  ['侧键', '失灵、卡住、连击'],
+  ['线材与接口', '接触不良、断线、接口松动 —— 换线'],
+  ['供电', '不充电、续航骤降、放一晚就没电 —— 换电池或修充电口'],
+  ['摔过、进过水', '之后的一系列问题 —— 能不能修要看腐蚀到什么程度,会先拆开告诉你'],
+];
+
+/** 不修的。这一栏比上面那栏重要:它可验证,而且它是真话。 */
+const NOT_REPAIRABLE = [
+  ['还在保修期内的', '先找厂商,免费换新。这钱不该花,我会直接让你别寄'],
+  ['进水很久、主板明显腐蚀的', '修完也撑不久,不值得花这个钱'],
+  ['结构件断裂又没有配件的', '没有件就修不了,不是我挑活'],
+  ['价格太低的', '换微动的工时费已经接近它本身,不如换个新的'],
+];
+
+const STEPS = [
+  '先联系,说清型号和症状。型号在鼠标底部,症状可以直接引用站里测试页的读数(比如"左键疑似连击 3 处")。',
+  '寄来。建议保价,这一段运费你自己承担。',
+  '收到后免费检测、免费报价。拆开看过了,报的才是实数。',
+  '你同意再动手。不同意就原样寄回,不收检测费。',
+  '修完复测,把修前修后的读数一起发给你 —— 换了什么、测出来变成什么样,你自己看。',
+  '回寄。返程运费我们出。',
+];
+---
+
+<BaseLayout
+  title="鼠标维修 - 按键双击、滚轮回滚、侧键失灵"
+  description="鼠标按键失灵与双击、滚轮回滚与异响、侧键故障、不充电等问题的维修:微动与编码器更换、免费清洁、寄修前免费报价、同意再动手。本站的测试工具与维修出自同一人,这一点页面上明说。"
+  jsonLd={jsonLd}
+>
+  <h1>鼠标维修</h1>
+
+  <p class="prose">
+    上面那排工具负责<strong>测</strong>,这一页负责<strong>修</strong>。两边是同一件事的两头:
+    工具告诉你鼠标哪儿不对,这一页说那个不对能不能处理、怎么处理。
+  </p>
+
+  {/*
+    披露放在最前面,不藏进页脚。
+
+    它不是免责声明,是**这条主线上的一次同构**:全站的规矩是"测不准就明说",
+    这里要明说的是**立场**而不是误差 —— 同一个站既出诊断又出维修,读者有权
+    先知道这件事,再决定信几分。
+
+    用 `.notice--info`(灰)而不是默认那条赭黄的警告色:这不是"出事了",
+    是一件需要你知道的常态事实。赭黄是全站的警告位,借过来会把话说重。
+  */}
+  <div class="notice notice--info">
+    <strong>先说清楚:这一页是本站作者自己的维修服务。</strong>
+    工具和维修出自同一个人,所以我们给出的故障判定可能影响你对这项服务的判断 ——
+    这一点你得知道。要交叉验证也很简单:拿不准的时候换一台机器再测一次,结论应当一致。
+  </div>
+
+  <figure class="repair-hero">
+    <Fragment set:html={REPAIR_HERO_SVG} />
+    <figcaption>
+      会坏的就这么几处:按键下的微动、滚轮连着的编码器、侧键。图上画的就是你刚才在上面测的那只鼠标。
+    </figcaption>
+  </figure>
+
+  <h2>能修什么</h2>
+
+  <dl class="spec">
+    {
+      REPAIRABLE.map(([name, desc]) => (
+        <>
+          <dt>{name}</dt>
+          <dd>{desc}</dd>
+        </>
+      ))
+    }
+  </dl>
+
+  <h2>不修什么</h2>
+
+  {/*
+    这一栏不是客套。它是这一页**唯一可验证**的部分:说清"什么不修",
+    比"什么都能修"值钱,因为前者能对得上,后者只能听。
+    四条里有三条是**劝你别花钱**,而这正是维修方最难开口的话。
+  */}
+  <p class="prose">
+    这一栏比上一栏重要 —— 「什么都能修」只是一句话,而下面这几条你可以拿去核对。
+  </p>
+
+  <dl class="spec spec--no">
+    {
+      NOT_REPAIRABLE.map(([name, desc]) => (
+        <>
+          <dt>{name}</dt>
+          <dd>{desc}</dd>
+        </>
+      ))
+    }
+  </dl>
+
+  <h2>修前和修后</h2>
+
+  <p class="prose">
+    条件允许的每一只,都会在动手前后各测一遍 —— 用站上自己的
+    <a href={href('double-click-test/')}>双击测试</a>和
+    <a href={href('button-test/')}>按键测试</a>,同一套口径。
+    下面是格式示例,实际案例会逐条换成真实记录。
+  </p>
+
+  <div class="case">
+    <p class="case__head">
+      罗技 G Pro X Superlight · 左键双击
+      <span class="case__tag">示例</span>
+    </p>
+
+    <div class="case__pair">
+      <div class="case__side">
+        <p class="case__when">修前</p>
+        <dl class="case__rows">
+          <div class="case__row">
+            <dt>左键</dt><dd class="case__bad">疑似连击 3 处</dd>
+          </div>
+          <div class="case__row">
+            <dt>滚轮</dt><dd>未发现</dd>
+          </div>
+          <div class="case__row">
+            <dt>合计</dt><dd class="case__bad">3 处</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="case__side">
+        <p class="case__when">修后</p>
+        <dl class="case__rows">
+          <div class="case__row">
+            <dt>左键</dt><dd>未发现</dd>
+          </div>
+          <div class="case__row">
+            <dt>滚轮</dt><dd>未发现</dd>
+          </div>
+          <div class="case__row">
+            <dt>合计</dt><dd>未发现</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+
+    <p class="case__note">
+      换了左键微动。这只鼠标的其余部分是好的,所以只动了这一处 —— 能只换一件就不换两件。
+    </p>
+  </div>
+
+  <h2>流程</h2>
+
+  <ol class="steps">
+    {STEPS.map((step) => <li>{step}</li>)}
+  </ol>
+
+  <h2>常见问题</h2>
+
+  <dl class="faq">
+    {
+      FAQ.map((item) => (
+        <>
+          <dt>{item.q}</dt>
+          <dd set:html={faqHtml(item.a)} />
+        </>
+      ))
+    }
+  </dl>
+
+  <h2>联系</h2>
+
+  <p class="prose">
+    加微信,或者直接进淘宝店铺。**两种都建议先聊清楚型号和症状再决定寄不寄** ——
+    没看到实物之前报的都是估价,拆开才是实数。
+  </p>
+
+  {/*
+    两格二维码。**样式是共用的 `.qr*`(`global.css`)**,和底部悬浮条里那两格
+    是同一份 —— 那块浅底是硬写颜色值的,两处各写一份迟早一处改了另一处旧着,
+    而"二维码扫不出来"在页面上看不出来。
+
+    尺寸由这一节自己给(`--qr-size: 168px`):**维修页上的码要比悬浮窗里的大**,
+    这一格是专门给人拿手机过来扫的,而悬浮窗那格只是让人先认出来是什么。
+
+    微信那格还是占位 —— 图片没拿到。占位方格里写着字,不是一块空白:
+    空白方块会被读成"图没加载出来"。
+  */}
+  <div class="contact">
+    <div class="qr">
+      <span class="qr__box">二维码位</span>
+      <span class="qr__label">微信</span>
+    </div>
+
+    <a class="qr" href={REPAIR.shop} target="_blank" rel="noopener noreferrer">
+      <span class="qr__box">
+        <img src={href('taobao-qr.png')} alt="淘宝店铺二维码" width="181" height="181" />
+      </span>
+      <span class="qr__label">淘宝店铺</span>
+    </a>
+  </div>
+</BaseLayout>
+
+<style>
+  /*
+   * 主图。
+   *
+   * **没有任何颜色**,只有两档线宽:外壳是细线,可维修的那五块描得重一点、
+   * 加一层浅底。纸面走无彩色是全站色彩纪律的支点 —— 有颜色的地方就是在出数,
+   * 而这一页一个数都不出,所以它必须彻底无色。
+   *
+   * 高度写死在页面里,不放进共用的 `.repair-figure`:那张图和测试页的
+   * `MOUSE_FIGURE_SVG` 同源,以后可能还有第三个消费者要别的尺寸 ——
+   * 和 `mouse-figure.ts` 文件头那条"高度不在共用规则里"是同一个理由。
+   */
+  .repair-hero {
+    margin: 26px 0 34px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  /*
+   * 用 `:global(...)`,理由和瞄准页的 `.aim-target` 一样:这段 SVG 走的是
+   * `<Fragment set:html>`,节点不在模板里长出来,拿不到 `data-astro-cid-*` ——
+   * 普通的页面规则一条都不会命中,而且是**静默的**(元素还在、位置还对,
+   * 只是没有长相)。只有这一页用它,所以选页面内的 `:global` 而不是
+   * 搬去 `global.css`。
+   */
+  :global(.repair-figure) {
+    width: auto;
+    height: 360px;
+    /*
+     * **一条线走到底,分区靠填充区分 —— 外壳和可维修区取同一个前景色。**
+     *
+     * 第一版外壳用的是 `--border-strong`(想做出"外壳淡、重点区深"的层次),
+     * 截图发现**深色下整只鼠标的下半身几乎看不见**:那只鼠标只有下半身是纯
+     * 外壳,而 `--border-strong` 在深色里是 `#363b41`,压在 `#0b0c0e` 上只有
+     * 约 1.9:1。层次感换成的是"这只鼠标断了一半"。
+     *
+     * 换成 `--text-dim` 之后外壳与分区同色、同为 1.4px,整只读得出来;
+     * 分区仍然分得清,靠的是它们各自那层浅底 —— **形状本身也是分开的
+     * 闭合路径**,所以填充在深色里几乎看不见(近黑区间的老问题)也不影响。
+     */
+    color: var(--text-dim);
+  }
+
+  :global(.repair-figure__shell) {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+  }
+
+  /*
+   * 可维修区那层底。**用 `--bg-elevated` 而不是 `--bg-inset`。**
+   *
+   * `--bg-inset` 在浅色下是深一档的灰(看得见),在深色下却是 `#07080a`
+   * 压在纸面 `#0b0c0e` 上 —— 那正是文档里量过的近黑区间,约 1.03:1,
+   * **填充等于没画**。于是同一张图在浅色下有分区、在深色下没有,两个主题
+   * 长得不一样。
+   *
+   * `--bg-elevated` 走的是反方向:浅色是白(比纸面亮)、深色是 `#15171a`
+   * (也比纸面亮)。两档都出得来,而且"抬起来的一块"正好是这几个部件的意思。
+   */
+  :global(.repair-figure__zone) {
+    fill: var(--bg-elevated);
+    stroke: currentColor;
+    stroke-width: 1.4;
+  }
+
+  .repair-hero figcaption {
+    max-width: 34em;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-faint);
+    line-height: 1.7;
+  }
+
+  /*
+   * 两张"什么修 / 什么不修"的清单。
+   *
+   * 走 `<dl>` 而不是 `<ul>`:左边那个词是**被解释的东西**,右边那句是解释 ——
+   * 这是定义关系的写法,不是并列的列表项。文档结构说对了,读屏念出来也是对的。
+   *
+   * 结构仍然只有 1px 细线,没有卡片、没有底色。
+   */
+  .spec {
+    margin: 14px 0 26px;
+    max-width: 68ch;
+  }
+
+  .spec dt {
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .spec dd {
+    margin: 0;
+    padding: 4px 0 12px;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .spec dd:last-child {
+    padding-bottom: 0;
+  }
+
+  /*
+   * 案例。
+   *
+   * **它长得像一张卡,但它不是首页那种卡**:那个是"能直接开测的装置",
+   * 有 `data-mini*` 挂钩、状态机和惰性挂载;这里是一块静态的对比数据。
+   * 共用那套机制只会把两件事焊在一起。
+   *
+   * 左右两栏用 `auto-fit`:够宽并排,不够宽自己叠起来,不写媒体查询 ——
+   * 和 `.workbench` 是同一条比例语言。
+   */
+  .case {
+    margin: 18px 0 26px;
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .case__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /*
+   * 「示例」那枚小标签。**它必须显眼到不会被略过** —— 里面的数字是格式示例,
+   * 不是一次真实的维修记录,让人误当成实测数据是这一页唯一不能出的错。
+   */
+  .case__tag {
+    padding: 1px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--text-faint);
+  }
+
+  .case__pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 18px;
+  }
+
+  .case__side {
+    min-width: 0;
+  }
+
+  .case__when {
+    margin: 0 0 8px;
+    font-size: 0.8rem;
+    color: var(--text-faint);
+  }
+
+  .case__rows {
+    margin: 0;
+  }
+
+  .case__row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.9rem;
+  }
+
+  .case__row dt {
+    color: var(--text-dim);
+  }
+
+  .case__row dd {
+    margin: 0;
+    font-weight: 600;
+  }
+
+  /*
+   * 「有故障」——**纸面的朱砂位**。语义色在纸面和仪器窗里是两个色值,
+   * 这一处住在纸面上,所以取的是 `#c2410c`(浅)/ `#f87171`(深),
+   * 和仪器窗里那个 `--well-danger` 不是同一个数。
+   *
+   * 修后那一栏一律默认墨色:正常位不另开一个绿色,这是全站的规矩。
+   */
+  .case__bad {
+    color: var(--danger);
+  }
+
+  .case__note {
+    margin: 14px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  /*
+   * 二维码那一节。格子的长相全在共用的 `.qr*` 里(`global.css`),
+   * 这里只管排布和尺寸。
+   *
+   * `--qr-size` **由这一节给,不由 `.qr` 自己定**:悬浮窗里要 128px,
+   * 这一页要 168px —— 这一格是专门给人拿手机过来扫的。
+   *
+   * 用 `flex-wrap` 而不是媒体查询,和 `.workbench` / `.keyboard` 同一条
+   * 比例语言:够宽并排、不够宽自己换行,这一节因此**一条断点都不用写**。
+   */
+  .contact {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 28px;
+    margin: 18px 0 0;
+    padding: 24px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    --qr-size: 168px;
+  }
+</style>

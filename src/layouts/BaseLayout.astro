@@ -2,6 +2,7 @@
 import '../styles/global.css';
 import ToolNav from '../components/ToolNav.astro';
 import { THEME_COLORS, THEME_KEY } from '../lib/theme';
+import { REPAIR } from '../lib/tools';
 import { href } from '../lib/url';
 
 interface Props {
@@ -109,22 +110,120 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
       <div class="wrap">
         <p>所有测试均在浏览器本地完成,数据不会上传到服务器。</p>
         <p>建议使用桌面版 Chrome 或 Edge 以获得最准确的测量结果。</p>
+        <!--
+          维修入口。**放页脚,而且全站每一页都出现** —— 这条是有意的,不是随手加的。
+
+          它必须与"测出了什么"无关:一个只在故障判定旁边出现的维修链接,会让人把
+          故障结论读成带货。页脚是常设位置,读者在哪一页看到它、看到的都是同一句话。
+
+          暴露立场的那半句(**出自同一人**)和链接写在同一行里,而且是链接的同位语 ——
+          不藏在别处。这一页的入口可以低调,但"这个站和这项服务是同一个人的"这件事
+          不能低调。整段理由见 `mouse-repair.astro` 的文件头。
+        -->
+        <p>
+          <a href={href(`${REPAIR.slug}/`)}>{REPAIR.navLabel}</a> —— 本站的测试工具与这项维修服务出自同一人。
+        </p>
       </div>
     </footer>
 
     <!--
-      底部悬浮条。**现在是关着的** —— 去掉下面那个 `hidden` 就会立刻出现,
-      不用改别的地方:页脚底部的留白是靠 `html:has(.site-dock:not([hidden]))`
-      跟它绑在一起的(见 global.css),开关这一个属性就够了。
+      底部悬浮条 —— **鼠标维修的入口**。现在开着(去掉了 `hidden`;
+      页脚底部的留白是靠 `html:has(.site-dock:not([hidden]))` 跟它绑在一起的,
+      所以开关只有这一个属性)。
 
-      里面是空的。以后放二维码 / 图片,把 .site-dock__placeholder 整块替换掉
-      即可(虚线和文字一起删)。
+      ## 它为什么必须与"测出了什么"无关
 
-      它是 position: fixed,所以**每个页面都会看到**。只想让首页显示的话,
-      把这一段整体搬进 src/pages/index.astro。
+      这是全站唯一有商业利益的东西,而它挂在**每一页**上。**它常驻,但它对
+      测量结果一律没有反应** —— 不做"测出故障就弹出来 / 变色 / 跳动"。
+      一个常驻入口像店门口挂的招牌:它在,但它没在看你。一个被结果触发的入口
+      是"它在盯着我的测试",而那会让人把「疑似连击」读成带货 —— 全站的
+      信誉正建立在这类判断不被怀疑上。整段理由见 `mouse-repair.astro` 的文件头。
+
+      ## 为什么一行 JS 都不写
+
+      照搬报头「工具箱」那一套:`:hover` / `:focus-within` 展开,触发器是 `<a>`。
+      好处一模一样 —— **没有"开着没有"这个 JS 状态,也就没有会漂的
+      `aria-expanded`**,所以这里**不写 `aria-haspopup`、也不写 `aria-expanded`**,
+      不是漏了,是从没声称过。触屏没有悬停:**点一下直接去维修页**,那里是
+      完整说明和见得到的二维码,这正是 `<a>` 该有的行为。
+
+      ## 结构上的一条硬约束
+
+      面板**排在触发器前面,而且不进绝对定位**。`.site-dock` 是
+      `position: fixed; bottom: 18px`,内容长出来自然向上顶,所以面板天然
+      在药丸上方。**用绝对定位会留出一条缝** —— 鼠标从药丸移到面板要跨过它,
+      而那条缝不属于任何一个盒子,`:hover` 当场失效、面板被收掉(经典的
+      hover 缝隙)。放进流里就没有这个问题。
     -->
-    <div class="site-dock well" hidden>
-      <p class="site-dock__placeholder">二维码 / 图片位</p>
+    <div class="site-dock">
+      <div class="site-dock__panel well">
+        <p class="site-dock__title">鼠标维修</p>
+
+        <div class="site-dock__codes">
+          {/*
+            微信那一格还是占位 —— 二维码图片还没拿到。**占位方格里写着字,
+            不是一块空白**:空白方块会被读成"图没加载出来",和 `.rate-chart:empty`
+            那条 110px 灰槽是同一种罪。真码到位时把 `<span>` 里的字换成
+            `<img>`,外面的 `.site-dock__code-box` 一个字不用动。
+          */}
+          <div class="qr">
+            <span class="qr__box">二维码位</span>
+            <span class="qr__label">微信</span>
+          </div>
+
+          {/*
+            淘宝那一格是**图片 + 链接两样都给**:码给桌面前的人用手机扫,
+            链接给直接点的人用(手机点开会唤起淘宝 App)。外面裹 `<a>` 而不是
+            挂 click 处理器 —— 后者会丢掉中键和「在新标签页中打开」,
+            和首页那枚可信度徽章同一条理由。
+          */}
+          <a
+            class="qr"
+            href={REPAIR.shop}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span class="qr__box">
+              <img src={href('taobao-qr.png')} alt="淘宝店铺二维码" width="181" height="181" />
+            </span>
+            <span class="qr__label">淘宝店铺</span>
+          </a>
+        </div>
+
+        {/*
+          这一行先前是披露(**本站的测试工具与这项维修服务出自同一人**),
+          用户换成了一句招呼。**披露本身没有丢** —— 它还在两处:
+          每一页的页脚,以及 `/mouse-repair/` 正文最前面那条 `.notice`。
+          把细字号的声明从广告面板里挪走是对的:那里没人读它,
+          而挂在那儿的唯一效果是把一句招呼挤掉。
+        */}
+        <p class="site-dock__note">鼠标不好用了?联系我们看看。</p>
+      </div>
+
+      {/*
+        触发器 = **一枚裸图标**:没有边框、没有文字、没有底板(用户定的)。
+
+        三条要点:
+
+        - **`alt` 现在必须写全**。加文字那版它刻意留空(旁边那行字已经把话说完了,
+          再写读屏会念两遍);现在图标是链接里**唯一**的可读内容,留空的话这个链接
+          在读屏里就是"链接",没有名字 —— 视觉上可以只有一个图标,听觉上不能。
+        - **那一圈边框连同底板一起去掉了**,所以 `.well` 从整条 dock 挪到了
+          **面板**上(`.site-dock__panel well`):展开时那张卡片仍然需要一块深色
+          衬托(上面有二维码和一行说明),而收起时脚下不该有任何东西。
+        - 图标自己的底是**抠过的**(源图是近白棋盘,JPEG/PNG 都没有 alpha 通道,
+          `public/repair-icon.png` 是抠完再缩出来的真 RGBA)。不抠的话它在深色
+          页面上会是一块白方块。
+      */}
+      <a class="site-dock__trigger" href={href(`${REPAIR.slug}/`)}>
+        <img
+          class="site-dock__trigger-icon"
+          src={href('repair-icon.png')}
+          alt={REPAIR.navLabel}
+          width="220"
+          height="251"
+        />
+      </a>
     </div>
 
     <script>

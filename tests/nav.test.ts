@@ -7,6 +7,7 @@ import {
   FUN_TOOLS,
   NAV,
   READY_TOOLS,
+  REPAIR,
   TOOLBOX,
   TOOLS,
 } from '../src/lib/tools';
@@ -68,6 +69,22 @@ describe('报头分组', () => {
   });
 
   /*
+   * 「鼠标维修」和工具箱是同一类东西:一扇门,不是一件能测的工具。
+   *
+   * 混进 `READY_TOOLS` 的后果也一样 —— 它会出现在首页(诊断卡片的网格里,
+   * 或者「更多工具」的清单里),而它两个地方都不是。
+   *
+   * **但它比工具箱更危险一点**:工具箱只是分类错了,而维修页要是被当成
+   * 一件"工具"排进首页,就等于把服务入口摆进了测量台 —— 那正是
+   * `mouse-repair.astro` 文件头里那条"故障判定区永远不出现服务信息"
+   * 要挡的事。所以这条判据守的不只是分类,还有那件更要紧的事。
+   */
+  it('「鼠标维修」也不在 READY_TOOLS 里', () => {
+    expect(READY_TOOLS.map((tool) => tool.slug)).not.toContain(REPAIR.slug);
+    expect(TOOLS.map((tool) => tool.slug)).not.toContain(REPAIR.slug);
+  });
+
+  /*
    * `'none'` 那一档(「不测量」)说的是"这一页压根不做测量"。
    * 一件**诊断**工具说自己不测量,要么是 `confidence` 填错了档,要么是
    * `group` 填错了 —— 两种都是那一页在给用户一个错的选页依据。
@@ -95,7 +112,11 @@ describe('slug 与页面文件', () => {
    * 代价六行,换回来的正是丢掉的那道保护。
    */
   it('每一个 slug 都真的有对应的页面文件', () => {
-    const slugs = [...READY_TOOLS.map((tool) => tool.slug), TOOLBOX.slug];
+    const slugs = [
+      ...READY_TOOLS.map((tool) => tool.slug),
+      TOOLBOX.slug,
+      REPAIR.slug,
+    ];
 
     for (const slug of slugs) {
       expect(existsSync(pagePath(slug)), `src/pages/${slug}.astro 不存在`).toBe(true);
