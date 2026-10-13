@@ -2,6 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import MiniCard from '../components/MiniCard.astro';
 import { CONFIDENCE_LABEL, DIAGNOSTIC_TOOLS, FUN_TOOLS, PLANNED_TOOLS } from '../lib/tools';
+
 import type { Confidence } from '../lib/tools';
 import { CONFIDENCE_NOTE, defaultMiniMode, findMiniCard, MINI_CARDS } from '../lib/mini-cards';
 import { href } from '../lib/url';
@@ -93,10 +94,6 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
     都不变 —— 这一条改完要重新数一遍 `<main>` 的字数对一遍。
   */}
   <h1 class="home-title">在线鼠标测试</h1>
-
-  <p class="home-sub">
-    卡片里就能直接测。要看完整模式、逐项读数和判定依据,点卡片标题进对应的页面。
-  </p>
 
   <ul class="mini-grid">
     {
@@ -254,21 +251,6 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
     margin-bottom: 0.5rem;
   }
 
-  /*
-   * 副标题:一句话说清"卡片"和"那一页"的分工。
-   *
-   * 用 `--text-dim` 而不是正文色 —— 它是导引不是内容,压在卡片上面不该抢视线;
-   * 也不该用 `--text-faint`,那个在深色下已经接近辅助文字的下限。
-   *
-   * `max-width` 按字数给:中文一个字就是一个 em,44 个字一行太长,
-   * 42em 让它折成两行,读起来正好。
-   */
-  .home-sub {
-    margin: 0 0 1.75rem;
-    max-width: 42em;
-    color: var(--text-dim);
-    line-height: 1.6;
-  }
 
   /*
    * 「更多工具」那两条链接。

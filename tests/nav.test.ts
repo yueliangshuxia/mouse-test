@@ -45,12 +45,43 @@ describe('报头分组', () => {
     const all = [...group, ...dropdown];
     expect(new Set(all).size, '有工具在报头里出现了两次').toBe(all.length);
 
-    // 不漏。这一句是整组用例里最要紧的一条
-    expect([...group, ...dropdown]).toEqual(READY_TOOLS.map((tool) => tool.slug));
+    /*
+     * 不漏。这一句是整组用例里最要紧的一条。
+     *
+     * **比较方式是"按 slug 排序后相等",不是"逐项相等"** —— 后者还顺带要求
+     * 两片拼起来保持着 `READY_TOOLS` 的顺序,而 `keyboard-test` 挪进下拉之后
+     * 那个顺序**注定对不上**(它在 `READY_TOOLS` 里排第 10,在下拉里排最后)。
+     * 顺序由下面那两条各自守一段就够了,这里要的是**集合层面的不重不漏**。
+     */
+    const allSlugs = [...group, ...dropdown].slice().sort();
+    expect(allSlugs).toEqual(READY_TOOLS.map((tool) => tool.slug).sort());
 
-    // 顺序两段各自保持 —— 报头靠这个顺序决定"先折谁"
-    expect(group).toEqual(DIAGNOSTIC_TOOLS.map((tool) => tool.slug));
-    expect(dropdown).toEqual(FUN_TOOLS.map((tool) => tool.slug));
+    /*
+     * 顺序两段各自保持 —— 报头靠这个顺序决定"先折谁"。
+     *
+     * **这两条从"等于两个 filter"改成了"各自是它们的子序列,而且挪走的那几个
+     * 确实在下拉里"。** 报头那一组从这一版起**有了自己的一份分组**:`keyboard-test`
+     * 被挪进了「工具箱」下拉(它是这十个诊断工具里唯一不测鼠标的,摆在
+     * 「鼠标测试」那一排里本来就别扭 —— 理由写在 `tools.ts` 的
+     * `HEADER_DROPDOWN_DIAGNOSTIC` 上面),所以 `NAV.group` 不再等于 `DIAGNOSTIC_TOOLS`。
+     *
+     * 直接写 `expect(group).toEqual(DIAGNOSTIC_TOOLS…)` 会红,而且红得对;
+     * 但改成"照抄一遍同一个 filter"就成了同义反复,什么都测不出来。
+     * 所以守住的是**真正的那两条不变量**:两段各自保持原顺序,而且
+     * **从框里少掉的必须一个不少地出现在下拉里** —— 后者才是这条用例原本
+     * 要挡的"某个工具从导航里静默消失"。
+     */
+    const diagSlugs = DIAGNOSTIC_TOOLS.map((tool) => tool.slug);
+    const funSlugs = FUN_TOOLS.map((tool) => tool.slug);
+
+    expect(group).toEqual(diagSlugs.filter((slug) => group.includes(slug)));
+    expect(dropdown.slice(0, funSlugs.length)).toEqual(funSlugs);
+
+    const movedOut = diagSlugs.filter((slug) => !group.includes(slug));
+    expect(dropdown.slice(funSlugs.length)).toEqual(movedOut);
+    for (const slug of movedOut) {
+      expect(dropdown, `${slug} 从框里挪走了,却没进下拉 —— 它从报头里消失了`).toContain(slug);
+    }
 
     // 两段都非空:空的那一段会让报头少一整块,而不是报错
     expect(group.length).toBeGreaterThan(0);
@@ -156,9 +187,21 @@ describe('工具箱页', () => {
    * 渲染成一片空白)—— 而空白的预览窗看起来像"这一件还没做好",
    * 和 `.rate-chart:empty` 那块 110px 灰槽是同一种罪:把"没有"画成了"坏了"。
    */
-  it('每一件趣味工具都有预览图形', () => {
-    for (const tool of FUN_TOOLS) {
-      expect(TOOL_MOTIF[tool.slug], `${tool.slug} 没有 TOOL_MOTIF 条目`).toBeTruthy();
+  it('下拉里的每一件都有预览图形', () => {
+    /*
+     * **遍历的是 `NAV.dropdown`,不是 `FUN_TOOLS`。**
+     *
+     * 这一条原本遍历 `FUN_TOOLS`,而工具箱页渲染的是 `NAV.dropdown` —— 两者
+     * 曾经相等,所以看不出差别。`keyboard-test` 挪进下拉之后它们**当场分家**:
+     * 页面上会多出一格,而 `TOOL_MOTIF['keyboard-test']` 是 `undefined`,
+     * 渲染成一片空白 —— **其余用例照样全绿**。
+     *
+     * 空白的预览窗看起来像"这一件还没做好",和 `.rate-chart:empty` 那条
+     * 110px 灰槽是同一种罪。改成遍历 `NAV.dropdown` 之后,判据就跟着页面走了:
+     * 以后再从框里往下拉挪一件,忘了配图形会立刻红。
+     */
+    for (const tool of NAV.dropdown) {
+      expect(TOOL_MOTIF[tool.slug], `${tool.slug} 在下拉里,却没有 TOOL_MOTIF 条目`).toBeTruthy();
     }
   });
 });

@@ -611,8 +611,25 @@ p {
    */
   padding: 2px 4px;
 
-  border: 1px solid var(--border);
+  /*
+   * **边框改成一圈渐变。** 用户要的是"明显一点" —— 原来那圈 1px 的
+   * `--border` 在纸面上就是一条灰线,和别处的线没有区别。
+   *
+   * 做法和索引卡那张一样(两层背景 + `background-clip`),但**这里是常驻的**,
+   * 不是悬停才出 —— 它要单独说出"这一组是鼠标测试"。
+   *
+   * 内层铺的是 `.site-header` 的底色,所以那一排悬停药丸还是照旧压在框里。
+   * **`border-color` 换成透明而不是删掉 `border`**:`border-width` 一动,
+   * 框的盒子就会变,而框的宽度是报头那笔折叠账的输入之一(见 `tools.ts`
+   * 的 `navLabel` 注释),变了整个折叠边界就漂。
+   */
+  border: 1px solid transparent;
   border-radius: var(--radius);
+  background-image:
+    linear-gradient(var(--bg-elevated), var(--bg-elevated)),
+    linear-gradient(110deg, #3b82f6, #8b5cf6, #ec4899);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 }
 
 /* 同 `.site-nav__more[hidden]`:`display: flex` 会压过默认样式表的 `[hidden]` */
@@ -1978,6 +1995,29 @@ input[type='number'] {
   gap: 9px;
 }
 
+/*
+ * 卡片悬停:只把边框提一档。**用户报过"鼠标放上去没有回馈感"**,而首页
+ * 一眼看上去最像能点的就是这七张卡 —— 但它其实只有卡名和徽章是链接,
+ * 卡身不导航(里面是能直接开测的装置,整张做成链接会把测试面吃掉)。
+ * 所以这里给的是**"这里有一块东西"**的回馈,不是"能点"的暗示 ——
+ * 也就到此为止,不加 pointer 光标、不加位移、不加阴影。
+ *
+ * `border-width` 一个像素都不动,所以**不会引起任何重排**:卡里的画布、
+ * 装置面高度全部照旧(首页总高 2177 / 3452 不受影响)。
+ */
+.mini-card:hover {
+  border-color: var(--border-strong);
+}
+
+/*
+ * 长表格的斑马线。用 `tbody tr` 限定:**表头行不该跟着亮** ——
+ * 它不是一条数据。底色走 `--bg-inset`(纸面上两种主题都比纸面深一档),
+ * 不引入任何色相。
+ */
+.ref-table tbody tr:hover {
+  background: var(--bg-inset);
+}
+
 .mini-card__head {
   display: flex;
   align-items: baseline;
@@ -2158,6 +2198,43 @@ input[type='number'] {
  */
 .mini-device[data-mini-kind='mouse-buttons'] {
   height: 168px;
+}
+
+/*
+ * **空态那只静态鼠标:竖排,鼠标在上、提示在下。**
+ *
+ * `.mini-device` 是 `display: flex` 横排,于是空态下鼠标和那句提示会并排贴着
+ * (实测鼠标右边界 494、提示左边界 495 —— 就差 1px,读起来像撞在一起)。
+ *
+ * `:not(.mini-device--running)` 把这条限定在空态:运行态那套横排(鼠标在左、
+ * chip 撑满右侧)在 `@container` 里另写,两条互不打扰。
+ *
+ * 代价是窄屏空态会从"收成一行"长高一点 —— 但那只鼠标是**用户明确要看的东西**,
+ * 它站在那儿就是在说"这张卡能按",而空态收成一行时那句话是看不见的。
+ */
+.mini-device[data-mini-kind='mouse-buttons']:not(.mini-device--running) {
+  flex-direction: column;
+  gap: 8px;
+}
+
+/*
+ * **空态那只鼠标小一档,因为那句提示要和它一起塞进 144px。**
+ *
+ * 算得出来:装置面 168,减去上下各 12px 内边距 = **144px 可用**;
+ * 而跨格后鼠标 126 + 间距 8 + 提示 24 = **158 —— 溢出 14px**,实测那句提示
+ * 正好压在卡片下边框上。
+ *
+ * **不能靠把卡片加高来解**:空态和运行态必须一样高,否则第一次按下去整张卡
+ * 会当场长高、把它那一行一起顶起来(这条写在 `.mini-device[data-mini-kind=…]`
+ * 那段的注释里)。所以缩的是鼠标:88 + 8 + 24 = 120 ≤ 144,留 24px 余量。
+ *
+ * 代价是第一次点下去鼠标会长大一点(88 → 126)。那一下整张卡的样貌本来就
+ * 全变了(提示换成 chip 和读数),所以这一点变化读不出来。
+ *
+ * 特异度 (0,3,1),压过基高那条 (0,2,0) 和 `@container` 里那条。
+ */
+.mini-device[data-mini-kind='mouse-buttons']:not(.mini-device--running) .mouse-figure {
+  height: 88px;
 }
 
 /*
@@ -2829,6 +2906,337 @@ code {
 
 .ref-table tr[data-current='true'] td:nth-child(2) {
   color: var(--accent);
+}
+
+/* ---------- 「去某一页」的胶囊 ---------- */
+
+/*
+ * 一枚带箭头的跳转胶囊。**不是按钮,是链接** —— 它指向另一页,所以是 `<a>`,
+ * 中键、右键「在新标签页中打开」、键盘全都照旧。
+ *
+ * 它和 `button[aria-pressed='true']` 那枚**实心**药丸是两回事:实心是"你已经
+ * 选了这个",描边是"点一下会去那里"。两者共用同一档圆角(`--radius-pill`),
+ * 所以"圆的就是可点的"这条在全站仍然成立。
+ *
+ * 右边那个圆圈里的箭头用 `::after` 画:**不是图标字体、不是 SVG,就是一个
+ * `→` 字符** —— 这个站没有任何图标资源,而一个字符在这里足够了。
+ * 代价是少数读屏会把 CSS 生成的 `→` 念出来;参考站用的是同一套做法。
+ *
+ * 悬停**只动边框和底色,不引入任何色相**:纸面的强调色就是墨色本身,
+ * 深色下 `color: var(--accent)` 等于没写 —— 这条在 `.confidence` 那枚
+ * 徽章上已经吃过一次。
+ */
+.pill-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  /* 左边宽、右边窄:右边的箭头自己有 20px,不用再留内边距 */
+  padding: 6px 7px 6px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  text-decoration: none;
+}
+
+.pill-link::after {
+  content: '→';
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
+/* 全局 `a:hover` 会给它加下划线,而它已经是一枚药丸,再加一条很难看 */
+.pill-link:hover {
+  border-color: var(--text);
+  background: var(--bg-inset);
+  text-decoration: none;
+}
+
+/*
+ * 放在一句话末尾的那种用法(参考站 FAQ 里就是这么排的:解释完一句,
+ * 后面跟一枚"去专项测试")。这里只负责把它和前面的字对齐。
+ */
+.pill-link--inline {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* ---------- 说明卡片 ---------- */
+
+/*
+ * **一份长相,两个入口。**
+ *
+ * 卡片这个东西站上一直有(`.mini-card` 就是),只是没往正文里搬过。
+ * 现在有两处要它:维修页那两张清单(`.card-grid` + `.card`),
+ * 和工具页正文里那些 `<ul>`(`.prose--cards`)。**长相只写一遍** ——
+ * 两处各写一份的话,改一处忘一处,而"两边看着不一样"这种毛病
+ * 在一屏之内看不出来(得上下翻着比)。
+ *
+ * 一个令牌都没新增:填充底 `--bg-elevated`、线 `--border`、圆角 `--radius-lg`。
+ * 深浅两套主题自动都对。
+ */
+.card,
+.prose--cards > ul > li,
+.prose--cards > ol.steps > li {
+  /* 悬停那圈环的定位基准 */
+  position: relative;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+
+/*
+ * 悬停:一圈**墨色的环**,和首页索引卡那圈是同一套写法(伪元素 + `mask-composite`
+ * 只留外框),**只是这里没有色相可给** —— 纸面走无彩色是全站的支点,而这一批
+ * 卡片长在工具页正文里,不是"目录"。
+ *
+ * 它**不改变任何布局**:伪元素 `position: absolute`、`pointer-events: none`,
+ * 卡片位置逐字节不动(理由和索引卡那条一样 —— 用 `border-width` 加粗就会动)。
+ *
+ * 一则自知的取舍:**这些卡片本身不是链接**,给它加悬停是在说"你正看着这一块",
+ * 不是"点我"。所以刻意做得克制 —— 只是边框换一档墨色,**没有光标变化、
+ * 没有位移、没有颜色**。首页那七张卡(`.mini-card:hover`)是同一条判据。
+ */
+.card::before,
+.prose--cards > ul > li::before,
+.prose--cards > ol.steps > li::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(120deg, var(--border-strong), var(--text-dim));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.card:hover::before,
+.prose--cards > ul > li:hover::before,
+.prose--cards > ol.steps > li:hover::before {
+  opacity: 1;
+}
+
+/*
+ * **抬起来。**
+ *
+ * 用户看完那圈环说「只有框有变化,没有那种悬浮起来的感觉」—— 说得对:一圈描边
+ * 是"选中了这一块",不是"它浮起来了"。浮起来要两样一起给:**位移**和**投影**,
+ * 少一样都读不出来(只位移像抖了一下,只投影像脏了一块)。
+ *
+ * 这**又是全站的一条规矩被破**:文档里写着「结构全靠 1px 细线,没有卡片、
+ * 没有阴影、没有渐变」。这一条是用户要的,记在这里免得下次有人当 bug 修掉。
+ *
+ * 两条实现上的注意:
+ *
+ * - **`transform` 不引起重排**,所以卡片位置对周围没有影响 —— 但它会改变
+ *   `getBoundingClientRect()` 的结果。这一批卡片里没有任何东西按 rect 定位
+ *   (轨迹画布和 `#pad` 都不在里面),所以安全。**首页那七张装置卡刻意不加**:
+ *   卡里是画布和装置面,悬停时 rect 一变就有得查了。
+ * - 投影在深色下几乎看不见(黑压黑),所以深色里"浮起来"主要靠位移和那圈环
+ *   表达 —— 那是可以接受的,不是漏做。
+ */
+.card,
+.prose--cards > ul > li,
+.prose--cards > ol.steps > li {
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.card:hover,
+.prose--cards > ul > li:hover,
+.prose--cards > ol.steps > li:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px -8px rgb(0 0 0 / 0.28);
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin: 14px 0 26px;
+}
+
+/*
+ * 卡片短、而且张数刚好时用这一档。维修页「不修什么」那**四张**用它:
+ * 260px 的下限会排成 3+1、末尾吊一张空两格(文档里那条"落位不留空"),
+ * 而 `floor((1060 + 12) / (210 + 12)) = 4` —— 一行正好。
+ * **这个数不是看着调的,是拿容器宽反算的**,和 `.mini-grid` 那条 932px 同一个算法。
+ */
+.card-grid--tight {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+/*
+ * 卡片头上那个小图形。**和首页索引卡那格长得一样,但这里是灰的** ——
+ * 维修页的卡片在纸面上,一个色相都不加(索引卡那九个色相是首页的例外,
+ * 理由写在 `index.astro` 里)。
+ *
+ * `--bg-inset` 在这两种底色上都出得来:浅色下它比 `--bg-elevated`(白)深一档,
+ * 深色下比 `#15171a` 也深一档 —— 所以两套主题都有一格。
+ */
+.card__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+}
+
+.card__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.card__title {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.card__desc {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+/*
+ * 更重的一圈线。维修页的「不修什么」用它:那一节是整页**唯一能拿去核对**
+ * 的部分,不该因为"读起来像劝退"就被弱化。
+ */
+.card--strong {
+  border-color: var(--border-strong);
+}
+
+/*
+ * 工具页正文的卡片。
+ *
+ * **它是个修饰类,靠加在 `<section class="prose prose--cards">` 上生效,
+ * 而不是去改 `.prose ul`** —— 后者会连 FAQ 答案里、步骤里、每一处列表
+ * 一起变,而那些地方该是列表。
+ *
+ * 首句那个 `<strong>` 被提成标题行:工具页的正文一直是
+ * `<li><strong>某个键按下去不亮</strong>——说明…</li>` 这个写法,
+ * 也就是说**标题早就写在标记里了**,这里只是把它显示成标题该有的样子。
+ * 所以**一页标记都不用改,加一个类就行**。
+ */
+/*
+ * **网格要逃出 `.prose` 那条 68ch 的阅读栏宽,段落不用。**
+ *
+ * 第一版没逃,量出来网格只有 638px 宽、卡片排成两列 313px —— 因为
+ * `.prose { max-width: 68ch }` 把整节都框住了。68ch 是**正文**该有的宽度
+ * (一行读得顺),但网格不是正文:参考站那种特色网格是通栏的,
+ * 而且卡片越窄、里面那句说明折的行越多。
+ *
+ * 所以这里把整节放开,再**把段落、标题、有序列表各自收回 68ch** ——
+ * 该读的还是读得顺,该铺开的铺开。
+ */
+.prose--cards {
+  max-width: none;
+}
+
+.prose--cards > p,
+.prose--cards > h2,
+.prose--cards > h3,
+.prose--cards > ol {
+  max-width: 68ch;
+}
+
+.prose--cards > ul,
+.prose--cards > ol.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 0;
+  margin: 14px 0 26px;
+  list-style: none;
+  max-width: none;
+}
+
+/*
+ * 编号步骤也走卡片网格。**它们是 `<strong>` 开头的,和 `<ul>` 那批同一个写法**
+ * —— 「先正常速度单击十几次。」这一类首句本来就是标题。
+ *
+ * 编号**照旧由 `.steps li::before` 那个圆圈画**,只是位置要从"贴着行首"挪到
+ * "贴着卡片内边距";顺序也照旧 —— 网格从左到右、从上到下读,编号一个不乱。
+ * 所以那一条设计(「编号能让人对得上号」)在这个排法下仍然成立。
+ */
+.prose--cards > ol.steps > li {
+  position: relative;
+  /* 卡片自身 16px 内边距 + 编号圈 22px + 间隙 */
+  padding-left: 46px;
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.75;
+}
+
+.prose--cards > ol.steps > li::before {
+  left: 16px;
+  top: 15px;
+}
+
+.prose--cards > ul > li {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.75;
+}
+
+.prose--cards > ul > li > strong:first-child,
+.prose--cards > ol.steps > li > strong:first-child {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text);
+}
+
+/*
+ * 首行是**链接**的那些(「想看细的,去这三页」那种)。
+ *
+ * 工具页的正文有两种开头:一种是 `<strong>标题</strong>——说明`,
+ * 另一种是 `<a>另一页</a>——说明`。两处的信息结构是一样的(首行是"这一条
+ * 讲什么",后面是展开),所以长相也该一样 —— 不这么做的话,
+ * 一个网格里会有一半的卡片有标题、另一半没有。
+ */
+.prose--cards > ul > li > a:first-child {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/*
+ * 卡片**里面**的嵌套列表(正文里有几处是"这一条下面再分两条")。
+ * 它跟着卡片一起搬进网格了,所以这里把它恢复成普通的项目符号列表 ——
+ * 外层那句 `list-style: none` 是会被继承下去的,不写回来就一个圆点都没有。
+ */
+.prose--cards > ul > li ul {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.prose--cards > ul > li ul li {
+  margin-bottom: 4px;
 }
 
 /* ---------- 常见问题 ---------- */

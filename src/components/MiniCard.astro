@@ -3,6 +3,7 @@ import { CONFIDENCE_LABEL } from '../lib/tools';
 import type { Tool } from '../lib/tools';
 import { DEFAULT_TRACE_SLOTS } from '../lib/mini-cards';
 import type { MiniCard } from '../lib/mini-cards';
+import { MOUSE_FIGURE_SVG } from '../lib/mouse-figure';
 import { href } from '../lib/url';
 
 interface Props {
@@ -127,6 +128,24 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
     data-mini={tool.slug}
     data-mini-kind={spec.kind ?? ''}
   >
+    {/*
+      **空态就把鼠标画出来**(用户要的:"平时也显示在上面,不用等点击了再显示")。
+
+      这一段是**静态的一份 `MOUSE_FIGURE_SVG`** —— 注意它和运行态那份是同一个字面量,
+      只是这里没有任何 `data-*` 状态挂钩,所以它画出来就是那只没亮任何一瓣的鼠标。
+      它身上那些填色用的是**纸面令牌**(`--bg-elevated` / `--border-strong`),
+      所以它在空态的纸面背景上看得见 —— 不需要先把它塞进 `.well`。
+
+      **一个采样器都没多建**:这只是模板渲染出来的一段 SVG,惰性挂载那条纪律
+      (`DEVICES[kind].wake`)一个字没动。第一次交互时 `start()` 那句
+      `surface.replaceChildren(live)` 会把它连同下面那句提示一起换掉。
+
+      只有 `mouse-buttons` 这张卡有 —— 别的装置(轨迹画布、CPS 计时器)空态下
+      本来就是空的,硬画一个只会说"这里有个数"而其实没有。
+    */}
+    {spec.kind === 'mouse-buttons' && (
+      <Fragment set:html={MOUSE_FIGURE_SVG} />
+    )}
     {spec.kind === null
       ? <p class="mini-device__why">{spec.fallback}</p>
       : <p class="mini-device__prompt">{prompt}</p>}

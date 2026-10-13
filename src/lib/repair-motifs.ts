@@ -31,6 +31,79 @@
  * - 没有 `data-mb`,也没有滚轮那两支方向箭头 —— 这一页不测任何东西,
  *   属性挂钩和方向箭头在这里都是没有含义的装饰
  */
+/**
+ * 维修页那两张清单里,每一类配的那个小图形。
+ *
+ * **和 `tool-motifs.ts` 同一套约定**:一律 `currentColor` 描边、一个写死的
+ * 颜色都没有,形状按 `viewBox="0 0 24 24"` 画,线宽和圆角由页面统一给。
+ *
+ * **键是短的英文名,不是中文类名** —— 让模板里写 `REPAIR_MOTIF[key]`,
+ * 中文名改一个字(「摔过、进过水」这种)不会让图形静默消失。
+ * 少一条的后果和工具箱页那条一样:那一格空着,而空着的预览窗看起来像
+ * "这一项还没做好"。
+ */
+export const REPAIR_MOTIF: Record<string, string> = {
+  /** 按键:一只鼠标,中间一道分缝。 */
+  button: `
+    <rect x="7" y="2.5" width="10" height="19" rx="5" />
+    <path d="M12 3v6" />
+  `,
+
+  /** 滚轮:一个轮子,上下各一支箭头。 */
+  wheel: `
+    <rect x="8.5" y="7" width="7" height="10" rx="3.5" />
+    <path d="M12 4.5V2M10 4h4M12 19.5V22M10 20h4" />
+  `,
+
+  /** 侧键:机身旁边多出来那一块。 */
+  side: `
+    <rect x="9.5" y="3" width="11" height="18" rx="5" />
+    <rect x="4" y="8" width="4.5" height="6.5" rx="1.5" />
+  `,
+
+  /** 线材与接口:一段线接一个插头。 */
+  cable: `
+    <path d="M2.5 12h5.5" />
+    <rect x="8" y="9" width="5.5" height="6" rx="1.5" />
+    <path d="M13.5 12h3.5a4 4 0 0 0 4-4V6" />
+  `,
+
+  /** 供电:一节电池。 */
+  power: `
+    <rect x="2.5" y="7.5" width="17" height="9" rx="2.5" />
+    <path d="M21.5 10.5v3" />
+    <path d="M6.5 12h5" />
+  `,
+
+  /** 摔过、进过水:一滴水。 */
+  water: `
+    <path d="M12 3c3.6 4.1 5.5 6.6 5.5 9.5a5.5 5.5 0 0 1-11 0C6.5 9.6 8.4 7.1 12 3Z" />
+  `,
+
+  /** 还在保修期内:一面盾牌。 */
+  warranty: `
+    <path d="M12 2.5 5 5.5v6c0 4.6 3 7.6 7 9.2 4-1.6 7-4.6 7-9.2v-6Z" />
+    <path d="M9 11.5l2 2 4-4" />
+  `,
+
+  /** 进水很久、主板已腐蚀:一块板子被划掉。 */
+  corroded: `
+    <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" />
+    <path d="M4 20 20 4" />
+  `,
+
+  /** 结构件断裂又没配件:断开的两截。 */
+  broken: `
+    <path d="M2.5 13h5.5l2.5-3.5M21.5 13H16l-2.5 3.5" />
+  `,
+
+  /** 价格太低:一枚价签。 */
+  cheap: `
+    <path d="M11.5 3.5H5.5a2 2 0 0 0-2 2v6l9.5 9.5 8.5-8.5Z" />
+    <circle cx="7.8" cy="7.8" r="1.2" />
+  `,
+};
+
 export const REPAIR_HERO_SVG = `
 <svg class="repair-figure" viewBox="2 2 52 88" aria-hidden="true" focusable="false">
   <rect class="repair-figure__shell" x="12" y="4" width="40" height="84" rx="14" />

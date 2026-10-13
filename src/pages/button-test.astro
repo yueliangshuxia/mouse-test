@@ -75,7 +75,14 @@ const jsonLd = {
     <button type="button" id="reset">重置</button>
   </div>
 
-  <section class="prose">
+  {/*
+    `prose--cards` 只把这一节里的 `<ul>` 排成卡片网格,**`<p>` 一个字不动** ——
+    所以「组合按键」和「注意事项」那两节(整段整段的说明)不受影响,
+    变的只有「怎么看结果」和「想看细的,去这三页」这两处**本来就是一个点一条**
+    的清单。这也是它做成修饰类、而不是去改全局 `.prose ul` 的原因:
+    后者会把 FAQ 答案里、步骤里的每一处列表一起改掉,而那些地方该是列表。
+  */}
+  <section class="prose prose--cards">
     <h2>怎么看结果</h2>
     <ul>
       <li>

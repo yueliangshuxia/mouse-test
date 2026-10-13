@@ -1,9 +1,46 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { REPAIR_HERO_SVG } from '../lib/repair-motifs';
+import { REPAIR_HERO_SVG, REPAIR_MOTIF } from '../lib/repair-motifs';
 import { REPAIR } from '../lib/tools';
+import { MOUSE_TOOLS } from '../lib/tools';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
 import { faqHtml, faqText } from '../lib/faq';
 import { href } from '../lib/url';
+
+/*
+ * 自测工具索引卡上每个工具的那个色相。
+ *
+ * **这一节原本长在首页上,用户让挪到维修页来。** 这是全站唯一一处给**纸面**
+ * 加色相的地方,所以理由要跟着一起搬过来,不能只剩一张表:
+ *
+ * 全站的规矩是「纸面走无彩色,有颜色的地方就是在出数」—— 它让"哪里是活的"
+ * 一眼可见,**蓝色强调色当年就是因此被删掉的**。这九个色相破了这条规矩,
+ * 代价是真实的。
+ *
+ * 换来的是:一排九张卡,眼睛能靠颜色把「按键」「滚轮」「回报率」分开,
+ * 而不是逐个读字。这是**识别**,不是数据。几条约束把伤害压到最小:
+ *
+ * - **色相只出现在图标那一格,和悬停时**;正文、边框、数字一概不染
+ * - **九个色相彼此拉开**,不让相邻两张看着像同一张
+ * - **仪器窗的磷光绿、警告赭黄、故障朱砂仍然是那三个语义位**,没有被顶掉
+ *
+ * 换句话说:**读数仍然只有那三种颜色**,多出来的是"目录"这一层。
+ *
+ * **另一件要留意的事**:这一页其余那些卡(`能修什么` / `不修什么`)是**灰的**,
+ * 只有这一节有色。所以这一节天然读成"另一类东西"—— 那正好:它是工具目录,
+ * 不是维修条目。
+ */
+const TOOL_HUE: Record<string, string> = {
+  'button-test': '#3b82f6',
+  'hold-drag-test': '#8b5cf6',
+  'double-click-test': '#f59e0b',
+  'scroll-test': '#ef4444',
+  'cps-test': '#06b6d4',
+  'trail-test': '#10b981',
+  'polling-rate-test': '#84cc16',
+  'dpi-test': '#ec4899',
+  'acceleration-test': '#f97316',
+};
 
 /*
  * 鼠标维修 —— **第二个不是"一件测量工具"的页面**(第一个是 `/toolbox/`)。
@@ -86,22 +123,27 @@ const jsonLd = {
   ],
 };
 
-/** 能修的。每条一句"什么现象 → 换什么",不写形容词。 */
+/**
+ * 能修的。每条一句"什么现象 → 换什么",不写形容词。
+ *
+ * 第三位是图形名(`REPAIR_MOTIF` 的键)。**用短英文名而不是中文类名当键**:
+ * 中文名改一个字(「摔过、进过水」这种)就会让图形静默消失。
+ */
 const REPAIRABLE = [
-  ['按键', '失灵、按下去没反应、单击变双击、轻轻一碰就误触、手感发涩 —— 换微动'],
-  ['滚轮', '失灵、回滚、跳格、没有阻尼、异响 —— 换编码器,或清理与更换阻尼件'],
-  ['侧键', '失灵、卡住、连击'],
-  ['线材与接口', '接触不良、断线、接口松动 —— 换线'],
-  ['供电', '不充电、续航骤降、放一晚就没电 —— 换电池或修充电口'],
-  ['摔过、进过水', '之后的一系列问题 —— 能不能修要看腐蚀到什么程度,会先拆开告诉你'],
+  ['按键', '失灵、按下去没反应、单击变双击、轻轻一碰就误触、手感发涩 —— 换微动', 'button'],
+  ['滚轮', '失灵、回滚、跳格、没有阻尼、异响 —— 换编码器,或清理与更换阻尼件', 'wheel'],
+  ['侧键', '失灵、卡住、连击', 'side'],
+  ['线材与接口', '接触不良、断线、接口松动 —— 换线', 'cable'],
+  ['供电', '不充电、续航骤降、放一晚就没电 —— 换电池或修充电口', 'power'],
+  ['摔过、进过水', '之后的一系列问题 —— 能不能修要看腐蚀到什么程度,会先拆开告诉你', 'water'],
 ];
 
 /** 不修的。这一栏比上面那栏重要:它可验证,而且它是真话。 */
 const NOT_REPAIRABLE = [
-  ['还在保修期内的', '先找厂商,免费换新。这钱不该花,我会直接让你别寄'],
-  ['进水很久、主板明显腐蚀的', '修完也撑不久,不值得花这个钱'],
-  ['结构件断裂又没有配件的', '没有件就修不了,不是我挑活'],
-  ['价格太低的', '换微动的工时费已经接近它本身,不如换个新的'],
+  ['还在保修期内的', '先找厂商,免费换新。这钱不该花,我会直接让你别寄', 'warranty'],
+  ['进水很久、主板明显腐蚀的', '修完也撑不久,不值得花这个钱', 'corroded'],
+  ['结构件断裂又没有配件的', '没有件就修不了,不是我挑活', 'broken'],
+  ['价格太低的', '换微动的工时费已经接近它本身,不如换个新的', 'cheap'],
 ];
 
 const STEPS = [
@@ -151,16 +193,32 @@ const STEPS = [
 
   <h2>能修什么</h2>
 
-  <dl class="spec">
+  {/*
+    网格卡片。**这不是新造的语言** —— `.mini-card` 早就是"填充底 + 1px 边 +
+    大圆角",首页七张卡用的就是它。这里只是把同一套长相搬到纸面上,
+    所以一个令牌都没新增。
+  */}
+  <div class="card-grid">
     {
-      REPAIRABLE.map(([name, desc]) => (
-        <>
-          <dt>{name}</dt>
-          <dd>{desc}</dd>
-        </>
+      REPAIRABLE.map(([name, desc, motif]) => (
+        <div class="card">
+          <span class="card__icon" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              set:html={REPAIR_MOTIF[motif]}
+            />
+          </span>
+          <h3 class="card__title">{name}</h3>
+          <p class="card__desc">{desc}</p>
+        </div>
       ))
     }
-  </dl>
+  </div>
 
   <h2>不修什么</h2>
 
@@ -173,24 +231,44 @@ const STEPS = [
     这一栏比上一栏重要 —— 「什么都能修」只是一句话,而下面这几条你可以拿去核对。
   </p>
 
-  <dl class="spec spec--no">
+  <div class="card-grid card-grid--tight">
     {
-      NOT_REPAIRABLE.map(([name, desc]) => (
-        <>
-          <dt>{name}</dt>
-          <dd>{desc}</dd>
-        </>
+      NOT_REPAIRABLE.map(([name, desc, motif]) => (
+        <div class="card card--strong">
+          <span class="card__icon" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              set:html={REPAIR_MOTIF[motif]}
+            />
+          </span>
+          <h3 class="card__title">{name}</h3>
+          <p class="card__desc">{desc}</p>
+        </div>
       ))
     }
-  </dl>
+  </div>
 
   <h2>修前和修后</h2>
 
   <p class="prose">
-    条件允许的每一只,都会在动手前后各测一遍 —— 用站上自己的
-    <a href={href('double-click-test/')}>双击测试</a>和
-    <a href={href('button-test/')}>按键测试</a>,同一套口径。
+    条件允许的每一只,都会在动手前后各测一遍 —— 用站上自己的工具,同一套口径。
     下面是格式示例,实际案例会逐条换成真实记录。
+  </p>
+
+  {/*
+    「去某一页」的胶囊。**它做的是这一页做不到的事**:这里是维修方说的话,
+    而读数得由用户自己在工具页上测出来。把这一步做成一枚可点的东西,
+    而不是一句"请移步双击测试页" —— 参考站最实在的一招就是这个。
+  */}
+  <p class="repair-cta">
+    <span class="repair-cta__label">先自己测一遍:</span>
+    <a class="pill-link" href={href('double-click-test/')}>双击测试</a>
+    <a class="pill-link" href={href('button-test/')}>按键测试</a>
   </p>
 
   <div class="case">
@@ -255,6 +333,54 @@ const STEPS = [
     }
   </dl>
 
+  <h2>先自己测一遍</h2>
+
+  {/*
+    这一节**原本长在首页上**,用户让挪到这里。
+
+    **放在页尾而不是页首,是刻意的。** 这一页的主语是维修:能修什么、不修什么、
+    修前修后、流程 —— 那几节才是读者来这儿要看的东西。九张工具卡摆在顶上会
+    把正文压下去,而它们是**辅助**(先自测,再决定要不要寄),不是主角。
+    放在"联系"前面,正好接上那句"先聊清楚症状"。
+
+    名单从 `MOUSE_TOOLS` 来,和报头那个框共用同一份 —— 手写九个 `<li>` 的话,
+    加一件工具会从这里静默消失。
+
+    图标走 `TOOL_MOTIF`,**和工具箱页、和首页原本用的是同一份图形**:
+    母题本身不写任何颜色(`currentColor`),色相由外面那格 `--hue` 给。
+
+    `aria-hidden` 是必须的:那段 SVG 对读屏一个字的信息都没有,而它里面全是
+    `<path>`,不藏起来只会让读屏念出一串没人听得懂的东西。
+  */}
+  <p class="prose">
+    不确定要不要修?这几个工具都在你的浏览器里跑,不用装任何东西 ——
+    先测一遍,拿着读数来聊,比「感觉有点飘」具体得多。
+  </p>
+
+  <ul class="tool-index">
+    {
+      MOUSE_TOOLS.map((tool) => (
+        <li>
+          <a class="tool-card" href={href(`${tool.slug}/`)} style={`--hue: ${TOOL_HUE[tool.slug]}`}>
+            <span class="tool-card__icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                set:html={TOOL_MOTIF[tool.slug]}
+              />
+            </span>
+            <span class="tool-card__name">{tool.navLabel}测试</span>
+            <span class="tool-card__desc">{tool.description}</span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+
   <h2>联系</h2>
 
   <p class="prose">
@@ -300,12 +426,23 @@ const STEPS = [
    * `MOUSE_FIGURE_SVG` 同源,以后可能还有第三个消费者要别的尺寸 ——
    * 和 `mouse-figure.ts` 文件头那条"高度不在共用规则里"是同一个理由。
    */
+  /*
+   * 主图那一块。**给它一块填充底,让它成一块"面板"而不是浮在纸上的一个图形** ——
+   * 和 `.card` 同一套长相(填充底 + 1px 边 + 大圆角),所以整页是同一个语言。
+   */
   .repair-hero {
     margin: 26px 0 34px;
+    padding: 26px 30px;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 14px;
+    justify-content: center;
+    /* 窄了自动叠成一列 —— 和全站其它地方一样,不写断点 */
+    flex-wrap: wrap;
+    gap: 12px 34px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
   }
 
   /*
@@ -356,44 +493,46 @@ const STEPS = [
     stroke-width: 1.4;
   }
 
-  .repair-hero figcaption {
-    max-width: 34em;
-    text-align: center;
+  /*
+   * 那排胶囊。`flex-wrap` 而不是网格 —— 数量会变(以后可能加"回报率"
+   * 或者型号页),按内容排最省事,窄了自动换行。
+   */
+  .repair-cta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 14px 0 4px;
+  }
+
+  .repair-cta__label {
     font-size: 0.85rem;
     color: var(--text-faint);
-    line-height: 1.7;
   }
 
   /*
-   * 两张"什么修 / 什么不修"的清单。
+   * 说明挪到鼠标右边。**横排是看过一版竖排之后改的**:竖排时鼠标居中、
+   * 说明在下面,面板 476px 高而内容只占中间一条,两边各空出约 420px ——
+   * 浮在纸面上时那叫留白,装进面板里就叫"空的"。
+   * 横排把这一条的宽度用掉,面板也从 476 掉到 300 出头。
    *
-   * 走 `<dl>` 而不是 `<ul>`:左边那个词是**被解释的东西**,右边那句是解释 ——
-   * 这是定义关系的写法,不是并列的列表项。文档结构说对了,读屏念出来也是对的。
-   *
-   * 结构仍然只有 1px 细线,没有卡片、没有底色。
+   * `flex: 1 1 260px` 给的是"尽量宽、但窄到 260px 就换行"的下限 ——
+   * 420 下它连同鼠标一起叠成一列,不用写断点。
    */
-  .spec {
-    margin: 14px 0 26px;
-    max-width: 68ch;
-  }
-
-  .spec dt {
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-    font-weight: 600;
-    color: var(--text);
-  }
-
-  .spec dd {
-    margin: 0;
-    padding: 4px 0 12px;
+  .repair-hero figcaption {
+    flex: 1 1 260px;
+    max-width: 34em;
+    text-align: left;
+    font-size: 0.9rem;
     color: var(--text-dim);
-    line-height: 1.7;
+    line-height: 1.75;
   }
 
-  .spec dd:last-child {
-    padding-bottom: 0;
-  }
+  /*
+   * 卡片长相住在 `global.css` 的 `.card` / `.card-grid` 里 —— 工具页正文
+   * (`.prose--cards`)用的是同一份,所以这边一行样式都不写。两处各写一份的话,
+   * 改一处忘一处,而"两边看着不一样"在一屏之内看不出来。
+   */
 
   /*
    * 案例。
@@ -504,6 +643,143 @@ const STEPS = [
    * 用 `flex-wrap` 而不是媒体查询,和 `.workbench` / `.keyboard` 同一条
    * 比例语言:够宽并排、不够宽自己换行,这一节因此**一条断点都不用写**。
    */
+  /*
+   * 自测工具索引卡那一排。**从首页整块搬过来的** —— 搬的时候一个数都没改。
+   *
+   * `240px` 的下限是按九个工具反算的:`floor((1060 + 12) / (240 + 12)) = 4`,
+   * 所以 1440 下排成 4 列(4 + 4 + 1),420 下 1 列。和 `.card-grid--tight`
+   * 那条 210px 用的同一个算法 —— **不是看着差不多调的**。
+   *
+   * 末行只有一张卡会空着右边,这一条**接受**(理由和 `.prose--cards` 那节
+   * 写的一样:文字卡末尾换行是常态;换成 flex 撑满的话,最后那一张会拉成
+   * 整行 1060px,比空洞更糟)。
+   */
+  .tool-index {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+    padding: 0;
+    margin: 0 0 1.75rem;
+    list-style: none;
+  }
+
+  .tool-card {
+    /* 悬停那圈渐变的定位基准 —— 它 `inset: -1px`,要贴着卡片 */
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100%;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-elevated);
+    text-decoration: none;
+  }
+
+  /*
+   * 图标那一格。**色相只长在这里** —— 正文、边框、数字一概不染。
+   *
+   * `color: var(--hue)` 直接喂给里面那段 SVG(它的描边是 `currentColor`),
+   * 所以同一份母题在工具箱页是灰的、在这里是彩的,**图形本身一个字节都没改**。
+   */
+  .tool-card__icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    margin-bottom: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-inset);
+    color: var(--hue);
+  }
+
+  .tool-card__icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .tool-card__name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text);
+  }
+
+  .tool-card__desc {
+    font-size: 0.85rem;
+    line-height: 1.65;
+    color: var(--text-dim);
+  }
+
+  /*
+   * 悬停:一圈**明显的渐变环** + 标题和图标转成这一项的色相。
+   *
+   * **第一版用的是"两层背景 + `background-clip`"那套,用户看了说不够明显**
+   * —— 因为那圈只有 1px,而 1px 的渐变在纸面上和一条灰线差不多粗,
+   * 正是"看不出来"的那一类。所以改成**伪元素画一圈 2px 的环**。
+   *
+   * `mask-composite` 是关键:两层 mask 相减,只留"外框那一圈",中间挖空 ——
+   * 画的是环,不是一块渐变底。`-webkit-mask-composite` 用的是另一个关键字
+   * (`xor` 对 `exclude`),两个都写。
+   *
+   * 它 `position: absolute`、`pointer-events: none`,**完全不参与布局** ——
+   * 所以加粗这一圈**不会动卡片的尺寸**(实测悬停前后位置逐字节相同)。
+   * 用 `border-width` 加粗就会,那是这一条不能用边框做的原因。
+   *
+   * **只在悬停时出现。** 静止时整页仍然只有图标那一格有色 ——
+   * 所以它读起来是"我在指这一项",不是"这一项在出数"。
+   */
+  .tool-card::before {
+    content: '';
+    position: absolute;
+    /* 往外扩 1px,把卡片自己那条 1px 的边也盖住 */
+    inset: -1px;
+    border-radius: inherit;
+    padding: 2px;
+    background: linear-gradient(120deg, var(--hue), #8b5cf6, #ec4899);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .tool-card:hover::before,
+  .tool-card:focus-visible::before {
+    opacity: 1;
+  }
+
+  /*
+   * **抬起来** —— 和 `.card` / `.prose--cards` 那批是同一条判决、同一套数:
+   * 位移 + 投影两样一起给,少一样都读不出"浮起来"(只位移像抖了一下,
+   * 只投影像脏了一块)。用户看完那圈渐变环说的正是「只有框有变化,
+   * 没有那种悬浮起来的感觉」。
+   *
+   * `transform` 不引起重排,但它会改 `getBoundingClientRect()` 的结果 ——
+   * 这批卡片里没有按 rect 定位的东西,所以安全(首页那七张装置卡因此不加)。
+   */
+  .tool-card {
+    transition:
+      transform 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  .tool-card:hover,
+  .tool-card:focus-visible {
+    /* 把卡片自己那条灰边让出来,免得和渐变环叠成两层 */
+    border-color: transparent;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px -8px rgb(0 0 0 / 0.28);
+    text-decoration: none;
+  }
+
+  .tool-card:hover .tool-card__name,
+  .tool-card:focus-visible .tool-card__name {
+    color: var(--hue);
+  }
+
   .contact {
     display: flex;
     flex-wrap: wrap;

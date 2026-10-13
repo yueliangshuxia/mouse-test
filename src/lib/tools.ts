@@ -420,8 +420,39 @@ export const REPAIR = {
  * 而 `ToolNav.astro` 给每一项挂的 `title` 就是全名。清单不在这里再抄一份 ——
  * 抄了迟早对不上(首页 `.more-list` 是同一条理由)。
  */
+/**
+ * 报头那排框里**不放**、改放进「工具箱」下拉的诊断工具。
+ *
+ * 现在只有 `keyboard-test` 一个,**理由不是排版,是归类**:它是这十个诊断工具里
+ * 唯一**不测鼠标**的那一个 —— 摆在「鼠标测试」那一排里本来就别扭。
+ * 这和「工具箱」原有那七件(趣味工具)不是一类,但下拉里放一件设备类工具
+ * 读起来并不违和,而放在框里一直违和。
+ *
+ * **它仍然是诊断工具**(`group: 'diagnostic'` 没动),所以首页那张键盘卡照旧。
+ * 这也意味着**报头那一组从此不再等于 `DIAGNOSTIC_TOOLS`** —— 它有了自己的一份
+ * 分组,`tests/nav.test.ts` 跟着改成守"两片恰好分完 + 挪走的一个不少地在下拉里",
+ * 而不是"两片分别等于两个 filter"。
+ */
+const HEADER_DROPDOWN_DIAGNOSTIC: readonly string[] = ['keyboard-test'];
+
+/**
+ * **测鼠标的那些诊断工具** —— 键盘不在其中。
+ *
+ * 两个消费者:报头那个框里的一组,和首页那排索引卡。**两处要的是同一件事**
+ * (「鼠标测试」底下该列哪几件),所以只写一份 —— 各写一份的话,哪天再挪一件
+ * 出去,报头变了而首页没变,而"首页多列了一件报头里没有的"在一屏之内看不出来。
+ */
+export const MOUSE_TOOLS = DIAGNOSTIC_TOOLS.filter(
+  (tool) => !HEADER_DROPDOWN_DIAGNOSTIC.includes(tool.slug),
+);
+
 export const NAV = {
-  group: DIAGNOSTIC_TOOLS,
+  /** 框里那一组 */
+  group: MOUSE_TOOLS,
   toolbox: TOOLBOX,
-  dropdown: FUN_TOOLS,
+  /** 下拉:趣味工具在前(原有顺序不动),挪过来的诊断工具接在后面 */
+  dropdown: [
+    ...FUN_TOOLS,
+    ...DIAGNOSTIC_TOOLS.filter((tool) => HEADER_DROPDOWN_DIAGNOSTIC.includes(tool.slug)),
+  ],
 } as const;
