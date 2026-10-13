@@ -44,6 +44,22 @@
     <i></i><i></i><i></i><i></i><i></i><i></i>
   </div>
 
+  {/*
+    流星(用户拿 StarryRing 要的)。**和上面那层星空同一个寄存器**:只在深色下出现,
+    而且是纯 CSS —— 一行 JS 都不用,和星空一样。
+
+    六个 `<i>` 各自一条,每条的起点、长度、周期、相位都在下面 `<style>` 里按
+    `nth-child` 给。**不是 canvas、也不在 rAF 上跑**:一个"每隔几秒自己飞一道"
+    的东西如果挂在 rAF 上,就会和这一站所有的测量循环抢帧 —— 而它一秒里
+    真正在动的只有那零点几秒。
+
+    注意它和下面那块 `#meteor` 画布**不是同一个东西**:那是跟着鼠标画的拖尾,
+    这个是自己在天上飞的。两个名字只差一个字母,改的时候看准。
+  */}
+  <div class="shooting-stars" aria-hidden="true">
+    <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+  </div>
+
   <canvas id="meteor" class="meteor" aria-hidden="true"></canvas>
 
 <style>
@@ -210,7 +226,129 @@
   }
 
   /*
+   * ---------- 流星(自己飞的,用户拿 StarryRing 要的)----------
+   *
+   * 和星空同一个寄存器:**只在深色下出现**(浅色纸上一条白线读起来是划痕,
+   * 不是流星),而且是**纯 CSS** —— 没有 canvas、没有 rAF、没有一行 JS。
+   *
+   * ## 一笔只有三样东西:一根斜着的细条 + 一段渐变 + 一条位移
+   *
+   * 每条流星就是一个 `2px` 宽、`--tail` 长的圆角细条,`rotate(-45deg)` 之后
+   * 沿着右下方向躺好,底色是一段从透明到白的渐变 —— **亮的那头是头,透明
+   * 的那头是尾巴**。然后一条 `@keyframes` 把它从左上推到右下。
+   *
+   * ## 为什么位移用 `vmax` 而不是 `vw`/`vh`
+   *
+   * 条子躺的是**精确的 45°**,而位移如果横向用 `vw`、纵向用 `vh`,在 1440×900
+   * 上两者像素数不一样,于是**它指着一个方向、却往另一个方向飘** —— 一条
+   * 斜线在"横着滑",一眼就看得出别扭。两个分量取同一个 `vmax`,位移方向
+   * 就恒等于 45°,和条子的朝向对上。
+   *
+   * ## "一闪而过"是怎么来的
+   *
+   * 整轮 `--dur` 里**只有开头那 10% 在飞**,其余 90% 是停在终点(而终点在
+   * 屏幕外面),所以它是一闪而过、不是常驻。六个的周期(11–22s)和相位
+   * (`--delay` 取负值,所以一进页面就有一个可能正在飞)两两不同,
+   * 合起来大约**每两三秒天上过一道**。
+   *
+   * ## `prefers-reduced-motion` 下它自动等于没有
+   *
+   * 全站那条夹子把 `animation-duration` 压成 0.01ms,而**基准态 `opacity: 0`**
+   * —— 动画跑完(瞬间)就回到基准,于是它整个消失。这正是该有的降级:
+   * 流星是纯装饰,少看一道什么也不影响。
+   *
+   * ## 它垫在正文下面,和星空同一层
+   *
+   * `z-index: -1`。**不做成"浮在文字上面"**:一条白线横穿正在读的读数,
+   * 比看不见它糟得多。所以它从版心的缝里露出来,和星星一样。
+   */
+  .shooting-stars {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  :global(:root[data-theme='dark']) .shooting-stars {
+    display: block;
+  }
+
+  .shooting-stars i {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 2px;
+    height: var(--tail, 130px);
+    border-radius: 999px;
+    background: linear-gradient(
+      to bottom,
+      rgb(255 255 255 / 0) 0%,
+      rgb(255 255 255 / 0.16) 55%,
+      rgb(255 255 255 / var(--peak, 0.92)) 100%
+    );
+    /* 基准态不可见 —— 动画被压平时它就是隐藏的,这一条别改成 1 */
+    opacity: 0;
+    animation: shoot var(--dur, 16s) linear var(--delay, 0s) infinite;
+  }
+
+  /*
+   * 位移的两个分量取同一个 `--run`(都是 `vmax`),所以方向恒为 45°。
+   * `--x` 是横向上从哪儿进场,每条不一样 —— 全从同一个点出来会像一列火车。
+   */
+  @keyframes shoot {
+    0% {
+      opacity: 0;
+      transform: translate3d(var(--x, 0px), -18vh, 0) rotate(-45deg);
+    }
+    /* 亮起来只占 1%:一道流星是"一下子出现"的,不是淡入的 */
+    1% {
+      opacity: var(--peak, 0.92);
+    }
+    10% {
+      opacity: 0;
+      transform: translate3d(
+          calc(var(--x, 0px) + var(--run, 115vmax)),
+          calc(-18vh + var(--run, 115vmax)),
+          0
+        )
+        rotate(-45deg);
+    }
+    100% {
+      opacity: 0;
+      transform: translate3d(
+          calc(var(--x, 0px) + var(--run, 115vmax)),
+          calc(-18vh + var(--run, 115vmax)),
+          0
+        )
+        rotate(-45deg);
+    }
+  }
+
+  /*
+   * 长 / 亮 / 从哪儿进 / 多久一轮 / 相位错开。
+   *
+   * **"多久一道"由这一列 `--dur` 决定,而且只由它决定**:每条一轮飞一次,
+   * 所以平均间隔 ≈ 1 ÷ Σ(1/--dur)。七条现在是 **13–20 秒**,合起来
+   * **大约每两秒天上过一道**(第一版六条 12–22s 是每 2.7 秒一道,用户说
+   * "再加一丢丢",于是加了一条并把周期整体压短)。
+   * **`--tail` 和 `--peak` 只管每一条自己的长短明暗,不影响频率** ——
+   * 觉得"蛋得不够亮"调 `--peak`,觉得"太稀"调 `--dur`,别把两件事混着调。
+   */
+  .shooting-stars i:nth-child(1) { --x: -6vw;  --tail: 150px; --dur: 13s;   --delay: -2.5s;  --peak: 0.95; }
+  .shooting-stars i:nth-child(2) { --x: 12vw;  --tail: 100px; --dur: 17s;   --delay: -11s;   --peak: 0.72; }
+  .shooting-stars i:nth-child(3) { --x: 28vw;  --tail: 130px; --dur: 15s;   --delay: -6.2s;  --peak: 0.85; }
+  .shooting-stars i:nth-child(4) { --x: 44vw;  --tail: 88px;  --dur: 20s;   --delay: -15.4s; --peak: 0.66; }
+  .shooting-stars i:nth-child(5) { --x: 60vw;  --tail: 120px; --dur: 11s;   --delay: -1.2s;  --peak: 0.9; }
+  .shooting-stars i:nth-child(6) { --x: 76vw;  --tail: 108px; --dur: 18s;   --delay: -9.1s;  --peak: 0.78; }
+  .shooting-stars i:nth-child(7) { --x: 92vw;  --tail: 140px; --dur: 14s;   --delay: -12.8s; --peak: 0.88; }
+
+  /*
    * ---------- 流星拖尾(用户拿参考图要的)----------
+   *
+   * **和上面那六条流星不是一回事**:这条是跟着鼠标画的,只在指针动的时候存在。
+   * 想要"天上自己飞的"看上面那一块。
    *
    * **它在 `pointermove` 上挂了一个 rAF 循环,而这一页有活的测量装置** ——
    * 所以三条底线必须守住:

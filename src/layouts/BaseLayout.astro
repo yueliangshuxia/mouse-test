@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import Backdrop from '../components/Backdrop.astro';
 import ToolNav from '../components/ToolNav.astro';
 import { THEME_COLORS, THEME_KEY } from '../lib/theme';
 import { REPAIR } from '../lib/tools';
@@ -153,6 +154,25 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
     }
   </head>
   <body>
+    {/*
+      氛围层:星空底 + 流星拖尾。**全站每一页都有,挂在壳上而不是各页各挂一份。**
+
+      它原本只挂在首页和维修页(用户先在那两页要的)。后来要求"工具页也加上"
+      —— 那就该挪到这里:一是六个 `<i>` 加一块画布的标记不必在十九个页面里
+      各写一遍,二是**"哪些页有"从此不需要维护**,新加一页自动就有。
+
+      `#meteor` 那个 id 和 `getElementById` 都依赖**每页只渲染一次**,所以
+      首页和维修页里原先那两处 `<Backdrop />` 已经撤掉了 —— 留着一个就会
+      变成两块画布,而 `getElementById` 只会拿到第一块。
+
+      **放在 `<body>` 最前面**,不为了"渲染更快",是为了**绘制顺序**:星空是
+      `z-index: -1`、拖尾画布是 `z-index: 3`,两者都是 `position: fixed`。
+      排在前面才能保证星空垫在正文下面、拖尾浮在正文上面。回报率页那块
+      铺满视口的轨迹画布也是 `z-index: -1`,它排在这之后 —— 同层按 DOM 顺序
+      画,于是轨迹压在星空上,而轨迹画布本身是透明的,星星照样透得出来。
+    */}
+    <Backdrop />
+
     <header class="site-header">
       <div class="wrap">
         <a class="brand" href={href()}>鼠标测试</a>

@@ -1,6 +1,5 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import Backdrop from '../components/Backdrop.astro';
 import { REPAIR_HERO_SVG, REPAIR_MOTIF } from '../lib/repair-motifs';
 import { REPAIR } from '../lib/tools';
 import { MOUSE_TOOLS } from '../lib/tools';
@@ -163,8 +162,6 @@ const STEPS = [
   jsonLd={jsonLd}
 >
   <h1>鼠标维修</h1>
-
-  <Backdrop />
 
   <p class="prose">
     上面那排工具负责<strong>测</strong>,这一页负责<strong>修</strong>。两边是同一件事的两头:

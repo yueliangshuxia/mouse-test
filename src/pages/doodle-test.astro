@@ -186,6 +186,16 @@ const jsonLd = {
     .doodle-area {
       height: 420px;
       cursor: crosshair;
+
+      /*
+       * **抬到流星拖尾上面。**
+       *
+       * 拖尾是壳里那层 `z-index: 3` 的固定画布,压在正文之上;而画板这一页的
+       * 指针一直在动,于是那条绿尾巴会**一直跟在你笔下**,画面上多出一条不属于
+       * 你的笔画。`.test-area` 自己就是 `position: relative`,所以 `z-index`
+       * 直接生效;星空是 `-1`,照样在后面,抬这一层不影响它。
+       */
+      z-index: 4;
     }
 
     .doodle-canvas {
