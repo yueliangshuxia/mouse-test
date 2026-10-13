@@ -682,6 +682,28 @@ p {
   color: var(--accent);
 }
 
+/*
+ * **有色相的那一项,药丸也跟着变色**(用户要的:「选中的那个标题也显示不一样的颜色」)。
+ *
+ * 上面那条是"没有色相时"的长相(灰底墨字),这一条只命中**挂了 `--hue` 的**
+ * 那些项 —— 也就是工具页的导航项。两个判据合起来的效果:
+ *
+ * - 在 `/trail-test/` 上,框里的「轨迹」是**翠绿**药丸,其余九项照旧
+ * - 在 `/toolbox/` 上,「工具箱」那一项没有 `--hue`(它不是工具),照旧灰的
+ * - 在某个趣味工具页上,「工具箱」标的是 `aria-current='true'` 且没有色相,
+ *   所以它仍然灰着,而**下拉里那一项**是彩的 —— 正是这两处今天的分工
+ *
+ * `[style*='--hue']` 是属性子串匹配:`ToolNav` 只给有色的项写这个内联自定义
+ * 属性,所以它恰好就是"这一项有颜色"的判据,**不必再加一个类去同步**。
+ *
+ * 底色是色相兑 16%(很淡的一层),字是兑 70% 的墨色(过 AA);这两句和卡片标题、
+ * 工具箱那格用的是同一套口径。
+ */
+.site-nav__item[aria-current][style*='--hue'] {
+  background: color-mix(in srgb, var(--hue) 16%, transparent);
+  color: color-mix(in srgb, var(--hue) 70%, var(--text));
+}
+
 /* ---------- 折叠出来的「更多」 ---------- */
 
 .site-nav__more {
@@ -2019,8 +2041,18 @@ input[type='number'] {
 }
 
 .mini-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: 0 8px 18px -8px rgb(0 0 0 / 0.28);
+  /*
+   * **边框取这张卡自己的色相**(用户要的"鼠标放上去的边框颜色都弄成不一样的")。
+   * `--hue` 挂在 `.mini-card` 自己身上,所以合并卡是蓝、CPS 是青、轨迹是翠绿
+   * —— 七张卡扫过去七种颜色。
+   *
+   * 兜底 `var(--border-strong)`:万一哪张卡没拿到色相,退回原来那条墨色的。
+   */
+  border-color: var(--hue, var(--border-strong));
+  /* 同 `.card`:悬停那层必须比静止那层深 */
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.06),
+    0 14px 26px -10px rgb(0 0 0 / 0.18);
 }
 
 /*
@@ -2054,11 +2086,56 @@ input[type='number'] {
   gap: 10px;
 }
 
+/*
+ * 首页卡头那枚图标。和工具页标题旁、工具箱那格是同一套(色相表见
+ * `src/lib/tool-hues.ts`)。
+ *
+ * **24px 是实测出来的上限,不是估的。** 我原先按"徽章 29px 是卡头里最高的
+ * 孩子"推,以为 26 也安全 —— **量出来是错的**:26px 时卡头 30 → 31、首页
+ * 2211 → 2214。逐档试过(见下表)才知道线在 24:
+ *
+ * | 图标 | 卡头 | 首页总高 |
+ * | --- | --- | --- |
+ * | 不显示 | 30 | 2211 |
+ * | 22px | 30 | 2211 |
+ * | **24px** | **30** | **2211** |
+ * | 26px | 31 | 2214 |
+ *
+ * 24 正好也是卡头那枚重置按钮的尺寸,两枚控件因此一样大。
+ * **改这个数之前先量**:卡头一旦被顶高,首页总高就跟着涨。
+ */
+.mini-card__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--hue, var(--bg-inset)) 12%, transparent);
+  color: var(--hue, var(--text-dim));
+}
+
+.mini-card__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/*
+ * 卡名万一要折行,**断在词组之间,不要断成一个孤零零的字**。
+ *
+ * 加了卡头那枚图标之后卡名可用宽度少了 32px,CPS 那张本来就刚好放得下、
+ * 于是折成了「…速度测」+「试」—— 一个字单独占一行,读起来像出了故障。
+ * `text-wrap: balance` 让两行长度接近,断点落在自然的位置。
+ *
+ * 只影响本来就折行的卡,一行放得下的一个字都不动。浏览器不认这一条时
+ * 退回普通折行,那正是加它之前的样子。
+ */
 .mini-card__name {
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: inherit;
+  text-wrap: balance;
 }
 
 .mini-card__name:hover {
@@ -2125,6 +2202,14 @@ input[type='number'] {
 
 .mini-card__desc {
   margin: 0;
+  /*
+   * **居中**(用户要的)。这句是卡片的"介绍",一句话说清这张卡能干什么 ——
+   * 它上面是卡头、下面是装置面,居中之后整张卡的视觉重心落在中轴上。
+   *
+   * 两行以上时居中会让左右两端参差,中文尤其明显 —— 但用户要的就是这个,
+   * 而且这句通常一到两行,参差有限。
+   */
+  text-align: center;
   color: var(--text-dim);
   font-size: 0.84rem;
   line-height: 1.55;
@@ -3040,10 +3125,26 @@ code {
 .prose--cards > ol.steps > li::before {
   content: '';
   position: absolute;
-  inset: -1px;
+  /*
+   * **`inset: 0` 而不是 `-1px`。** 工具页那些卡片现在带 `overflow-y: auto`
+   * (见下面"限高"),而 `overflow` 不是 `visible` 就会**裁掉溢出的伪元素** ——
+   * `-1px` 那一圈会被削平,环就缺一块。退回边框盒以内,改成压在卡片自己那条
+   * 1px 边上(悬停时那条边本来就转透明)。
+   */
+  inset: 0;
   border-radius: inherit;
   padding: 1.5px;
-  background: linear-gradient(120deg, var(--border-strong), var(--text-dim));
+  /*
+   * **有色相就用色相,没有就退回原来那条墨色的。**
+   * `var(--hue, X)` 的兜底让这同一条规则伺候两种页面:工具页传了色相 →
+   * 一圈实色的环;维修页/工具箱没传 → 还是 `--border-strong → --text-dim`。
+   * 一个 `--hue` 都没加,兜底分支走的就是老样子。
+   */
+  background: linear-gradient(
+    120deg,
+    var(--hue, var(--border-strong)),
+    var(--hue, var(--text-dim))
+  );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -3089,7 +3190,11 @@ code {
 .prose--cards > ul > li:hover,
 .prose--cards > ol.steps > li:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 18px -8px rgb(0 0 0 / 0.28);
+  /* **必须比静止那层更深** —— 静止的投影加进来之后,原来那一条(单层、-8px)
+     反而比静止还浅,悬停会看着像"陷下去"。同样是远近两层,一起放大。 */
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.06),
+    0 14px 26px -10px rgb(0 0 0 / 0.18);
 }
 
 .card-grid {
@@ -3190,6 +3295,31 @@ code {
   max-width: 68ch;
 }
 
+/*
+ * **小节标题前面一小段色相短线。**
+ *
+ * 这一页从头到尾只有标题那一处有颜色,读完那一眼之后整页就又是灰的了。
+ * 每个 `<h2>` 前面来一小段(4×0.8em、圆头),整页从上到下就有了一条**色的节奏** ——
+ * 它同时在当"这里是一个新小节"的路标,不是纯装饰。
+ *
+ * 用 `::before` 画,所以**一页标记都不用改**;`var(--hue, var(--text-dim))`
+ * 让没传色相的页面(维修页、工具箱)退回一条墨色短线,那里本来就是无彩色的。
+ */
+.prose--cards > h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prose--cards > h2::before {
+  content: '';
+  flex: none;
+  width: 4px;
+  height: 0.8em;
+  border-radius: 2px;
+  background: var(--hue, var(--text-dim));
+}
+
 .prose--cards > ul,
 .prose--cards > ol.steps {
   display: grid;
@@ -3235,7 +3365,61 @@ code {
 .prose--cards > ol.steps > li > strong:first-child {
   display: block;
   margin-bottom: 5px;
-  color: var(--text);
+  /*
+   * 卡片标题取**这一页色相的深版**:`color-mix` 把它往正文墨色里兑 30%。
+   *
+   * 两个作用:一是参考站那边卡片标题就是有颜色的(用户发的那张,标题全是靛蓝),
+   * 二是这一页字最多的就是这些卡片 —— 标题带色,一片文字里就有了路标。
+   *
+   * **兑 30% 墨色是为了对比度,不是为了好看。** 纯 `var(--hue)` 的蓝压在白纸上
+   * 只有 3.1:1,做正文级的标题不够;兑完是 4 出头,粗体 15px 稳过 AA-large。
+   * 深色那边同一句自动反着走(墨色是白的),兑完是更亮的色,压在近黑上 7:1。
+   * **没有色相的页面走兜底 `var(--text)`,和原来一模一样。**
+   */
+  color: color-mix(in srgb, var(--hue, var(--text)) 70%, var(--text));
+}
+
+/*
+ * **限高 + 内部滚动**(用户要的"弄个滚轮")。
+ *
+ * 起因:一行里只要有一张卡内容特别长,整行就被它撑到那个高度,旁边几张短卡
+ * 底下空出一大片。实测 `/button-test/` 1440 下第二行三张**全是 454px**
+ * (内容最长那张顶的),而第一行只有 186。
+ *
+ * 限到 280 之后:六张卡都落回 200 上下,长的那张自己滚,旁边几张的空档
+ * 从 268px 收到几十。
+ *
+ * **为什么是 280**:实测同页的常见高度是 186,`/aim-test/` 那两组是 186 / 161。
+ * 280 落在"绝大多数卡本来就够高"和"长卡确实要滚"之间 —— 阈值取太小的话,
+ * 大半的卡都会长出滚动条,那比留白更烦。
+ *
+ * **只在 `.prose--cards` 上,`.card` 不加**:维修页那几张是手写的、本来就短,
+ * 给它们加一条用不上的规则只是留个以后会误会的钩子。
+ *
+ * 滚动条自己也调了:默认那条在纸面上是一块系统灰,和全站的细线语言不搭。
+ */
+.prose--cards > ul > li,
+.prose--cards > ol.steps > li {
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.prose--cards > ul > li::-webkit-scrollbar,
+.prose--cards > ol.steps > li::-webkit-scrollbar {
+  width: 8px;
+}
+
+.prose--cards > ul > li::-webkit-scrollbar-thumb,
+.prose--cards > ol.steps > li::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--border-strong);
+}
+
+.prose--cards > ul > li::-webkit-scrollbar-track,
+.prose--cards > ol.steps > li::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /*
@@ -3266,6 +3450,91 @@ code {
 
 .prose--cards > ul > li ul li {
   margin-bottom: 4px;
+}
+
+/* ---------- 工具页的标题图标 ---------- */
+
+/*
+ * 标题旁边那枚图标。用户拿参考站提的:那边**每个图标底下都垫一块淡色方块**,
+ * 而我们的工具页**连图标都没有**(全站图标只长在工具箱清单和维修页上)。
+ *
+ * 它干的事是"一眼认出这是哪一件",不是装饰 —— 所以色相只落在这块底和描边上,
+ * 标题本身仍然取墨色。色相表在 `src/lib/tool-hues.ts`,那里写了这条例外
+ * 的完整理由和约束。
+ *
+ * 底色走 `color-mix` 把色相稀释到 12% —— **不写死任何淡色值**,换一个色相
+ * 它自己跟着变,深浅两套主题也不用各写一份(透明底在两种纸面上都成立)。
+ */
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* h1 的下边距搬到这一层:图标和标题是同一个整体,间距该由这个整体给 */
+  margin-bottom: 0.8rem;
+}
+
+.tool-head h1 {
+  margin-block: 0;
+  /* 长标题(iOS「鼠标按键 / 滚轮 / 长按 / 双击测试」那种)要能自己折行 */
+  min-width: 0;
+}
+
+.tool-head__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--hue) 12%, transparent);
+  color: var(--hue);
+}
+
+.tool-head__icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+/*
+ * 窄屏缩一档。48px 的方块加 14px 间距会吃掉标题的宽度,而中文标题本来就长。
+ */
+@media (max-width: 760px) {
+  .tool-head {
+    gap: 10px;
+  }
+
+  .tool-head__icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .tool-head__icon svg {
+    width: 21px;
+    height: 21px;
+  }
+}
+
+/*
+ * 卡片**静止时**就有一层柔和的投影。
+ *
+ * 参考站(用户发的那四张)全都有这个,而现在只有 hover 才出 —— 于是"卡片"
+ * 和"纸面上画了个框"看起来是一回事。静止投影把卡片从纸面上抬起来一层,
+ * 这是那种"说不上哪里不一样但就是更好看"的主要来源。
+ *
+ * 两级:近距离一层很紧的接触影 + 远距离一层大而淡的环境影,这是标准的做法
+ * (单层会显得像描边而不是影子)。**深色下它几乎不可见** —— 黑压黑,物理限制,
+ * 不是漏做;深色那边靠边框和底色区分层次。
+ *
+ * `--radius-lg` 的卡片和药丸图标一起给,免得同一页上有一半浮一半不浮。
+ */
+.card,
+.prose--cards > ul > li,
+.prose--cards > ol.steps > li,
+.tool-card,
+.mini-card {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 4px 12px -6px rgb(0 0 0 / 0.1);
 }
 
 /* ---------- 按下去 ---------- */

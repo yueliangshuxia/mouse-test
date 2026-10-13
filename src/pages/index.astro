@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import Backdrop from '../components/Backdrop.astro';
 import MiniCard from '../components/MiniCard.astro';
 import { CONFIDENCE_LABEL, DIAGNOSTIC_TOOLS, FUN_TOOLS, PLANNED_TOOLS } from '../lib/tools';
 
@@ -94,6 +95,8 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
     都不变 —— 这一条改完要重新数一遍 `<main>` 的字数对一遍。
   */}
   <h1 class="home-title">在线鼠标测试</h1>
+
+  <Backdrop />
 
   <ul class="mini-grid">
     {
@@ -191,6 +194,8 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
       </>
     )
   }
+
+
 </BaseLayout>
 
 <script>
@@ -236,6 +241,7 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
     const card = surface.closest('.mini-card');
     if (spec && card instanceof HTMLElement) mountMiniCard(card, spec);
   }
+
 </script>
 
 <style>
@@ -286,4 +292,5 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
     color: var(--text);
     text-decoration: none;
   }
+
 </style>

@@ -1927,6 +1927,19 @@ export interface KeyboardStats {
   maxSimultaneous: number;
   /** 结束时仍被认为按住的键数 */
   stuck: number;
+  /**
+   * **逐个键各按下多少次。** 键帽上那个小计数直接读它。
+   *
+   * 放在这里而不是让页面自己记一个 `Map`:页面上那句注释写得对 ——
+   * 「所有统计量都从它派生,页面自己不再另记一套计数器,**两套计数迟早会不一致**,
+   * 而『累计按下 42 次』和『已触发的键 43 个』同时出现在屏幕上,用户只会认为
+   * 整个页面都是错的」。键帽上的数就是最容易和「累计按下」对不上的那一处:
+   * 两个数并排显示,差一个就穿帮。
+   *
+   * **系统的自动重复已经被挡在 `events` 之外**(页面在 `keydown` 里
+   * `if (event.repeat) return`),所以这里数出来的就是人真正按下的次数。
+   */
+  perKey: Map<string, number>;
 }
 
 /**
@@ -1944,6 +1957,7 @@ export interface KeyboardStats {
 export function summarizeKeyboard(events: readonly KeyEvent[]): KeyboardStats {
   const held = new Set<string>();
   const seen = new Set<string>();
+  const perKey = new Map<string, number>();
   let presses = 0;
   let maxSimultaneous = 0;
 
@@ -1954,6 +1968,7 @@ export function summarizeKeyboard(events: readonly KeyEvent[]): KeyboardStats {
       presses++;
       seen.add(event.code);
       held.add(event.code);
+      perKey.set(event.code, (perKey.get(event.code) ?? 0) + 1);
       if (held.size > maxSimultaneous) maxSimultaneous = held.size;
     } else {
       held.delete(event.code);
@@ -1965,6 +1980,7 @@ export function summarizeKeyboard(events: readonly KeyEvent[]): KeyboardStats {
     uniqueKeys: seen.size,
     maxSimultaneous,
     stuck: held.size,
+    perKey,
   };
 }
 

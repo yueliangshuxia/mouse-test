@@ -5,6 +5,8 @@ import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
 import { REPRESS_RADIUS_PX, REPRESS_WINDOW_MS } from '../lib/analysis';
 import { BUTTONS } from '../lib/mouse-buttons';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('hold-drag-test')!;
 
@@ -105,8 +107,22 @@ const jsonLd = {
   description={tool.description}
   current={tool.slug}
   jsonLd={jsonLd}
+  hue={TOOL_HUE['hold-drag-test']}
 >
-  <h1>鼠标长按拖拽测试</h1>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['hold-drag-test']}
+      />
+    </span>
+    <h1>鼠标长按拖拽测试</h1>
+  </div>
 
   <p class="prose">
     按住任意一个鼠标按键,在下面的区域里来回拖动十几秒,然后松开。页面会统计每一次按住期间

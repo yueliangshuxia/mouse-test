@@ -14,7 +14,6 @@ import {
 } from './capabilities';
 import {
   isTheme,
-  systemTheme,
   THEME_COLORS,
   THEME_KEY,
   THEME_LABELS,
@@ -268,9 +267,13 @@ export function readTheme(): Theme {
     const raw = localStorage.getItem(THEME_KEY);
     if (isTheme(raw)) return raw;
   } catch {
-    /* 隐私模式:读不到就走系统偏好,不影响本次显示 */
+    /* 隐私模式:读不到就落到默认那一档,不影响本次显示 */
   }
-  return systemTheme();
+  /*
+   * **没表态之前默认深色**(用户定的),理由和代价写在 `theme.ts` 的文件头。
+   * 原来这里走的是 `systemTheme()`,那个函数已经删掉了。
+   */
+  return 'dark';
 }
 
 function writeTheme(theme: Theme): void {

@@ -4,6 +4,8 @@ import type { Tool } from '../lib/tools';
 import { DEFAULT_TRACE_SLOTS } from '../lib/mini-cards';
 import type { MiniCard } from '../lib/mini-cards';
 import { MOUSE_FIGURE_SVG } from '../lib/mouse-figure';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 import { href } from '../lib/url';
 
 interface Props {
@@ -49,7 +51,8 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
 
   条件为假时输出的 class 与原来逐字节相同,其余七张卡的 DOM 一个字符都不变。
 */}
-<li class={`mini-card${spec.wide ? ' mini-card--wide' : ''}`}>
+{/* `--hue` 挂在**卡片根上**,不在图标那一格 —— 悬停时那条边框也要用它,而边框是卡片的 */}
+<li class={`mini-card${spec.wide ? ' mini-card--wide' : ''}`} style={`--hue: ${TOOL_HUE[tool.slug]}`}>
   {/*
     卡名和摘要走 `spec.faceName` / `spec.faceDesc`,没写才落回 `Tool` 那两个。
     一张卡顶几页时 `Tool.name` / `Tool.description` 只说了一半 —— 它们是**那一页**
@@ -75,6 +78,25 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
     只会听到一个叫「直接测得」的链接,不知道它去哪儿。
   */}
   <div class="mini-card__head">
+    {/*
+      卡头那枚图标,和工具页标题旁边那枚、工具箱那格是**同一套长相**
+      (色相表在 `src/lib/tool-hues.ts`)。
+
+      **26px 是量出来的尺寸,不是随便挑的**:卡头里最高的孩子是可信度徽章
+      **29px**,所以只要不超过它,卡头高度不变、首页总高就一格不涨
+      (这一页的高度在文档里是钉住的)。26 < 29,安全。
+    */}
+    <span class="mini-card__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF[tool.slug]}
+      />
+    </span>
     <a class="mini-card__name" href={href(`${tool.slug}/`)}>{spec.faceName ?? tool.name}</a>
     {spec.kind !== null && (
       <button

@@ -1,5 +1,6 @@
 ---
 import { NAV } from '../lib/tools';
+import { TOOL_HUE } from '../lib/tool-hues';
 import { href } from '../lib/url';
 
 interface Props {
@@ -56,6 +57,7 @@ const { current } = Astro.props;
             href={href(`${tool.slug}/`)}
             title={tool.name}
             aria-current={current === tool.slug ? 'page' : undefined}
+            style={TOOL_HUE[tool.slug] ? `--hue: ${TOOL_HUE[tool.slug]}` : undefined}
           >
             {tool.navLabel}
           </a>
@@ -108,6 +110,7 @@ const { current } = Astro.props;
             href={href(`${tool.slug}/`)}
             title={tool.name}
             aria-current={current === tool.slug ? 'page' : undefined}
+            style={TOOL_HUE[tool.slug] ? `--hue: ${TOOL_HUE[tool.slug]}` : undefined}
           >
             {tool.navLabel}
           </a>

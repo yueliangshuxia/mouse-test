@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import Backdrop from '../components/Backdrop.astro';
 import { REPAIR_HERO_SVG, REPAIR_MOTIF } from '../lib/repair-motifs';
 import { REPAIR } from '../lib/tools';
 import { MOUSE_TOOLS } from '../lib/tools';
@@ -162,6 +163,8 @@ const STEPS = [
   jsonLd={jsonLd}
 >
   <h1>鼠标维修</h1>
+
+  <Backdrop />
 
   <p class="prose">
     上面那排工具负责<strong>测</strong>,这一页负责<strong>修</strong>。两边是同一件事的两头:
@@ -771,7 +774,10 @@ const STEPS = [
     /* 把卡片自己那条灰边让出来,免得和渐变环叠成两层 */
     border-color: transparent;
     transform: translateY(-2px);
-    box-shadow: 0 8px 18px -8px rgb(0 0 0 / 0.28);
+    /* 同 `.card`:必须比静止那层深,否则悬停看着像陷下去 */
+    box-shadow:
+      0 2px 4px rgb(0 0 0 / 0.06),
+      0 14px 26px -10px rgb(0 0 0 / 0.18);
     text-decoration: none;
   }
 

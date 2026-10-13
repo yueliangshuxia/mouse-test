@@ -2,6 +2,7 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { CONFIDENCE_LABEL, NAV } from '../lib/tools';
 import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 import { faqHtml, faqText } from '../lib/faq';
 import { href } from '../lib/url';
 
@@ -108,7 +109,7 @@ const jsonLd = {
             对读屏用户一个字的信息都没有,而它里面全是 `<path>`,
             不藏起来只会让读屏念出一串没人听得懂的东西。
           */}
-          <div class="box-item__preview" aria-hidden="true">
+          <div class="box-item__preview" aria-hidden="true" style={`--hue: ${TOOL_HUE[tool.slug]}`}>
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -220,10 +221,17 @@ const jsonLd = {
     place-items: center;
     width: 64px;
     height: 64px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--bg-inset);
-    color: var(--text-dim);
+    border-radius: var(--radius-lg);
+    /*
+     * **从"灰格子"改成"淡色格子"**,和工具页标题那枚图标、首页卡头那枚
+     * 是同一套长相(色相表在 `src/lib/tool-hues.ts`)。
+     *
+     * 底色 `color-mix` 到 12% —— 不写死任何淡色值,也不给深浅两套主题各写一份。
+     * 边框用色相兑一半,比纯色相淡、比灰线明显。
+     */
+    border: 1px solid color-mix(in srgb, var(--hue, var(--border)) 35%, var(--border));
+    background: color-mix(in srgb, var(--hue, var(--bg-inset)) 12%, transparent);
+    color: var(--hue, var(--text-dim));
   }
 
   .box-item__preview svg {

@@ -4,6 +4,8 @@ import StatPanel from '../components/StatPanel.astro';
 import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
 import { TARGET_COUNT, TARGET_DIAMETER_PX } from '../lib/analysis';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('aim-test')!;
 
@@ -108,8 +110,21 @@ const jsonLd = {
 };
 ---
 
-<BaseLayout title={tool.title} description={tool.description} current={tool.slug} jsonLd={jsonLd}>
-  <h1>鼠标瞄准测试</h1>
+<BaseLayout title={tool.title} description={tool.description} current={tool.slug} jsonLd={jsonLd} hue={TOOL_HUE['aim-test']}>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['aim-test']}
+      />
+    </span>
+    <h1>鼠标瞄准测试</h1>
+  </div>
 
   <p class="prose">
     选好目标和时长,点<strong>「开始练习」</strong>,然后在下面的框里尽量多、尽量准地点中靶子。

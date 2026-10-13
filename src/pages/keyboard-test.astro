@@ -4,6 +4,8 @@ import StatPanel from '../components/StatPanel.astro';
 import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
 import { ALL_KEYS, MAIN_ROWS, NAV_ROWS, NUMPAD, isGap } from '../lib/keyboard-layout';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('keyboard-test')!;
 
@@ -68,8 +70,22 @@ const jsonLd = {
   description={tool.description}
   current={tool.slug}
   jsonLd={jsonLd}
+  hue={TOOL_HUE['keyboard-test']}
 >
-  <h1>键盘按键测试</h1>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['keyboard-test']}
+      />
+    </span>
+    <h1>键盘按键测试</h1>
+  </div>
 
   <p class="prose">
     按下键盘上的任意键,对应的键帽会立即高亮。用来排查<strong>某个键失灵</strong>,
@@ -95,7 +111,8 @@ const jsonLd = {
                       data-tested="false"
                       style={`flex:${item.width ?? 1}`}
                     >
-                      {item.label}
+                      <span class="kb-key__label">{item.label}</span>
+                      <span class="kb-key__n"></span>
                     </div>
                   ),
                 )}
@@ -120,7 +137,8 @@ const jsonLd = {
                         data-tested="false"
                         style={`flex:${item.width ?? 1}`}
                       >
-                        {item.label}
+                        <span class="kb-key__label">{item.label}</span>
+                        <span class="kb-key__n"></span>
                       </div>
                     ),
                   )}
@@ -139,7 +157,8 @@ const jsonLd = {
                   data-tested="false"
                   style={`${key.colSpan ? `grid-column: span ${key.colSpan};` : ''}${key.rowSpan ? `grid-row: span ${key.rowSpan};` : ''}`}
                 >
-                  {key.label}
+                  <span class="kb-key__label">{key.label}</span>
+                  <span class="kb-key__n"></span>
                 </div>
               ))
             }
@@ -358,6 +377,8 @@ const jsonLd = {
     }
 
     .kb-key {
+      /* 右上角那个计数的定位基准 */
+      position: relative;
       flex: 1 1 0;
       min-width: 0;
       display: flex;
@@ -376,6 +397,34 @@ const jsonLd = {
       white-space: nowrap;
       transition: background 0.05s linear, border-color 0.05s linear;
       user-select: none;
+    }
+
+    /*
+     * 键帽右上角那个**按下次数**(用户拿参考站提的:「有显示按的次数」)。
+     *
+     * 数从 `summarizeKeyboard(events).perKey` 来 —— **页面不另记计数器**,
+     * 理由写在 `analysis.ts` 那个字段上:键帽上的数和读数栏的「累计按下」
+     * 并排显示,两套计数差一个就穿帮。
+     *
+     * **空字符串 = 不显示。** `setText` 写进去的是 `''` 而不是 `'0'`,
+     * 这里用 `:not(:empty)` 把它收掉 —— 全站那条「没数据不画空槽」落到键帽上
+     * 就是这个样子:一个 0 会被读成"按过,次数是零",而它一次都没被按到过。
+     *
+     * 颜色走 `var(--accent)`,而键帽长在 `.well` 里,所以它自动是磷光绿 ——
+     * 和「按过」那一档同一个色,不需要写死任何值。
+     */
+    .kb-key__n {
+      position: absolute;
+      top: 1px;
+      right: 3px;
+      display: none;
+      font-size: 0.58rem;
+      line-height: 1.2;
+      color: var(--accent);
+    }
+
+    .kb-key__n:not(:empty) {
+      display: block;
     }
 
     .kb-key--small {
@@ -419,6 +468,12 @@ const jsonLd = {
       .kb-key {
         height: 34px;
         font-size: 0.62rem;
+      }
+
+      /* 键帽缩了,右上角那个数也跟着缩一档,否则会盖住键名 */
+      .kb-key__n {
+        font-size: 0.52rem;
+        right: 2px;
       }
     }
   </style>
@@ -476,15 +531,38 @@ const jsonLd = {
     /** 最近若干次按键的展示用记录 */
     const logEntries: { label: string; holdMs: number | null }[] = [];
 
-    function renderKey(code: string, held: boolean): void {
+    /**
+     * 刷新一个键帽。
+     *
+     * `perKey` 是**可选**的,而且只有传了才去动那个计数格 —— 这一点不是随手写的:
+     * 失焦那条路(`clearHeld`)只按"这个键不再按着"去刷,它手里没有一份当前的
+     * 计数表;要是那种调用也去写计数格,窗口一失焦整块键盘的数字就全被抹成 0 了。
+     * **不传 = 不动那一格**,而不是"当成 0"。
+     */
+    function renderKey(code: string, held: boolean, perKey?: Map<string, number>): void {
       const node = document.querySelector<HTMLElement>(`.kb-key[data-code="${code}"]`);
       if (!node) return;
       node.dataset.held = held ? 'true' : 'false';
       if (held) node.dataset.tested = 'true';
+
+      const count = node.querySelector<HTMLElement>('.kb-key__n');
+      if (count && perKey) {
+        const n = perKey.get(code) ?? 0;
+        /*
+         * 没按过的键写**空字符串而不是 "0"**。这是全站那条「没数据不画空槽」
+         * 落到键帽上的样子:一个 0 会被读成"这个键按过,次数是零",
+         * 而它其实一次都没被按到过。CSS 那边也是按 `:empty` 收的。
+         */
+        setText(count, n > 0 ? String(n) : '');
+      }
     }
 
-    function renderSummary(): void {
-      const stats = summarizeKeyboard(events);
+    /**
+     * `stats` 可以由调用方传进来。热路径(`keydown` / `keyup`)每一下都要同时刷
+     * 键帽和读数栏,**两边用同一份** —— 各算一次不算错(它是纯函数),但键帽上
+     * 那个数和读数栏那个数并排显示,让它们由同一次遍历产生是最省事的保证。
+     */
+    function renderSummary(stats = summarizeKeyboard(events)): void {
 
       setStat('presses', String(stats.presses));
       setStat('unique', `${stats.uniqueKeys} / ${KEY_COUNT}`);
@@ -573,8 +651,9 @@ const jsonLd = {
       heldSince.set(event.code, performance.now());
       events.push({ t: event.timeStamp, code: event.code, down: true });
 
-      renderKey(event.code, true);
-      renderSummary();
+      const stats = summarizeKeyboard(events);
+      renderKey(event.code, true, stats.perKey);
+      renderSummary(stats);
 
       // 先占个位,松开时再补时长
       logEntries.push({ label: keyLabel(event.code), holdMs: null });
@@ -586,7 +665,7 @@ const jsonLd = {
       const startedAt = heldSince.get(event.code);
       heldSince.delete(event.code);
       events.push({ t: event.timeStamp, code: event.code, down: false });
-      renderKey(event.code, false);
+      renderKey(event.code, false, summarizeKeyboard(events).perKey);
 
       if (startedAt !== undefined) {
         // 找到这条按键在日志里的位置,把按住时长补上。日志容量有限,

@@ -4,6 +4,8 @@ import StatPanel from '../components/StatPanel.astro';
 import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
 import { CLICK_CHATTER_MS, CLICK_DOUBLE_MAX_MS } from '../lib/analysis';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('double-click-test')!;
 
@@ -70,8 +72,22 @@ const jsonLd = {
   description={tool.description}
   current={tool.slug}
   jsonLd={jsonLd}
+  hue={TOOL_HUE['double-click-test']}
 >
-  <h1>鼠标双击测试</h1>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['double-click-test']}
+      />
+    </span>
+    <h1>鼠标双击测试</h1>
+  </div>
 
   <p class="prose">
     在下面的区域里点击选中的那个键,页面会记录<strong>相邻两次按下之间隔了多少毫秒</strong>,

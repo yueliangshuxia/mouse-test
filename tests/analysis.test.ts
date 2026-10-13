@@ -1229,6 +1229,23 @@ describe('summarizeKeyboard', () => {
     expect(stats.uniqueKeys).toBe(3);
     expect(stats.maxSimultaneous).toBe(2);
     expect(stats.stuck).toBe(0);
+
+    /*
+     * **逐键计数**(键帽上那个小数字读的就是它)。
+     *
+     * 两条不变量,合起来才是"它和汇总对得上":
+     * 逐键加起来必须等于 `presses`,而键的个数必须等于 `uniqueKeys`。
+     * 少一条,键帽上的数和读数栏那个数就可能各说各话 —— 而它们并排显示。
+     */
+    expect([...stats.perKey.entries()].sort()).toEqual([
+      ['KeyA', 1],
+      ['KeyB', 1],
+      ['KeyC', 1],
+    ]);
+
+    // 那两条不变量本身也钉住 —— 逐键加起来 === 汇总,键的个数 === 不同键数
+    expect([...stats.perKey.values()].reduce((a, b) => a + b, 0)).toBe(stats.presses);
+    expect(stats.perKey.size).toBe(stats.uniqueKeys);
   });
 
   it('同一个键反复按只算一个"不同键",但次数照记', () => {
@@ -1241,6 +1258,8 @@ describe('summarizeKeyboard', () => {
 
     expect(stats.presses).toBe(2);
     expect(stats.uniqueKeys).toBe(1);
+    // 键帽上那个数字就是这个 —— 同一个键按两次,它得是 2
+    expect(stats.perKey.get('KeyA')).toBe(2);
     expect(stats.maxSimultaneous).toBe(1);
   });
 

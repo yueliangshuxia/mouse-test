@@ -1,0 +1,351 @@
+---
+/**
+ * 氛围层:**星空底 + 流星拖尾**。
+ *
+ * 两样都是纯装饰,和这个站一贯的"没有装饰"相反。用户拿参考站要的。
+ *
+ * ## 为什么抽成组件,不是各页抄一份
+ *
+ * 它原本整块写死在 `index.astro` 里,而用户随后要求维修页也加上 ——
+ * 那就成了**两份拷贝**:改一处忘一处,而"星星少了几个""拖尾不跟手"
+ * 这种毛病在两页之间翻着看是发现不了的。
+ *
+ * ## 它自己带 `<style>` 和 `<script>`,而且是**不冲突的**
+ *
+ * 页面 `<style>` 会被加上 `data-astro-cid`,而组件里的元素也由这个组件
+ * 渲染 —— 所以 cid 对得上,普通的作用域规则就够,不需要 `:global`。
+ * (那个 `:root[data-theme='dark'] .starfield` 例外:Astro 把 cid 加在
+ * **最后一个复合选择器**上,于是它变成 `:root[...] .starfield[cid]`,
+ * 照样命中。)
+ *
+ * `<script>` 由 Astro 按组件去重:同一页里用两次也只跑一次。
+ * 这里每页只用一次,所以 `getElementById('meteor')` 不会有歧义。
+ *
+ * ## 两样各自的规矩都写在下面各自的块里
+ *
+ * 简版:**星空只在深色下出现**;**拖尾不碰任何采样器、`pointer-events: none`、
+ * 指针停下来时 rAF 必须自己停**(首页有活的测量装置,常驻的 rAF 会和轨迹
+ * 渲染器抢帧)。
+ */
+---
+
+  {/*
+    流星拖尾的画布。**`pointer-events: none` 不是可选项** —— 它铺满视口,
+    挡住的话首页七张装置面一个都点不到。`z-index` 取 3:高过正文,低过底部
+    悬浮条(5)和报头(20)。
+  */}
+  {/*
+    星空底。**六个各自独立的图层** —— 每层自己的周期、相位和色温,所以任一时刻
+    亮着的只是其中几片。用两个伪元素做不到这件事:一个元素只有一个动画,
+    那片里的星星就只能整片一起明灭。详见上面 `<style>` 里那段。
+    `display` 由主题开关控制(浅色下整块不显示)。
+  */}
+  <div class="starfield" aria-hidden="true">
+    <i></i><i></i><i></i><i></i><i></i><i></i>
+  </div>
+
+  <canvas id="meteor" class="meteor" aria-hidden="true"></canvas>
+
+<style>
+  /*
+   * ---------- 星空底(用户拿参考站要的)----------
+   *
+   * **只在深色下出现。** 浅色纸面是 `#f1f3f4`,白点铺上去读起来是"屏幕脏了",
+   * 不是星星 —— 星空的底从定义上就得是暗的。整块套在 `:root[data-theme='dark']` 里。
+   * 这是全站**第一次让两个主题长相不同**,所以单独说一句:代价是"浅色下少了
+   * 一样东西",硬做只会两档都难看。
+   *
+   * ## 为什么是六个元素,不再是两个伪元素
+   *
+   * 第一版用 `body::before` / `body::after` 两片,**每片一个动画** —— 于是每片里
+   * 所有星星只能**整片一起明灭**。用户要的是"几个几个地闪",那本质上是要求
+   * **多个互相独立的相位**,两个伪元素给不了(一个元素只有一个动画)。
+   *
+   * 所以改成六个 `<i>`,每层自己的周期、相位和色温。六片错开之后,任一时刻
+   * 亮着的都是其中几片 —— 那才是"闪"。
+   *
+   * (代价是六个 DOM 节点。它们不含文字、不接事件、`display` 随主题开关,
+   * 比一个 canvas 便宜得多。)
+   *
+   * ## 颜色
+   *
+   * 星等不同色温就不同,真实的星空本来就不是一片纯白。六层各给一点极淡的偏色
+   * (冷白 / 暖白 / 淡金 / 淡蓝 / 淡玫瑰),单看几乎察觉不到,叠在一起才不像
+   * 一片白点。**饱和度压在极低**:再高一点就会读成"彩色雪花"。
+   *
+   * ## 亮度
+   *
+   * 第一版 0.28–0.62,用户在整页截图上几乎看不见 —— 提到 0.42–0.92。
+   * **但别再加了**:这一页卡片密,星星本来就只从卡片缝里露出来,再亮会喧宾夺主,
+   * 把卡片的边界盖过去。
+   *
+   * ## 一层里要塞好几个点,不是一层一个
+   *
+   * 一层一个点,`background-repeat` 出来的是**规整的方格阵** —— 放大一眼就
+   * 看出是网格。每层三到四个分散的点,叠起来才像"散"。
+   *
+   * ## 其它
+   *
+   * - **没有一个像素是画出来的**:全是 `radial-gradient` + `background-repeat`。
+   * - **`z-index: -1`** 压在内容下面 —— 依赖"body 的底色被传播到根元素去画"
+   *   (`html` 自己没有 background),和回报率页那条全屏画布同一个前提。
+   * - **`prefers-reduced-motion` 下自动静止**:全站那条夹子把 `animation-duration`
+   *   压成 0.01ms,于是它就是一张静止的星空 —— 正是该有的降级,不用另写一段。
+   * - **这是全站第二条非用户触发的动效**(第一条是双击页那圈波纹,而那条恰恰
+   *   由用户触发)。用户明确要的就是"忽闪忽闪"。
+   */
+  .starfield {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    /* 它只是一层底,不该接任何事件 —— 首页的卡片装置才是接事件的地方 */
+    pointer-events: none;
+  }
+
+  :global(:root[data-theme='dark']) .starfield {
+    display: block;
+  }
+
+  .starfield i {
+    position: absolute;
+    inset: 0;
+    background-repeat: repeat;
+  }
+
+  /* 冷白 */
+  .starfield i:nth-child(1) {
+    --lo: 0;
+    --hi: 1;
+    background-image:
+      radial-gradient(2.3px 2.3px at 30px 42px, rgb(255 255 255 / 1) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 104px 76px, rgb(255 255 255 / 0.34) 50%, transparent 51%),
+      radial-gradient(1.8px 1.8px at 156px 110px, rgb(255 255 255 / 0.86) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 214px 34px, rgb(255 255 255 / 0.48) 50%, transparent 51%),
+      radial-gradient(1.4px 1.4px at 62px 190px, rgb(255 255 255 / 0.66) 50%, transparent 51%);
+    background-size: 248px 248px;
+    animation: twinkle 5.2s ease-in-out -0.4s infinite;
+  }
+
+  /* 暖白 */
+  .starfield i:nth-child(2) {
+    --lo: 0;
+    --hi: 0.95;
+    background-image:
+      radial-gradient(2.1px 2.1px at 82px 184px, rgb(255 246 226 / 0.92) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 192px 164px, rgb(255 246 226 / 0.36) 50%, transparent 51%),
+      radial-gradient(1.6px 1.6px at 130px 216px, rgb(255 246 226 / 0.72) 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 244px 82px, rgb(255 246 226 / 0.54) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 36px 118px, rgb(255 246 226 / 0.44) 50%, transparent 51%);
+    background-size: 296px 296px;
+    animation: twinkle 6.8s ease-in-out -2.9s infinite;
+  }
+
+  /* 淡金 */
+  .starfield i:nth-child(3) {
+    --lo: 0;
+    --hi: 0.8;
+    background-image:
+      radial-gradient(2.2px 2.2px at 366px 104px, rgb(255 232 186 / 0.9) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 312px 278px, rgb(255 232 186 / 0.34) 50%, transparent 51%),
+      radial-gradient(1.6px 1.6px at 436px 228px, rgb(255 232 186 / 0.64) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 152px 340px, rgb(255 232 186 / 0.46) 50%, transparent 51%),
+      radial-gradient(1.4px 1.4px at 268px 428px, rgb(255 232 186 / 0.56) 50%, transparent 51%);
+    background-size: 512px 512px;
+    animation: twinkle 8.1s ease-in-out -5.5s infinite;
+  }
+
+  /* 淡蓝 */
+  .starfield i:nth-child(4) {
+    --lo: 0;
+    --hi: 0.9;
+    background-image:
+      radial-gradient(1.9px 1.9px at 48px 142px, rgb(206 228 255 / 0.84) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 224px 50px, rgb(206 228 255 / 0.36) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 118px 92px, rgb(206 228 255 / 0.62) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 266px 248px, rgb(206 228 255 / 0.46) 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 176px 296px, rgb(206 228 255 / 0.56) 50%, transparent 51%);
+    background-size: 336px 336px;
+    animation: twinkle 4.6s ease-in-out -1.7s infinite;
+  }
+
+  /* 淡玫瑰 */
+  .starfield i:nth-child(5) {
+    --lo: 0;
+    --hi: 0.84;
+    background-image:
+      radial-gradient(1.7px 1.7px at 270px 196px, rgb(255 226 232 / 0.76) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 170px 296px, rgb(255 226 232 / 0.34) 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 386px 142px, rgb(255 226 232 / 0.52) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 58px 372px, rgb(255 226 232 / 0.42) 50%, transparent 51%);
+    background-size: 448px 448px;
+    animation: twinkle 7.4s ease-in-out -3.6s infinite;
+  }
+
+  /* 纯白(最亮的一层,周期最长) */
+  .starfield i:nth-child(6) {
+    --lo: 0;
+    --hi: 1;
+    background-image:
+      radial-gradient(2.5px 2.5px at 148px 252px, rgb(255 255 255 / 1) 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 332px 66px, rgb(255 255 255 / 0.62) 50%, transparent 51%),
+      radial-gradient(1.1px 1.1px at 52px 102px, rgb(255 255 255 / 0.4) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 240px 330px, rgb(255 255 255 / 0.7) 50%, transparent 51%);
+    background-size: 398px 398px;
+    animation: twinkle 9.6s ease-in-out -7.2s infinite;
+  }
+
+  /*
+   * **明灭的两端由每一层自己给**(`--lo` / `--hi`),不是写死的一对值。
+   *
+   * 这是"有亮有暗"能不能维持住的关键:所有层共用 `0.28 → 1` 的话,暗层的星
+   * 到头来也会亮到同一个顶点 —— 一轮闪完,亮度差就被抹平了。分档之后,
+   * 最亮那层在 0.55–1 之间脉动,最暗那层在 0.18–0.68 之间,**差一直存在**。
+   *
+   * 两端都**不取 0**:降到全黑再冒出来读的是"在开关灯",不是"在闪"。
+   */
+  @keyframes twinkle {
+    0%, 100% { opacity: var(--lo, 0.3); }
+    50% { opacity: var(--hi, 1); }
+  }
+
+  /*
+   * ---------- 流星拖尾(用户拿参考图要的)----------
+   *
+   * **它在 `pointermove` 上挂了一个 rAF 循环,而这一页有活的测量装置** ——
+   * 所以三条底线必须守住:
+   *
+   * 1. **不碰任何采样器。** 它只读指针坐标自己画,不 import `sampler.ts`、
+   *    不改任何缓冲区。首页那些卡片的样本一个都不会多、也不会少。
+   * 2. **`pointer-events: none`。** 铺满视口的层要是接事件,七张装置面全部失效。
+   * 3. **`prefers-reduced-motion` 下整段不跑**(见脚本)—— 全站那条 CSS 夹子
+   *    夹的是 CSS 动画,管不到 JS 循环,所以这里必须自己判一次。
+   *
+   * 颜色取仪器窗那支磷光绿:它是这个站"动起来了"的记号,而拖尾正是一个
+   * **动起来的东西**。参考图里那支是橙的 —— 换成橙色只要改脚本里那一个 rgba。
+   *
+   * 它和星空不同:**两个主题都跑**。星空需要暗底才成立,拖尾不需要。
+   */
+  .meteor {
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+</style>
+
+<script>
+  /*
+   * ---------- 流星拖尾 ----------
+   *
+   * 三条底线(理由写在上面 `.meteor` 那段):
+   *   · 不碰任何采样器 —— 它只读指针坐标自己画
+   *   · `pointer-events: none` —— 铺满视口的层接事件会让七张装置面全失效
+   *   · `prefers-reduced-motion` 下整段不跑(CSS 那条夹子管不到 JS 循环)
+   *
+   * ## **指针不动时必须停下来**
+   *
+   * 这一页有活的测量装置,而一个常驻的 rAF 会和轨迹卡那个渲染器**一直抢同一帧**。
+   * 所以循环是**按需起、无事自动停**:`pointermove` 时若没在跑就起一次,
+   * 尾巴全部过期之后**最后一个空帧把画布清干净然后 return,不再排下一帧**。
+   * 于是静止时的开销是 0 —— 那正是首页最需要保证的一件事。
+   *
+   * ## 尾巴按时间过期,不按帧数
+   *
+   * 掉帧时按帧数算的尾巴会拖得特别长(同样的 30 个点,60fps 下是 0.5 秒、
+   * 20fps 下是 1.5 秒),按时间算则每次都一样长。和全站"两个事件之间 vs
+   * 一段墙钟"那条判据是同一个道理。
+   */
+  {
+    const canvas = document.getElementById('meteor') as HTMLCanvasElement | null;
+    const ctx = canvas?.getContext('2d') ?? null;
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (canvas && ctx && !still) {
+      /*
+       * 两个非空别名。**不是多此一举**:上面那个 `if` 收窄的是 `canvas` / `ctx`
+       * 本身,而 TypeScript **不会把收窄带进嵌套的函数声明里**(`resize` /
+       * `frame` 都是)—— `astro check` 会直接报 17 个 `possibly null`。
+       * 赋给新的 `const` 之后类型就是收窄后的,闭包里也用得上。
+       */
+      const surface = canvas;
+      const g = ctx;
+
+      /** 尾巴存活多久 —— 从"头"往回算 */
+      const TAIL_MS = 280;
+      /** 最多存多少个点。按 1000Hz 的指针算,280ms 也就几十个,给足余量 */
+      const MAX_POINTS = 64;
+      /** 磷光绿。参考图里那支流星是橙的,换色改这一个常量即可 */
+      const RGB = '94, 214, 155';
+
+      let viewW = 0;
+      let viewH = 0;
+      const points: { x: number; y: number; t: number }[] = [];
+      let running = false;
+
+      function resize(): void {
+        // 上限 2:高 DPR 屏上再翻倍只是让每帧多填一倍像素,拖尾看不出区别
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        viewW = window.innerWidth;
+        viewH = window.innerHeight;
+        surface.width = Math.round(viewW * dpr);
+        surface.height = Math.round(viewH * dpr);
+        surface.style.width = `${viewW}px`;
+        surface.style.height = `${viewH}px`;
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      resize();
+      window.addEventListener('resize', resize, { passive: true });
+
+      function frame(now: number): void {
+        g.clearRect(0, 0, viewW, viewH);
+
+        // 尾部按时间过期
+        while (points.length > 0 && now - points[0].t > TAIL_MS) points.shift();
+
+        if (points.length === 0) {
+          // **画布已经在上面清过了**,这里直接停 —— 静止时一帧都不跑
+          running = false;
+          return;
+        }
+
+        const n = points.length;
+        for (let i = 1; i < n; i++) {
+          const a = points[i - 1];
+          const b = points[i];
+          const k = i / (n - 1); // 0 = 尾,1 = 头
+          g.beginPath();
+          g.moveTo(a.x, a.y);
+          g.lineTo(b.x, b.y);
+          g.lineCap = 'round';
+          g.lineWidth = 0.8 + k * 3.2;
+          // 平方衰减:尾巴掉得比线性快,才像烧掉的一段,而不是一条均匀的线
+          g.strokeStyle = `rgba(${RGB}, ${(k * k * 0.85).toFixed(3)})`;
+          g.stroke();
+        }
+
+        const head = points[n - 1];
+        g.beginPath();
+        g.arc(head.x, head.y, 2.4, 0, Math.PI * 2);
+        g.fillStyle = `rgba(${RGB}, 0.95)`;
+        g.fill();
+
+        requestAnimationFrame(frame);
+      }
+
+      window.addEventListener(
+        'pointermove',
+        (event) => {
+          points.push({ x: event.clientX, y: event.clientY, t: performance.now() });
+          if (points.length > MAX_POINTS) points.shift();
+          if (!running) {
+            running = true;
+            requestAnimationFrame(frame);
+          }
+        },
+        { passive: true },
+      );
+    }
+  }
+</script>

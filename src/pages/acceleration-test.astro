@@ -3,6 +3,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
 import { ACCEL_MILD_RATIO, ACCEL_STRONG_RATIO } from '../lib/analysis';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('acceleration-test')!;
 
@@ -70,8 +72,22 @@ const jsonLd = {
   description={tool.description}
   current={tool.slug}
   jsonLd={jsonLd}
+  hue={TOOL_HUE['acceleration-test']}
 >
-  <h1>鼠标加速度测试</h1>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['acceleration-test']}
+      />
+    </span>
+    <h1>鼠标加速度测试</h1>
+  </div>
 
   <p class="prose">
     指针加速的意思是:<strong>你移得越快,系统把位移放大得越多</strong>。

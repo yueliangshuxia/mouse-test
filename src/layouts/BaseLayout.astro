@@ -30,9 +30,19 @@ interface Props {
    * canonical 是错的(虽然搜索引擎在 404 上本来就忽略它,但写对是免费的)。
    */
   noindex?: boolean;
+  /**
+   * 这一页对应工具的色相(`src/lib/tool-hues.ts`)。给了就写到 `<main>` 上,
+   * 于是**整页都能用 `var(--hue)`** —— 标题图标、卡片悬停那圈环、卡片标题
+   * 都取同一件工具的颜色。
+   *
+   * **没给就整页没有 `--hue`**,而那些用到它的地方一律写成
+   * `var(--hue, 兜底值)`,退回无色相的旧长相。所以这是个**可选**的装饰,
+   * 不是必填 —— 维修页、工具箱、404 都不传它的对应色相也能照常站住。
+   */
+  hue?: string;
 }
 
-const { title, description, current, jsonLd, isolation = false, noindex = false } = Astro.props;
+const { title, description, current, jsonLd, isolation = false, noindex = false, hue } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 
 /*
@@ -108,14 +118,20 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
         }
 
         /*
-         * 只认 'light' / 'dark' 两个字面量,其余(没存过、存坏了、读抛了)
-         * 一律落到系统偏好。顺序不能反:先判 dark 再判 light,
-         * 中间那一段留给"什么都不是"。
+         * **只有存过 'light' 才是浅色,其余一律深色** —— 包括"没存过"、
+         * 存坏了、`localStorage` 读抛了(隐私模式)。
+         *
+         * 也就是说**默认是深色,而且和系统偏好无关**(用户 2026-10-13 定的):
+         * 首页那层星空只在深色下出现,跟着系统走的话系统是浅色的访客永远看不到。
+         * 代价写在这里,别当 bug 修掉:**系统明明是浅色、也从没按过开关的人,
+         * 进来会看到深色页面。**
+         *
+         * 这一处和 `ui.ts` 的 `readTheme()` 是**两个地方读同一个判据** ——
+         * 首帧这一处不能 import(`is:inline`),所以那句表达式在那边又写了一遍。
+         * **改这里必须同时改 `readTheme`**(反过来说,`theme.ts` 的文件头记着
+         * 这条双写,以及 `systemTheme()` 为什么被删了)。
          */
-        var dark =
-          stored === 'dark' ||
-          (stored !== 'light' &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches);
+        var dark = stored !== 'light';
 
         document.documentElement.dataset.theme = dark ? 'dark' : 'light';
 
@@ -146,7 +162,7 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
       </div>
     </header>
 
-    <main class="wrap">
+    <main class="wrap" style={hue ? `--hue: ${hue}` : undefined}>
       <slot />
     </main>
 

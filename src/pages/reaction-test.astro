@@ -11,6 +11,8 @@ import {
   RT_WAIT_MIN_MS,
   TRIALS_PER_ROUND,
 } from '../lib/analysis';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('reaction-test')!;
 
@@ -107,8 +109,21 @@ const jsonLd = {
 };
 ---
 
-<BaseLayout title={tool.title} description={tool.description} current={tool.slug} jsonLd={jsonLd}>
-  <h1>鼠标反应速度测试</h1>
+<BaseLayout title={tool.title} description={tool.description} current={tool.slug} jsonLd={jsonLd} hue={TOOL_HUE['reaction-test']}>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['reaction-test']}
+      />
+    </span>
+    <h1>鼠标反应速度测试</h1>
+  </div>
 
   <p class="prose">
     下面的框会等一段<strong>随机</strong>的时间,然后整块亮起来。看到变亮就<strong

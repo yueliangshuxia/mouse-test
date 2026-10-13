@@ -3,6 +3,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import StatPanel from '../components/StatPanel.astro';
 import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('cps-test')!;
 
@@ -102,8 +104,22 @@ const jsonLd = {
   description={tool.description}
   current={tool.slug}
   jsonLd={jsonLd}
+  hue={TOOL_HUE['cps-test']}
 >
-  <h1>鼠标 CPS 点击速度测试</h1>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['cps-test']}
+      />
+    </span>
+    <h1>鼠标 CPS 点击速度测试</h1>
+  </div>
 
   <p class="prose">
     选好时长,然后在下面的框里<strong>直接开始快速连点左键</strong>——

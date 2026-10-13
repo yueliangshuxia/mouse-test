@@ -5,6 +5,8 @@ import { findTool } from '../lib/tools';
 import { faqHtml, faqText } from '../lib/faq';
 import { href } from '../lib/url';
 import { cmPer360, GAMES } from '../lib/sensitivity';
+import { TOOL_MOTIF } from '../lib/tool-motifs';
+import { TOOL_HUE } from '../lib/tool-hues';
 
 const tool = findTool('sensitivity-converter')!;
 
@@ -91,8 +93,22 @@ const jsonLd = {
   description={tool.description}
   current={tool.slug}
   jsonLd={jsonLd}
+  hue={TOOL_HUE['sensitivity-converter']}
 >
-  <h1>鼠标灵敏度换算器</h1>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['sensitivity-converter']}
+      />
+    </span>
+    <h1>鼠标灵敏度换算器</h1>
+  </div>
 
   <p class="prose">
     填上你的 DPI 和游戏内灵敏度,换算出 <strong>eDPI</strong> 与
