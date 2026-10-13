@@ -20,11 +20,13 @@ import {
   detectAngleSnap,
   detectGaps,
   detectTrailJumps,
+  dpiDeviation,
   estimateDpi,
   isNearAxis,
   isSnapped,
   longestSegment,
   markScrollGlitches,
+  maxRulerDistanceCm,
   measureDrift,
   MIN_VALID_TRIALS,
   normalizeWheelDelta,
@@ -1184,6 +1186,62 @@ describe('classifyDpi', () => {
     // 960 距离 800 和 1200 都超过 12%
     expect(classifyDpi(960)).toBeNull();
     expect(classifyDpi(254)).toBeNull();
+  });
+});
+
+describe('dpiDeviation', () => {
+  it('实测比标称快就是正数,慢就是负数', () => {
+    // 812 对 800:(812 - 800) / 800 = +1.5%
+    expect(dpiDeviation(812, 800)).toBeCloseTo(0.015, 6);
+    expect(dpiDeviation(720, 800)).toBeCloseTo(-0.1, 6);
+  });
+
+  it('正好一致时是 0,不是 null —— 那是一个真的读数', () => {
+    expect(dpiDeviation(800, 800)).toBe(0);
+  });
+
+  it('标称留空或填成 0/负数时返回 null,页面显示破折号', () => {
+    // 标称留空是最常见的一档,不是错误
+    expect(dpiDeviation(800, null)).toBeNull();
+    expect(dpiDeviation(800, undefined)).toBeNull();
+    expect(dpiDeviation(800, 0)).toBeNull();
+    expect(dpiDeviation(800, -800)).toBeNull();
+  });
+
+  it('没测出实测值时返回 null,不能拿 0 去比', () => {
+    expect(dpiDeviation(null, 800)).toBeNull();
+    expect(dpiDeviation(undefined, 800)).toBeNull();
+    expect(dpiDeviation(Number.NaN, 800)).toBeNull();
+  });
+});
+
+describe('maxRulerDistanceCm', () => {
+  it('800 DPI、1600 像素可走:物理上限 5.08 厘米', () => {
+    // 1600 px ÷ 800 计数/英寸 = 2 英寸 = 5.08 厘米
+    expect(maxRulerDistanceCm({ dpi: 800, availablePx: 1600, margin: 1 })).toBeCloseTo(5.08, 6);
+  });
+
+  it('DPI 翻一倍,能推的距离就减半', () => {
+    expect(maxRulerDistanceCm({ dpi: 1600, availablePx: 1600, margin: 1 })).toBeCloseTo(2.54, 6);
+  });
+
+  it('默认留两成余量 —— 推到贴边那一下本身很难点准', () => {
+    expect(maxRulerDistanceCm({ dpi: 800, availablePx: 1600 })).toBeCloseTo(4.064, 6);
+  });
+
+  it('显示缩放要乘进去:同样的屏幕像素在 150% 下等于更多鼠标计数', () => {
+    // 1000 CSS 像素在 150% 下是 1500 个计数,1500/800 英寸 = 4.7625 厘米
+    expect(
+      maxRulerDistanceCm({ dpi: 800, availablePx: 1000, scale: 1.5, margin: 1 }),
+    ).toBeCloseTo(4.7625, 6);
+  });
+
+  it('算不出来就给 null,不编一个数出来', () => {
+    expect(maxRulerDistanceCm({ dpi: null, availablePx: 1600 })).toBeNull();
+    expect(maxRulerDistanceCm({ dpi: 0, availablePx: 1600 })).toBeNull();
+    expect(maxRulerDistanceCm({ dpi: 800, availablePx: 0 })).toBeNull();
+    expect(maxRulerDistanceCm({ dpi: 800, availablePx: -10 })).toBeNull();
+    expect(maxRulerDistanceCm({ dpi: 800, availablePx: 1600, scale: 0 })).toBeNull();
   });
 });
 

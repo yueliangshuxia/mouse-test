@@ -1854,6 +1854,82 @@ export function classifyDpi(dpi: number, tolerance = 0.12): number | null {
   return bestDelta / best <= tolerance ? best : null;
 }
 
+/**
+ * 本页**自身**能分辨到的最小偏差。
+ *
+ * 它不是「合格线」,是**噪声底**:手推 10 厘米差 2 毫米就是 2%,再算上起止
+ * 两下的点位误差和推歪,这一页对偏差的分辨力也就到 5% 上下。所以落在带内的
+ * 偏差**说明不了鼠标偏没偏**——它和本页的误差是同一个量级。
+ *
+ * 页面的措辞从它派生(import 进去插进文案),不手抄。
+ */
+export const DPI_NOISE_BAND = 0.05;
+
+/**
+ * 实测 DPI 与标称 DPI 的偏差,返回**相对比例**(`+0.015` = 比标称快 1.5%)。
+ *
+ * 任一项不是正的有限数就返回 `null`(页面显示破折号)。**标称留空是最常见的
+ * 一档,不是错误**——不留空才走这条。
+ *
+ * 它只给一个数,**不含判定**。「这点偏差算不算多」由页面拿 `DPI_NOISE_BAND`
+ * 去说。参考站那个「< 5% 判绿、否则判红」的做法本站不要:朱砂是全站的故障位,
+ * 把一个落在自身误差带里的数染红,正是「测不准就明说」要挡的那种假精确。
+ */
+export function dpiDeviation(
+  measured: number | null | undefined,
+  nominal: number | null | undefined,
+): number | null {
+  if (measured === null || measured === undefined) return null;
+  if (nominal === null || nominal === undefined) return null;
+  if (!Number.isFinite(measured) || !Number.isFinite(nominal)) return null;
+  if (nominal <= 0) return null;
+
+  const ratio = (measured - nominal) / nominal;
+  return Number.isFinite(ratio) ? ratio : null;
+}
+
+/**
+ * 给定实测 DPI,**这段物理距离最多还能推多长** —— 也就是光标走到屏幕边上之前。
+ *
+ * ## 为什么需要它
+ *
+ * 鼠标每移动一英寸产生 DPI 个计数,Windows 在指针速度居中时把 1 个计数映射成
+ * 1 个物理像素 —— 所以"推 10 厘米"要求光标在屏幕上走 `DPI × 10 / 2.54` 个像素。
+ * 800 DPI 是 3150 像素,而一屏 1920 的窗口可用宽度也就 1800 上下。
+ * **光标顶到屏幕边就再也不动了**,再推鼠标坐标也不会更新,量到的距离被悄悄截短,
+ * 算出来的 DPI 也就跟着偏低。
+ *
+ * 这道墙的尴尬之处在于**上限本身取决于 DPI**,而 DPI 正是要测的东西 ——
+ * 所以只能先测一个短的,拿到数之后再回来告诉用户"你最多能推多远"。
+ *
+ * `margin` 默认 0.8:推到贴边时,想在那个位置上点准一下本身就很难。
+ *
+ * 返回 `null` 表示输入不足以算出上限。
+ */
+export function maxRulerDistanceCm(input: {
+  /** 实测 DPI */
+  dpi: number | null;
+  /** 光标还剩下多少 CSS 像素可以走(通常是窗口内宽) */
+  availablePx: number;
+  /** 显示缩放倍数,默认 1。屏幕上的 CSS 像素要乘回它才是鼠标计数 */
+  scale?: number;
+  /** 留出的余量,默认 0.8 */
+  margin?: number;
+}): number | null {
+  const scale = input.scale ?? 1;
+  const margin = input.margin ?? 0.8;
+
+  if (input.dpi === null || !Number.isFinite(input.dpi) || input.dpi <= 0) return null;
+  if (!Number.isFinite(input.availablePx) || input.availablePx <= 0) return null;
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  if (!Number.isFinite(margin) || margin <= 0) return null;
+
+  // availablePx = dpi × cm / CM_PER_INCH / scale  →  解出 cm
+  const cm = (input.availablePx * scale * CM_PER_INCH) / input.dpi;
+  const result = cm * margin;
+  return Number.isFinite(result) && result > 0 ? result : null;
+}
+
 export type AccelLevel = 'none' | 'mild' | 'strong' | 'unknown';
 
 export interface AccelComparison {

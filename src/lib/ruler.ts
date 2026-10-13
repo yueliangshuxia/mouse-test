@@ -7,6 +7,19 @@
  *
  * 这一层是薄的(和采样层同理):它只负责**界定这一次手势**,不做任何换算。
  * 像素换算成 DPI 是纯函数 `estimateDpi` 的活,那边有单测。
+ *
+ * ## 起止由谁定:`trigger`
+ *
+ * 两个页面问的是同一个量(推了多远),但"这一次从哪儿到哪儿"是**两套**:
+ *
+ * - `'first-move'`(加速度页):点按钮 → 第一次移动就是起点 → 停住结算。
+ *   起止都是**推出来的**。
+ * - `'manual'`(DPI 页):点起点带钉起点 → 移动 → 再点一下结束。
+ *   起止都是**点出来的**,所以这里一个静止判定都不做 —— 用户推的过程中
+ *   停一下是常事,把它当成"推完了"会提前结算,而那个数看着完全正常。
+ *
+ * 两种模式共用 `snapshot()` / `onProgress` / 偏轴统计 / 自动选轴**同一份实现**,
+ * 差别只在那个起点坐标从哪儿来、以及谁来喊停。
  */
 
 export interface RulerResult {
@@ -31,12 +44,26 @@ export interface RulerResult {
 }
 
 export interface RulerOptions {
-  /** 静止多久算这次量完了(毫秒) */
+  /**
+   * 起止由谁定。见文件头。
+   *
+   * `'manual'` 下 `stillnessMs` / `maxDurationMs` 两个都不起作用 ——
+   * 起止都是用户给的,替他结束后半段是错的。
+   */
+  trigger?: 'first-move' | 'manual';
+  /** 静止多久算这次量完了(毫秒)。只在 `'first-move'` 下用 */
   stillnessMs?: number;
-  /** 一次手势最长允许多久(毫秒),超时自动结束 */
+  /** 一次手势最长允许多久(毫秒),超时自动结束。只在 `'first-move'` 下用 */
   maxDurationMs?: number;
-  /** 移动过程中的实时回调,用于显示"已经移动了多少像素" */
-  onProgress?: (current: RulerResult) => void;
+  /**
+   * 移动过程中的实时回调,用于显示"已经移动了多少像素"。
+   *
+   * 第二个参数是**原样转交的那个 `pointermove` 事件**:画面上的标记要跟着指针
+   * 走,而 `RulerResult` 里只有距离、没有"指针现在在哪儿"。让页面自己再挂一个
+   * `pointermove` 也能做到,但那就成了每帧两份监听、两条独立的坐标换算。
+   * 加速度页不用它,少写一个参数即可。
+   */
+  onProgress?: (current: RulerResult, event: PointerEvent) => void;
   /** 结束时回调。`null` 表示这次手势太短,不足以得出结果 */
   onFinish: (result: RulerResult | null) => void;
 }
@@ -44,6 +71,13 @@ export interface RulerOptions {
 export interface Ruler {
   /** 开始等待移动。**计时从第一次移动才开始**,所以可以先点再摆鼠标 */
   start(): void;
+  /**
+   * 把起点钉在这里。**只在 `trigger: 'manual'` 下用。**
+   *
+   * 它会顺手 `start()`(没在跑就先挂上监听),所以页面上就是一步:
+   * 「点起点带 → `anchorAt(x, y)`」。拆成两步没有好处,只多一种写错的方式。
+   */
+  anchorAt(x: number, y: number): void;
   /** 用户主动结束 */
   finish(): void;
   /** 放弃这一次,不回调结果 */
@@ -56,6 +90,7 @@ const DEFAULT_STILLNESS_MS = 700;
 const DEFAULT_MAX_DURATION_MS = 20_000;
 
 export function createRulerMeasurement(options: RulerOptions): Ruler {
+  const trigger = options.trigger ?? 'first-move';
   const stillnessMs = options.stillnessMs ?? DEFAULT_STILLNESS_MS;
   const maxDurationMs = options.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
 
@@ -113,22 +148,36 @@ export function createRulerMeasurement(options: RulerOptions): Ruler {
     options.onFinish(snapshot());
   }
 
+  /**
+   * 钉下起点并起算。两种模式共用 —— "第一次移动当起点"和"用户点出来的起点"
+   * 在数据上是同一件事,只是那个坐标从哪儿来的差别。
+   */
+  function anchor(x: number, y: number): void {
+    startX = lastX = x;
+    startY = lastY = y;
+    startedAt = lastAt = performance.now();
+    minCross = 0;
+    maxCross = 0;
+    samples = 1;
+  }
+
   function onMove(event: PointerEvent): void {
     if (!running) return;
     const now = performance.now();
 
     if (samples === 0) {
-      startX = lastX = event.clientX;
-      startY = lastY = event.clientY;
-      startedAt = now;
-      minCross = 0;
-      maxCross = 0;
-      samples = 1;
+      anchor(event.clientX, event.clientY);
 
-      // 计时从第一次移动开始,所以超时也在这里起算 —— 用户点了按钮之后
-      // 慢慢摆鼠标的时间不该算进这次手势里
-      window.clearTimeout(maxTimer);
-      maxTimer = window.setTimeout(finish, maxDurationMs);
+      if (trigger === 'first-move') {
+        // 计时从第一次移动开始,所以超时也在这里起算 —— 用户点了按钮之后
+        // 慢慢摆鼠标的时间不该算进这次手势里
+        window.clearTimeout(maxTimer);
+        maxTimer = window.setTimeout(finish, maxDurationMs);
+      } else {
+        // manual 模式下 `samples === 0` 只可能是"钉完起点还没动过",不该走到这儿;
+        // 真走到了就当作起点已经由这一下移动钉好,不起任何计时器。
+        // 不起计时器的理由见文件头:起止都是用户给的。
+      }
     } else {
       lastX = event.clientX;
       lastY = event.clientY;
@@ -146,10 +195,12 @@ export function createRulerMeasurement(options: RulerOptions): Ruler {
     lastAt = now;
 
     const current = snapshot();
-    if (current) options.onProgress?.(current);
+    if (current) options.onProgress?.(current, event);
 
-    window.clearTimeout(stillnessTimer);
-    stillnessTimer = window.setTimeout(finish, stillnessMs);
+    if (trigger === 'first-move') {
+      window.clearTimeout(stillnessTimer);
+      stillnessTimer = window.setTimeout(finish, stillnessMs);
+    }
   }
 
   function start(): void {
@@ -168,6 +219,13 @@ export function createRulerMeasurement(options: RulerOptions): Ruler {
     window.addEventListener('pointermove', onMove, { passive: true });
   }
 
+  function anchorAt(x: number, y: number): void {
+    // 没在跑就先挂上监听 —— 页面上「点起点带」是一个动作,不该要他记得先 start()
+    if (!running) start();
+    clearTimers();
+    anchor(x, y);
+  }
+
   function cancel(): void {
     running = false;
     clearTimers();
@@ -180,6 +238,7 @@ export function createRulerMeasurement(options: RulerOptions): Ruler {
 
   return {
     start,
+    anchorAt,
     finish,
     cancel,
     destroy,
