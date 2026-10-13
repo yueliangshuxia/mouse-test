@@ -1,0 +1,117 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { READY_TOOLS, REPAIR, TOOLBOX } from '../lib/tools';
+import { href } from '../lib/url';
+
+/*
+ * 404 —— **全站唯一一个不进任何注册表的页面**,而且它连"是不是工具"都不是
+ * (工具、工具箱、维修页三者的区别见 `tools.ts`)。
+ *
+ * Astro 把它编译成 `dist/404.html`,GitHub Pages 对认不出的路径就发这一页 ——
+ * 在此之前落到的是 Pages 自带的英文 404:没有导航、没有回首页的路,
+ * 一个手打错地址的人就死在那儿了。
+ *
+ * 两条和别处不一样的写法:
+ *
+ * - **`noindex`** —— 这一页是给一个不存在的地址渲染的,`Astro.url.pathname`
+ *   那一刻就是那个坏地址。声明一个指向不存在页面的 canonical 是错的,
+ *   所以 `BaseLayout` 那个开关会把它换成 `<meta name="robots" content="noindex">`。
+ * - **它列出的是全部工具**,而不是像工具页那样只给正文。落到 404 的人已经
+ *   迷路了,再让他自己找导航是雪上加霜;把能去的地方一次摊开,他大概率
+ *   能在这儿就把路找回来。
+ *
+ * 名单从 `READY_TOOLS` 派生,**不手写** —— 手写的话加一件工具、这一页就悄悄
+ * 少一条,而没人会来 404 页检查。
+ */
+
+const MAIN = [
+  { label: '回首页', href: href(), desc: '所有工具的总入口' },
+  { label: TOOLBOX.navLabel, href: href(`${TOOLBOX.slug}/`), desc: '手稳度、涂鸦板、坏点检测这些' },
+  { label: REPAIR.navLabel, href: href(`${REPAIR.slug}/`), desc: '测出问题了,或者想先看看怎么修' },
+];
+---
+
+<BaseLayout
+  title="页面没找到 - 在线鼠标测试"
+  description="这个地址没有对应的页面。下面是站内所有的工具入口。"
+  noindex
+>
+  <h1>这个地址没有东西</h1>
+
+  <p class="prose">
+    可能是地址打错了,也可能是那个工具的网址变过。下面是站内<strong>所有</strong>工具 ——
+    大概率你要找的那个就在里面。
+  </p>
+
+  <h2>先看这三个</h2>
+
+  <ul class="lost-main">
+    {
+      MAIN.map((item) => (
+        <li>
+          <a class="pill-link" href={item.href}>{item.label}</a>
+          <span class="lost-main__desc">{item.desc}</span>
+        </li>
+      ))
+    }
+  </ul>
+
+  <h2>全部工具</h2>
+
+  <ul class="lost-list">
+    {
+      READY_TOOLS.map((tool) => (
+        <li>
+          <a href={href(`${tool.slug}/`)}>{tool.name}</a>
+        </li>
+      ))
+    }
+  </ul>
+</BaseLayout>
+
+<style>
+  /*
+   * 三个主入口。**用 `.pill-link`**(全站那枚带箭头的跳转胶囊)—— 落到 404 的
+   * 人需要的正是"点一下就能走",而不是一段说明文字。
+   *
+   * 说明跟在药丸右边、`--text-faint`:它是补注,不是第二条路。
+   */
+  .lost-main {
+    margin: 14px 0 30px;
+    padding: 0;
+    list-style: none;
+    max-width: 68ch;
+  }
+
+  .lost-main li {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .lost-main__desc {
+    font-size: 0.85rem;
+    color: var(--text-faint);
+  }
+
+  /*
+   * 全部工具那一列。**多列**而不是一长条 —— 十七个工具竖着排下来,
+   * 在 1440 下会是一条又长又空的单列。`auto-fit` 够宽自己排开、窄了叠成一列。
+   */
+  .lost-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 2px 20px;
+    margin: 14px 0 26px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .lost-list li {
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+  }
+</style>

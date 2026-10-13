@@ -22,10 +22,29 @@ interface Props {
    * 机制见 `public/coi-serviceworker.js`。
    */
   isolation?: boolean;
+  /**
+   * 这一页**不要**被搜索引擎收录。目前只有 404 页用。
+   *
+   * 它同时会**去掉 canonical**:404 是给一个不存在的地址渲染出来的,
+   * `Astro.url.pathname` 那一刻就是那个坏地址 —— 声明一个指向不存在页面的
+   * canonical 是错的(虽然搜索引擎在 404 上本来就忽略它,但写对是免费的)。
+   */
+  noindex?: boolean;
 }
 
-const { title, description, current, jsonLd, isolation = false } = Astro.props;
+const { title, description, current, jsonLd, isolation = false, noindex = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
+
+/*
+ * 社交分享图。**必须是绝对 URL** —— `href()` 出来的是 `/mouse-test/og.png`,
+ * 那是站内路径,而抓取分享卡片的那些客户端不在这个站里,读到相对路径只会
+ * 当作没给。所以拿 `Astro.site` 拼成绝对地址。
+ *
+ * 全站共用这一张(`public/og.png`,1200×630)。**每页一张当然更好**,但那就得
+ * 在构建期生成二十张图,而这一版的收益几乎全在"有没有"上 —— 在此之前
+ * 一个 `og:` 标签都没有,分享出去是一张空白卡。
+ */
+const ogImage = new URL(href('og.png'), Astro.site).href;
 ---
 
 <!doctype html>
@@ -35,7 +54,32 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="canonical" href={canonical.href} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical.href} />}
+
+    <!--
+      社交分享卡片。**在此之前全站一个 `og:` 都没有** —— 链接发到微信、QQ
+      或者任何一个聊天工具里,弹出来的是一张只有域名的空白卡。
+
+      对本站尤其要紧:目标就是做流量,而自然传播的每一次都是白捡的曝光,
+      空卡等于把那一次浪费掉。
+
+      `og:title` / `og:description` 直接用每页自己的 —— 各页本来就有独立的
+      `title` 和 `description`(它们同时喂 `<title>` 和 meta description),
+      所以这里没有第二份文案要维护。
+
+      `twitter:card` 取 `summary_large_image`:图是 1200×630 的横图,
+      用 `summary` 那张图会被裁成一个很小的方块。
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="在线鼠标测试" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical.href} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/svg+xml" href={href('favicon.svg')} />
     <meta name="theme-color" content={THEME_COLORS.light} />
 
