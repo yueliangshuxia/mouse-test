@@ -1,0 +1,298 @@
+---
+/*
+ * 灵敏度换算器页的**主体**。两个薄路由引它:中文的 `/sensitivity-converter/`
+ * 和英文的 `/en/sensitivity-converter/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * 逐页翻译的四步写在 `components/pages/Cps.astro` 的文件头,这一页照同一套做的:
+ * 文案在 `src/lib/i18n/pages/sensitivity.ts`,这一页只负责把 `t.…` 摆进标记。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { href } from '../../lib/url';
+import { cmPer360, GAMES } from '../../lib/sensitivity';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.sensitivity;
+
+/*
+ * 这一页**没有工作台**,也**没有仪器窗**。
+ *
+ * 它不测任何东西 —— 它把两个你填进去的已知数按各游戏的固定常数推成另外两个数,
+ * 换算在 `input` 事件里当场算完,没有"开始测量",也没有"正在出数"的那个状态。
+ * 所以读数走**纸面**的 `.stat-grid` / `.stat`(全站统计面板都在纸面),
+ * 一个 `.well` 都不出现 —— `.well` 说的是"这里正在出数",而这里没有。
+ */
+
+/** 表格里用来做对照的那一组设定。取最常见的两个数,方便读者拿自己的设置比 */
+const REF_DPI = 800;
+const REF_SENS = 1;
+
+/*
+ * 游戏名从目录里**按 `GamePreset.id` 查**,不再读 `GAMES` 的 `label` ——
+ * 那四个名字是用户可见文字,所以住在 `pages/sensitivity.ts` 的 `games` 里。
+ * `sensitivity.ts` 一个字没动,它的 `label` 仍然留着当默认值。
+ */
+const gameLabel = (id: string) => t.games[id as keyof typeof t.games];
+
+/*
+ * FAQ 的答案**不能放 HTML**。两条出口都从同一份原文出发:`faqHtml` 先转义
+ * `& < >` 再插 `<strong>`(不然答案里一个小于号就会把标签吃掉),`faqText`
+ * 直接原样送进 JSON-LD。所以答案里写 `<a>` 只会**原样印出一串尖括号**。
+ * 要放链接,放在正文里(见下面那段 prose)。
+ */
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="sensitivity-converter"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['sensitivity-converter']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['sensitivity-converter']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  {/*
+    这一段中间嵌着一枚指向 DPI 测试页的链接。**整句留在一个键里**,
+    页面把 `{dpiTestLink}` 换成那枚 `<a>`(锚文本也来自目录)。
+
+    顺序不能反:先 `faqHtml()` 把 `**` 变成 `<strong>`,再 `fill()` 塞链接 ——
+    反过来的话那段链接 HTML 会被 `faqHtml` 的转义吃掉,印出一串尖括号。
+  */}
+  <p
+    class="prose"
+    set:html={fill(faqHtml(t.dpiLede), {
+      dpiTestLink: `<a href="${href('dpi-test/')}">${t.dpiTestLink}</a>`,
+    })}
+  />
+
+  <div class="controls">
+    <label class="field">
+      <span class="field__label">{t.fields.game}</span>
+      <select id="game">
+        {
+          GAMES.map((game) => (
+            <option value={game.id}>
+              {gameLabel(game.id)}
+            </option>
+          ))
+        }
+      </select>
+    </label>
+
+    <label class="field">
+      <span class="field__label">{t.fields.dpi}</span>
+      <input id="dpi" type="number" min="1" step="50" value={REF_DPI} inputmode="numeric" />
+    </label>
+
+    <label class="field">
+      <span class="field__label">{t.fields.sens}</span>
+      <input id="sens" type="number" min="0.01" step="0.01" value={REF_SENS} inputmode="decimal" />
+    </label>
+  </div>
+
+  <div class="stat-grid">
+    <StatPanel id="cm360" label={t.stats.cm360.label} unit="cm" primary hint={t.stats.cm360.hint} />
+    <StatPanel id="edpi" label={t.stats.edpi.label} hint={t.stats.edpi.hint} />
+    <StatPanel id="cm180" label={t.stats.cm180.label} unit="cm" hint={t.stats.cm180.hint} />
+  </div>
+
+  <p class="prose" id="note" data-note="sensitivity">
+    —
+  </p>
+
+  <section class="prose prose--cards">
+    <h2>{t.constantsHeading}</h2>
+    <p set:html={faqHtml(t.constantsLede)} />
+    <p set:html={fill(faqHtml(t.constantsTableLede), { dpi: REF_DPI, sens: REF_SENS })} />
+
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>{t.tableColumns.game}</th>
+          <th>{t.tableColumns.yaw}</th>
+          <th>{fill(t.tableColumns.round, { dpi: REF_DPI, sens: REF_SENS })}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          GAMES.map((game) => (
+            <tr data-ref-game={game.id}>
+              <td>{gameLabel(game.id)}</td>
+              <td>{game.yaw}</td>
+              <td>{cmPer360(REF_DPI, REF_SENS, game.yaw)!.toFixed(1)} cm</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>{t.formulasHeading}</h2>
+    <ul>
+      {
+        t.formulas.map((item) => (
+          <li>
+            <strong>{item.title}</strong>
+            {item.body}
+          </li>
+        ))
+      }
+    </ul>
+
+    <h2>{t.feelHeading}</h2>
+    <p set:html={faqHtml(t.feelBody)} />
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 换算结果是**当场出数**的,所以这里给一句说明文字一点间距让它不贴着面板。
+     * 别的都走 global.css(`.field` / `.field__label` / `.stat-grid` 都是共用的)。
+     */
+    [data-note='sensitivity'] {
+      margin-top: -0.5rem;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+  </style>
+
+  <script>
+    import { cmPer360, edpi, findGame } from '../../lib/sensitivity';
+    import { el, format, setStat, setText } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.sensitivity;
+
+    /*
+     * 这一页**刻意不调 `suppressWorkbenchDefaults()`**,也不做能力告警。
+     *
+     * 判据是全站那条:**这一页的读数会不会被指针的默认行为污染?**
+     * 这里没有测试区、没有手势,读数由键盘敲进去的两个数决定 —— 右键菜单和
+     * 中键自动滚动拦不拦,都不会让哪个数变样。而这一页上真正需要右键的是
+     * **数字输入框的粘贴**,拦掉只会给人添麻烦(`keyboard-test` 不调它同理,
+     * 那一页量的是键盘)。
+     *
+     * 能力告警同理:这一页不读时间戳、不读指针坐标,`detectCapabilities()`
+     * 那四条与精度有关的告警在这里说的全是不成立的话(字面上还会印出
+     * "本页不报抖动和丢包率就是这个原因",而这一页压根不测那两样)。
+     * 少印一段与读者无关的警告,和少印一个假数字是同一条纪律。
+     */
+
+    const gameSelect = el('game') as HTMLSelectElement | null;
+    const dpiInput = el('dpi') as HTMLInputElement | null;
+    const sensInput = el('sens') as HTMLInputElement | null;
+
+    /** 读一个数字输入框。空着或写了字母时 `valueAsNumber` 就是 NaN,交给纯函数返回 null */
+    function readNumber(input: HTMLInputElement | null): number {
+      return input ? input.valueAsNumber : NaN;
+    }
+
+    function update(): void {
+      const game = findGame(gameSelect?.value ?? '');
+      const dpi = readNumber(dpiInput);
+      const sens = readNumber(sensInput);
+
+      // yaw 找不到就给 NaN,`cmPer360` 会因此返回 null —— 破折号,不是 0
+      const yaw = game ? game.yaw : NaN;
+
+      const value360 = cmPer360(dpi, sens, yaw);
+      setStat('cm360', format(value360, 2));
+      setStat('edpi', format(edpi(dpi, sens), 0));
+      // 180° 就是半个 360°,不用另一个公式:同一个量除以二,免得两份实现漂开
+      setStat('cm180', format(value360 === null ? null : value360 / 2, 1));
+
+      if (value360 === null) {
+        setText(el('note'), t.noteInvalid);
+        return;
+      }
+
+      // 游戏名按 `GamePreset.id` 从目录里查 —— 和模板里那个 `<option>` 是同一份
+      const label = game ? t.games[game.id as keyof typeof t.games] : t.gameFallback;
+      setText(
+        el('note'),
+        fill(t.noteResult, {
+          game: label,
+          dpi: format(dpi, 0),
+          sens,
+          cm: value360.toFixed(2),
+        }),
+      );
+    }
+
+    gameSelect?.addEventListener('change', update);
+    dpiInput?.addEventListener('input', update);
+    sensInput?.addEventListener('input', update);
+
+    // 首帧先算一次:值写在标记里(`value={REF_DPI}`),脚本只读不写第二份
+    update();
+  </script>
+</BaseLayout>

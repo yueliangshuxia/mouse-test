@@ -12,14 +12,8 @@ import {
   type CapabilityOptions,
   type Capabilities,
 } from './capabilities';
-import {
-  isTheme,
-  THEME_COLORS,
-  THEME_KEY,
-  THEME_LABELS,
-  THEME_ORDER,
-  type Theme,
-} from './theme';
+import { THEME_COLORS, THEME_KEY, isTheme, type Theme } from './theme';
+import { currentLocale, getCatalog } from './i18n';
 
 /** `document.getElementById` 的简写。脚本里到处在用,单列一个省得每处都断言。 */
 export function el(id: string): HTMLElement | null {
@@ -276,6 +270,26 @@ export function readTheme(): Theme {
   return 'dark';
 }
 
+/*
+ * 主题按钮的两枚图标。**内联 SVG 字面量,和 `mouse-figure.ts` / `tool-motifs.ts`
+ * 同一条路子** —— 这个站一个图标资源都没有,而 `☾` / `☀` 那两个字符在不同
+ * 字体下的样子差太远,不能当一个控件用。
+ *
+ * 一律 `currentColor` 描边,所以颜色的活交给外面的 CSS,换主题自动对。
+ * 键名是**要切过去的那个主题**(`light` 是太阳)。
+ */
+const THEME_ICON: Record<Theme, string> = {
+  light:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+    'stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/>' +
+    '<path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4 7 7M17 17l1.6 1.6' +
+    'M18.6 5.4 17 7M7 17l-1.6 1.6"/></svg>',
+  dark:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M20.5 14.3A8.6 8.6 0 1 1 9.7 3.5a6.8 6.8 0 0 0 10.8 10.8Z"/></svg>',
+};
+
 function writeTheme(theme: Theme): void {
   try {
     localStorage.setItem(THEME_KEY, theme);
@@ -296,9 +310,30 @@ export function applyTheme(theme: Theme): void {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', THEME_COLORS[theme]);
 
-  for (const button of document.querySelectorAll<HTMLElement>('[data-theme-value]')) {
-    const selected = button.dataset.themeValue === theme;
-    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  /*
+   * 开关是一枚**图标按钮**,所以这里刷的是图标 + 无障碍名字,不是 `aria-pressed`。
+   *
+   * **图标画的是"现在是什么",名字说的是"按下去会变成什么"** —— 这是图标型
+   * 切换按钮的通行做法:眼睛看到月亮(现在是深色),读屏听到"切到浅色"
+   * (按下去会怎样)。两句话各说各的,因为两种读者的需要本来就不一样。
+   *
+   * 之前是两个文字按钮(浅色 / 深色),靠 `aria-pressed` 标当前项 —— 那一套
+   * 变成一枚图标之后就不成立了:`aria-pressed` 说的是"这个选项被选中",
+   * 而这里只有一个按钮、没有可选项。改它的原因也不是审美,是为了给中英开关
+   * 腾出报头那 41.2px 的余量(见 `tools.ts` 末尾)。
+   */
+  const t = getCatalog(currentLocale());
+  const label = theme === 'dark' ? t.common.themeToLight : t.common.themeToDark;
+  // **图标画的是"按下去会去哪儿"(和 aria-label 说同一件事)**,不是"现在在哪儿"
+  const icon = theme === 'dark' ? THEME_ICON.light : THEME_ICON.dark;
+
+  for (const button of document.querySelectorAll<HTMLElement>('[data-theme-toggle]')) {
+    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+    if (button.dataset.icon !== icon) {
+      button.dataset.icon = icon;
+      button.innerHTML = icon;
+    }
   }
 }
 
@@ -318,29 +353,33 @@ export function applyTheme(theme: Theme): void {
 export function mountThemeToggle(host: Element | null): void {
   if (!host) return;
 
-  const fragment = document.createDocumentFragment();
-  for (const theme of THEME_ORDER) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.themeValue = theme;
-    button.textContent = THEME_LABELS[theme];
-    fragment.appendChild(button);
-  }
-  host.replaceChildren(fragment);
+  /*
+   * **一枚图标按钮,不是两个文字按钮。**
+   *
+   * 改它的原因不是审美,是报头那笔宽度账:报头是 `auto minmax(0,1fr) auto`
+   * 三列,最后一列原来只有这一组按钮,而现在还要塞进中英开关 ——
+   * **两个控件都在这一列里,抢的是中间导航那 41.2px 的余量**(见 `tools.ts`
+   * 末尾那段)。两个文字按钮约 80px,一枚图标按钮 32px,净腾出约 50px。
+   *
+   * 代价说清楚:以前两个按钮能一眼看出"现在哪个被选中";一枚图标只能靠
+   * 图标本身表达。所以图标 + `aria-label` 必须成对,且说的是同一件事。
+   */
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.themeToggle = '';
+  host.replaceChildren(button);
 
   applyTheme(readTheme());
 
-  // 事件委托:按钮是刚建出来的,而且以后可能改文案/顺序
   host.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    if (!target.closest('[data-theme-toggle]')) return;
 
-    const button = target.closest('[data-theme-value]');
-    const theme = button instanceof HTMLElement ? button.dataset.themeValue : undefined;
-    if (!isTheme(theme)) return;
-
-    writeTheme(theme);
-    applyTheme(theme);
+    // 按一下切到另一个 —— 只有两档,所以"另一个"就是全部的逻辑,不需要表
+    const next: Theme = readTheme() === 'dark' ? 'light' : 'dark';
+    writeTheme(next);
+    applyTheme(next);
   });
 }
 

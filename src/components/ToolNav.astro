@@ -1,14 +1,32 @@
 ---
 import { NAV } from '../lib/tools';
 import { TOOL_HUE } from '../lib/tool-hues';
-import { href } from '../lib/url';
+import { DEFAULT_LOCALE, getCatalog, pageHref, toolCopy } from '../lib/i18n';
+import type { Locale } from '../lib/i18n';
 
 interface Props {
   /** 当前页面的 slug,用于高亮 */
   current?: string;
+  /** 这一页是哪个语言。**默认中文** —— 现有的 21 页因此一行都不用改 */
+  locale?: Locale;
 }
 
-const { current } = Astro.props;
+const { current, locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale);
+
+/*
+ * **名字和链接都走 locale**,两件事必须一起做:
+ *
+ * - 名字来自目录(`toolCopy`),中文短名和英文短名是两套,而报头那笔宽度账
+ *   是按**中文**那套量的 —— 英文短名更宽,所以英文版会更早折叠,那是预期的。
+ * - 链接走 `pageHref` —— 它**只在目标页真翻过时才给 `/en/…`**,没翻的落回中文版。
+ *   不能直接拼 `localePath`,那会给出一堆不存在的地址(实测断链 75 条,
+ *   其中大半是导航这一份)。**少做这一步的后果
+ *   很隐蔽**:英文页面上点任何一项都跳回中文页,而页面本身看着完全正常。
+ */
+const navLabel = (slug: string) => toolCopy(slug, locale).navLabel;
+const navName = (slug: string) => toolCopy(slug, locale).name;
+const navHref = (slug: string) => pageHref(locale, slug);
 
 /*
  * 报头那一条横向菜单,**分三段**。
@@ -47,19 +65,19 @@ const { current } = Astro.props;
  */
 ---
 
-<nav class="site-nav" aria-label="工具导航" data-nav>
+<nav class="site-nav" aria-label={t.common.navAria} data-nav>
   <div class="site-nav__track" data-nav-track>
     <div class="site-nav__group" data-nav-group>
       {
         NAV.group.map((tool) => (
           <a
             class="site-nav__item"
-            href={href(`${tool.slug}/`)}
-            title={tool.name}
+            href={navHref(tool.slug)}
+            title={navName(tool.slug)}
             aria-current={current === tool.slug ? 'page' : undefined}
             style={TOOL_HUE[tool.slug] ? `--hue: ${TOOL_HUE[tool.slug]}` : undefined}
           >
-            {tool.navLabel}
+            {navLabel(tool.slug)}
           </a>
         ))
       }
@@ -74,7 +92,7 @@ const { current } = Astro.props;
       aria-expanded="false"
       aria-haspopup="true"
     >
-      更多<span class="site-nav__caret" aria-hidden="true"></span>
+      {t.common.more}<span class="site-nav__caret" aria-hidden="true"></span>
     </button>
     <div class="site-nav__panel" data-nav-panel></div>
   </div>
@@ -93,26 +111,26 @@ const { current } = Astro.props;
   <div class="site-nav__tools">
     <a
       class="site-nav__item site-nav__item--tools"
-      href={href(`${NAV.toolbox.slug}/`)}
+      href={navHref(NAV.toolbox.slug)}
       aria-current={current === NAV.toolbox.slug
         ? 'page'
         : NAV.dropdown.some((tool) => tool.slug === current)
           ? 'true'
           : undefined}
     >
-      {NAV.toolbox.navLabel}<span class="site-nav__caret" aria-hidden="true"></span>
+      {navLabel(NAV.toolbox.slug)}<span class="site-nav__caret" aria-hidden="true"></span>
     </a>
     <div class="site-nav__panel">
       {
         NAV.dropdown.map((tool) => (
           <a
             class="site-nav__item"
-            href={href(`${tool.slug}/`)}
-            title={tool.name}
+            href={navHref(tool.slug)}
+            title={navName(tool.slug)}
             aria-current={current === tool.slug ? 'page' : undefined}
             style={TOOL_HUE[tool.slug] ? `--hue: ${TOOL_HUE[tool.slug]}` : undefined}
           >
-            {tool.navLabel}
+            {navLabel(tool.slug)}
           </a>
         ))
       }

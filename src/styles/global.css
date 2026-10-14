@@ -56,6 +56,64 @@
  * --trail-color),硬编码会导致主题切换后画布和界面脱节。
  */
 
+/*
+ * ---------- 字体(2026-10-14 用户要"科幻赛博朋克感"时引入的)----------
+ *
+ * 三个都是 **OFL**,随仓库分发(许可原文在 `public/fonts/*-LICENSE.txt`)。
+ * **没有往 `package.json` 里加依赖** —— woff2 是用 `npm pack` 从 @fontsource
+ * 包里一次取出来的,不是运行期依赖。
+ *
+ * ## 为什么文件在 `src/assets/fonts/` 而不是 `public/`
+ *
+ * 这一条是硬的:写进 `public/` 就得在 CSS 里写 `url('/fonts/…')`,而站点落在
+ * `/mouse-test/` 子路径上 —— **构建不报错,上线之后字体全 404**,和 `href()`
+ * 那条是同一个坑(见「部署」)。放进 `src/assets/` 由 Vite 处理,它会把这个
+ * 相对 `url()` 改写成带 base 的产物路径(实测产物里是
+ * `/mouse-test/_astro/<hash>.woff2`)。
+ *
+ * ## 中文那一个是不是完整字体
+ *
+ * **不是。** fontsource 的 CJK 包把字切成 93 块、woff2 合计 4.8MB,对一次
+ * "先看看效果"的试改太重,所以合并之后按"`src/` 下真正出现过的字"裁了一份
+ * (1562 字,711KB)。脚本和命令记在「字体」那一节里。
+ *
+ * **代价写在明处:以后新写的文案里出现没收录的字,那一个字会回落到后面的
+ * 字体。** 页面照常显示,只是那一个字不是新字体 —— 换完文案重跑一次脚本即可。
+ */
+@font-face {
+  font-family: 'Saira Stencil One';
+  font-style: normal;
+  /*
+   * **只有 400 这一档。**而全站的 h1/h2 请求的是 600 —— 不处理的话浏览器会
+   * **合成加粗**,而合成加粗是把每一笔**描粗**,那正好会把镂空模板字的
+   * 那些口子**糊上**:这个字体唯一的特点就没了。
+   * 所以 `:root[data-font='cyber']` 里配了一条 `font-synthesis-weight: none`,
+   * 明确告诉浏览器"这个字重没有就别装"。
+   */
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/saira-stencil-one-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Share Tech Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/share-tech-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'ZCOOL QingKe HuangYou';
+  font-style: normal;
+  /* 只有 400 这一档。请求更粗的字重时浏览器会**合成加粗** —— 这个字体本身
+     就是钝重的,合成之后在 48px 上会有点糊。真觉得糊就把用到它的地方
+     `font-weight` 收回 400(展示字体本来也不必靠字重分层)。 */
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/zcool-qingke-huangyou-subset.woff2') format('woff2');
+}
+
 :root {
   /*
    * 原生控件(滚动条、<select> 弹出层、UA 焦点环)的配色跟着它走。
@@ -165,8 +223,27 @@
    */
   --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', 'Cascadia Mono', Consolas,
-    'Liberation Mono', Menlo, monospace;
+
+  /*
+   * 标题与卡片名用的"展示字体"。**默认就等于正文那一套** —— 也就是说这个令牌
+   * 存在,但默认什么都不改。只有页面在 `<html>` 上写了 `data-font="cyber"`
+   * 时才会换成另一套(见下面那条规则),其它页面逐字节不变。
+   *
+   * 这是照 `--hue` 那套来的:**一条规则伺候两种页面**。
+   */
+  --font-display: var(--font-sans);
+
+  /*
+   * 系统等宽那一串**单独一个令牌**,因为它要被引用两次。
+   *
+   * 不能写成 `:root[data-font='cyber'] { --font-mono: 'X', var(--font-mono) }`
+   * —— 那是**自我引用**,按 CSS 规则整个自定义属性会变成 "guaranteed-invalid",
+   * 于是 `font-family: var(--font-mono)` 静默地什么都不生效(回落到继承值)。
+   * 抽一层就没有这个问题,而且系统那一串仍然只写一遍。
+   */
+  --font-mono-system: ui-monospace, SFMono-Regular, 'SF Mono', 'Cascadia Mono',
+    Consolas, 'Liberation Mono', Menlo, monospace;
+  --font-mono: var(--font-mono-system);
 
   /*
    * 圆角阶梯。原来只有一个 5px 打天下,于是"按钮、输入框、整个仪器窗、
@@ -220,6 +297,48 @@
  * (用 `--well-raised` 那一档的亮度)。那时"井"的含义从"凹进去"变成"独立的一块
  * 仪器面",规律换一条,但视觉上仍然成立。
  */
+/*
+ * ---------- 展示字体那一档(2026-10-14 用户要"科幻赛博朋克感"试改的)----------
+ *
+ * **只在 `<html>` 写了 `data-font="cyber"` 的页面上生效**,目前只有首页
+ * (`index.astro` 给 `BaseLayout` 传了 `font="cyber"`)。其它 20 页一个字都不变
+ * —— 这是用户要的"先在首页改一下我看看"。
+ *
+ * ## 两个令牌,分别管两件事
+ *
+ * - `--font-display` 换的是 **h1 / h2 / h3 / 卡片名**。拉丁字母走 Oxanium
+ *   (方角、HUD 感),中文走站酷庆科黄油体(钝重、方硬)—— 字体栈按字形回落,
+ *   所以一条 `font-family` 就同时覆盖两种文字,不用分两条规则。
+ * - `--font-mono` 换的是 **读数与数字**。这一站的数据面全是等宽的,
+ *   换成一个终端味的等宽字体是这次改动里观感提升最大的一处。
+ *
+ * ## 两个**故意没动**的地方
+ *
+ * - **报头(`.site-nav__item`)不换。** 报头每一段的宽度是拿尺子量出来的,
+ *   而折叠边界就建立在那些数上(见「首页与报头」:框 703.4、余量 41.2px)。
+ *   **换一个字体会让整条边界漂**,而中文的字宽估不准、只能重量一遍。
+ *   为了"看起来更酷"去动那笔账,不划算。
+ * - **正文不换。** 庆科黄油体是展示字体,整页正文用它读不动 —— 展示字体用在
+ *   标题上、正文字体用在正文里,这条分工本身就是设计。
+ */
+:root[data-font='cyber'] {
+  --font-display: 'Saira Stencil One', 'ZCOOL QingKe HuangYou', var(--font-sans);
+  /* 尾巴接 `--font-sans`:等宽字体一个中文字都没有,不接的话中文会落到
+     泛用的 `monospace`(Windows 上是宋体一类的衬线),和整页打架 */
+  --font-mono: 'Share Tech Mono', var(--font-mono-system), var(--font-sans);
+
+  /*
+   * **不许合成字重。** 上面两个字体都只有 400 一档,而全站标题请求 600 ——
+   * 浏览器默认会**描粗**来凑,而描粗会把 Saira Stencil One 的镂空口子糊上、
+   * 把 Share Tech Mono 的字形也撑变形。
+   *
+   * 代价是**标题比原来细一档**。这是有意的:这两套字体的性格就在字形本身,
+   * 靠合成加粗去补字重,补掉的是它们唯一值钱的东西。
+   * (属性是继承的,写在这一层就够,不用逐个元素配。)
+   */
+  font-synthesis-weight: none;
+}
+
 :root[data-theme='dark'] {
   /*
    * 原生控件(滚动条、<select> 弹出层、UA 默认焦点环)跟着根元素走。
@@ -388,7 +507,22 @@ a:hover {
  */
 h1,
 h2 {
+  /* 展示字体。默认 `--font-display` 就等于 `--font-sans`,所以这一句对
+     没有 `data-font` 的页面是**不生效的** —— 见那个令牌的注释 */
+  font-family: var(--font-display);
   font-weight: 600;
+  /*
+   * **标题居中**(用户 2026-10-14 要的:「把全部的标题啥的都居中」)。
+   *
+   * 只动**标题这一层**,正文仍然左对齐 —— 这是最常见的"居中标题 + 左对齐
+   * 正文"的排法:标题是路牌,居中让它从一段文字里跳出来;正文是内容,
+   * 居中会让每一行的起点都在变,读起来累。
+   *
+   * 跟着一起居中的还有几处"其实也是标题"的东西,散在各自的位置上
+   * (`.tool-head`、`.prose--cards > h2`、`.mini-card__name`),
+   * 它们都是 flex 行或卡片,`text-align` 管不着,得各自写 `justify-content`。
+   */
+  text-align: center;
 }
 
 h1 {
@@ -419,6 +553,9 @@ h2 {
 }
 
 h3 {
+  font-family: var(--font-display);
+  /* 同 h1/h2:标题居中,正文不居中 */
+  text-align: center;
   font-size: 1.1875rem;
   line-height: 1.45;
   font-weight: 650;
@@ -855,31 +992,132 @@ p {
  * 两个按钮里哪一个是当前状态本来就一目了然;再给它一块实心底,报头里就会
  * 出现全页最亮的一小块,而它管的只是一件跟内容无关的事。
  */
+/*
+ * 报头最右那一列。**两个控件住同一个网格列**,没有开第四列 ——
+ * 报头是 `auto minmax(0,1fr) auto` 三列,再开一列就等于直接去抢中间导航
+ * 那 41.2px 的余量(见 `tools.ts` 末尾那段账)。
+ *
+ * 报头那一列现在是:**中英开关 + 主题开关**两个,靠 `gap` 分开。
+ * 主题开关从两个文字按钮压成一枚图标按钮、中英开关只有两枚短链接 ——
+ * 换来的效果见下面 `.theme-switch` 那段。
+ */
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+}
+
+/*
+ * 外观开关。**现在是一枚图标按钮**,不再是「浅色 / 深色」两个文字按钮。
+ *
+ * 改它的原因不是审美,是报头那笔宽度账:两个文字按钮约 80px,一枚图标
+ * 按钮 32px,**净腾出约 50px 给中英开关**。而报头只剩 41.2px 余量、又没有
+ * 任何测试守着那几个数,所以这 50px 是必须的,不是顺手省的。
+ *
+ * 图标由 `ui.ts` 的 `applyTheme` 写进去(内联 SVG,`currentColor` 描边),
+ * 这里只管盒子。36px 是**命中区**,不是留白 —— 一个只有图标、没有文字的
+ * 按钮,肉眼分不出哪儿能点(WCAG 2.5.8 那条 24×24 的下限之上)。
+ */
 .theme-switch {
+  display: flex;
+  flex: none;
+}
+
+.theme-switch button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+  border-radius: var(--radius-pill);
+}
+
+.theme-switch button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.theme-switch button:hover {
+  background: var(--bg-inset);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/*
+ * 语言开关。**是 `<a>` 不是 `<button>`** —— 语言是"你在哪个地址",
+ * 不是"你选了什么偏好"(理由见 `i18n/locale.ts` 的文件头)。
+ *
+ * 长相沿用外观开关那一套的**语义**(当前项描边、另一项无框),但尺寸更小:
+ * 它有两项,而报头的位置是抠出来的。当前项标的是 `aria-current='true'`
+ * (不是 `page` —— 它指的不是"这一页",是"当前这一项")。
+ */
+.lang-switch {
   display: flex;
   gap: 2px;
   flex: none;
 }
 
-.theme-switch button {
-  padding: 4px 11px;
-  font-size: 0.8rem;
+.lang-switch a {
+  padding: 3px 7px;
+  font-size: 0.78rem;
   line-height: 1.5;
-  background: transparent;
-  border-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
   color: var(--text-dim);
 }
 
-.theme-switch button:hover {
-  background: transparent;
+.lang-switch a:hover {
+  background: var(--bg-inset);
   border-color: var(--border-strong);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.lang-switch a[aria-current='true'] {
+  border-color: var(--accent);
   color: var(--text);
 }
 
-.theme-switch button[aria-pressed='true'] {
-  background: transparent;
-  border-color: var(--accent);
-  color: var(--text);
+/*
+ * 另一种语言还没有这一页时那一个词。**它不是链接,所以不能长得像链接。**
+ *
+ * 用 `--text-faint`(比未选中的 `--text-dim` 再淡一档)+ 不响应悬停 ——
+ * "这一项点不了"这件事只能靠这两样说,而 `cursor: not-allowed` 和
+ * `aria-disabled` 一个给眼睛一个给读屏。
+ */
+.lang-switch__off {
+  padding: 3px 7px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.lang-switch a[aria-current='true']:hover {
+  text-decoration: none;
+}
+
+/* 窄档:两个控件都收一点,把宽度还给导航 */
+@media (max-width: 760px) {
+  .header-controls {
+    gap: 8px;
+  }
+
+  .lang-switch a {
+    padding: 3px 5px;
+    font-size: 0.72rem;
+  }
+
+  .theme-switch button {
+    width: 28px;
+    height: 28px;
+  }
 }
 
 /*
@@ -2077,7 +2315,16 @@ input[type='number'] {
 
 .mini-card__head {
   display: flex;
-  align-items: baseline;
+  /*
+   * **`center` 而不是 `baseline`。** 卡名从"一段文字"变成了"图标 + 文字的
+   * flex 行"之后,它身上已经没有可用的基线了 —— `baseline` 会让浏览器退回按
+   * 行的下外边距对齐,而实测那一下把**卡头从 30px 顶到 32px、首页总高从 2127
+   * 涨到 2133**。改成 `center` 之后两者都回到原值。
+   *
+   * 卡头高度是首页总高的输入之一(文档里点过名),所以这一条是量出来的取舍,
+   * 不是审美判断 —— **改它之前先量**。
+   */
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
@@ -2127,11 +2374,30 @@ input[type='number'] {
  * 退回普通折行,那正是加它之前的样子。
  */
 .mini-card__name {
+  /* 卡名是首页最显眼的一层文字,所以它跟着 `--font-display` 走。
+     **注意它会动卡头高**:卡头现在是 30px、里面最高的孩子是徽章 29px,
+     换字体如果让卡名折成两行,卡头就会被顶高、首页总高跟着涨 —— 换完要量。 */
+  font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: inherit;
   text-wrap: balance;
+  /*
+   * **图标现在住在卡名里面**(用户要的:「卡片左上角的小图标也靠过来」),
+   * 所以这里是一个居中的 flex 行:图标 + 文字整组一起居中。
+   *
+   * 之前图标是卡头的第一个孩子、被 `space-between` 顶在最左边,而卡名居中 ——
+   * 两者隔着三百多像素,看着像两个不相干的东西。
+   *
+   * **`flex: 1 1 auto` 不能省**:卡名只有占据中间那段,居中才有东西可居。
+   */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  text-align: center;
 }
 
 .mini-card__name:hover {
@@ -2821,8 +3087,51 @@ a.confidence:hover {
  * 所以这里不能照搬"80 字符"。而页面是 1000px 宽的栏,不设上限的话一整段
  * 会拉到 60 多个字,读到行尾要回头找下一行的开头。
  */
+/*
+ * **正文不再设行宽上限(2026-10-14,用户连着三次说"空")。**
+ *
+ * 原来这里是 68ch(约合 34 个汉字),理由是"汉字全角,一行 60 多字读到行尾要
+ * 回头找下一行"。那个理由仍然成立,只是**权衡被推翻了**:栏宽是 1060px,而正文
+ * 只占 638px,右边空出 442px —— 用户连着三次说"旁边空出了一大堆""看起来怎么
+ * 这么空"。他宁愿行宽长一点,也不要那一片空白。
+ *
+ * **代价认下来**:一行现在能排到 55–60 个汉字,比舒适区宽。真要收回去,
+ * 改的是这一处,不是别处。
+ */
 .prose {
-  max-width: 68ch;
+  max-width: none;
+}
+
+/*
+ * **`main` 直接子元素里的 `.prose` **段落**:不设宽度上限,而且居中。**
+ * (用户 2026-10-14:「介绍旁边还有一大堆空位,把介绍也填满过去」。)
+ *
+ * ## 它管的是哪一批
+ *
+ * 只有"顶层的导语/说明段"——**它们上面那个标题已经居中了**,所以这两句是
+ * 同一件事的两半。实测过的两个落点:工具页 `<h1>` 下面那段导语(17 页),
+ * 以及首页「更多工具」「关于这些测试」两节里的说明段。
+ *
+ * ## 判据必须是 `p.prose`,不能是 `.prose`
+ *
+ * **这里踩过一次,而且是被用户拿截图报出来的。** 第一版写的是 `main > .prose`,
+ * 而**工具页的正文整块是 `<section class="prose">`** —— 它同样是 `main` 的直接
+ * 子元素,于是整节都被居中,里面每个段落都继承了 `text-align: center`,而宽度
+ * 上限还是 68ch。结果是一列**又窄又居中**的文字,左右各空三百多像素:正是用户
+ * 说的「旁边空出了一大堆」。
+ *
+ * `p.prose` 这个判据把两种情况分开了:**顶层那几段是 `<p>`,整节是 `<section>`**。
+ * (顺带:同一版里还得给列表和表格单独把居中还回去 —— 换成 `p.prose` 之后
+ * 那几条用不着了,`<p>` 里放不下列表。)
+ *
+ * ## 为什么是"居中"而不只是"放宽"
+ *
+ * 放宽对短的段落没用 —— 那句话本来就比 638px 短,容器再宽也是空着。
+ * 要让它看起来是"排好的"而不是"没排完",只能居中。
+ */
+main > p.prose {
+  max-width: none;
+  text-align: center;
 }
 
 .prose ul,
@@ -3270,25 +3579,16 @@ code {
  * 所以**一页标记都不用改,加一个类就行**。
  */
 /*
- * **网格要逃出 `.prose` 那条 68ch 的阅读栏宽,段落不用。**
+ * **这一节整块通栏。**第一版没这么做,量出来网格只有 638px 宽、卡片排成两列
+ * 313px —— 因为 `.prose` 那条行宽上限把整节都框住了。网格不是正文:参考站那种
+ * 特色网格是通栏的,而且卡片越窄、里面那句说明折的行越多。
  *
- * 第一版没逃,量出来网格只有 638px 宽、卡片排成两列 313px —— 因为
- * `.prose { max-width: 68ch }` 把整节都框住了。68ch 是**正文**该有的宽度
- * (一行读得顺),但网格不是正文:参考站那种特色网格是通栏的,
- * 而且卡片越窄、里面那句说明折的行越多。
- *
- * 所以这里把整节放开,再**把段落、标题、有序列表各自收回 68ch** ——
- * 该读的还是读得顺,该铺开的铺开。
+ * > 以前这里还写着一句「段落、标题、有序列表**各自收回** 68ch」—— **那句话
+ * > 已经作废**:2026-10-14 用户连着三次说"空",行宽上限整个放开了(见
+ * > `.prose` 上面那段),这一节里也不例外。
  */
 .prose--cards {
   max-width: none;
-}
-
-.prose--cards > p,
-.prose--cards > h2,
-.prose--cards > h3,
-.prose--cards > ol {
-  max-width: 68ch;
 }
 
 /*
@@ -3304,6 +3604,8 @@ code {
 .prose--cards > h2 {
   display: flex;
   align-items: center;
+  /* 小色条 + 文字一起居中,所以色条会跟着走到文字左边 */
+  justify-content: center;
   gap: 10px;
 }
 
@@ -3464,6 +3766,10 @@ code {
 .tool-head {
   display: flex;
   align-items: center;
+  /* 这一块其实就是一个标题(图标 + h1),所以跟着居中。
+     **必须是 `justify-content` 而不是 `text-align`** —— flex 行里的
+     文字对齐由主轴分布决定 */
+  justify-content: center;
   gap: 14px;
   /* h1 的下边距搬到这一层:图标和标题是同一个整体,间距该由这个整体给 */
   margin-bottom: 0.8rem;
@@ -3634,7 +3940,8 @@ a.confidence:active,
   list-style: none;
   padding: 0;
   margin: 0 0 18px;
-  max-width: 68ch;
+  /* 同上:编号步骤也放开 */
+  max-width: none;
 }
 
 .steps li {

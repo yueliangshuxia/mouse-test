@@ -5,6 +5,19 @@ import ToolNav from '../components/ToolNav.astro';
 import { THEME_COLORS, THEME_KEY } from '../lib/theme';
 import { REPAIR } from '../lib/tools';
 import { href } from '../lib/url';
+import {
+  DEFAULT_LOCALE,
+  HTML_LANG,
+  LOCALE_LABEL,
+  LOCALES,
+  OG_LOCALE,
+  altLocalePath,
+  getCatalog,
+  pageHref,
+  isTranslated,
+  parsePath,
+} from '../lib/i18n';
+import type { Locale } from '../lib/i18n';
 
 interface Props {
   /** 页面 <title>,每页独立 */
@@ -41,10 +54,69 @@ interface Props {
    * 不是必填 —— 维修页、工具箱、404 都不传它的对应色相也能照常站住。
    */
   hue?: string;
+  /**
+   * 字体档位。目前只有一个值 `'cyber'`,给了就写到 `<html data-font>` 上。
+   *
+   * **默认(不传)逐字节等于改之前** —— `--font-display` 在 `:root` 里就指向
+   * `--font-sans`,`--font-mono` 也还是系统那一串。所以这是个纯可选的开关,
+   * 和 `hue` / `isolation` 同一套写法:**没传的页面自动退回老长相**。
+   *
+   * 2026-10-14 用户要"科幻赛博朋克感"时加的,当时只让首页传 ——
+   * "先在首页改一下我看看"。
+   */
+  font?: 'cyber';
+  /**
+   * 这一页是哪个语言。**默认中文** —— 所以现有的 21 个页面一个字都不用改,
+   * 只有 `/en/` 那一套路由文件显式传 `locale="en"`。
+   *
+   * 它决定三件事:`<html lang>`、`<meta og:locale>`、以及**默认的字体档位**
+   * (英文版挂赛博那套)。三件都由这一个值推出来,不会各写各的。
+   */
+  locale?: Locale;
 }
 
-const { title, description, current, jsonLd, isolation = false, noindex = false, hue } = Astro.props;
+const {
+  title,
+  description,
+  current,
+  jsonLd,
+  isolation = false,
+  noindex = false,
+  hue,
+  font,
+  locale = DEFAULT_LOCALE,
+} = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
+
+/*
+ * 当前页的文案目录,以及**同一个页面在另一种语言下的两个地址**。
+ *
+ * 中英开关是两枚真链接,不是两个按钮 —— 理由写在 `i18n/locale.ts` 的文件头
+ * (语言是地址,不是偏好)。两个地址由同一个 `altLocalePath()` 算出来,
+ * 所以不会出现"回中文那条对、去英文那条错"。
+ */
+const t = getCatalog(locale);
+const switchTo = (target: Locale) => href(altLocalePath(target, Astro.url.pathname));
+
+/*
+ * 当前这一页在**另一种语言**下有没有。
+ *
+ * 判据一条就够:中文是站点自己的语言,任何一页的中文版都一定在;英文版只有
+ * 翻过的才有。所以"另一个语言可不可点"= `目标语言 === 默认语言 || 这一页翻过`。
+ *
+ * **两个方向都要对**:未翻译页上 EN 不可点(否则 404),而英文页上「中文」
+ * **必须可点** —— 漏掉后半句的话英文页就回不去了,而那是我第一版真写错的地方。
+ */
+const currentSlug = parsePath(Astro.url.pathname).rest.replace(/\/$/, '');
+
+/*
+ * 英文版才挂赛博那套字体(用户定的:镂空模板字本来就是为拉丁字母设计的,
+ * 在英文版里它才是主角;中文版维持规整的系统字体)。
+ *
+ * **`font` prop 仍然优先** —— 它是"这一页要不要这套字体"的显式开关,
+ * 而 locale 只是默认值。两者都留着是因为以后可能想要"英文版里某一页例外"。
+ */
+const fontSet = font ?? (locale === 'en' ? 'cyber' : undefined);
 
 /*
  * 社交分享图。**必须是绝对 URL** —— `href()` 出来的是 `/mouse-test/og.png`,
@@ -59,7 +131,7 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
 ---
 
 <!doctype html>
-<html lang="zh-CN">
+<html lang={HTML_LANG[locale]} data-font={fontSet}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -83,7 +155,25 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
     -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="在线鼠标测试" />
-    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale" content={OG_LOCALE[locale]} />
+
+    {/*
+      同一页面的另一种语言,给搜索引擎看。**三条一起给**:
+      两条 `alternate` 加一条 `x-default`(指默认语言那一份)。
+      少了 x-default 的话,搜索引擎在"该给哪个语言的用户看"上没有落点。
+    */}
+    {LOCALES.map((other) => (
+      <link
+        rel="alternate"
+        hreflang={HTML_LANG[other]}
+        href={new URL(href(altLocalePath(other, Astro.url.pathname)), Astro.site).href}
+      />
+    ))}
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href={new URL(href(altLocalePath(DEFAULT_LOCALE, Astro.url.pathname)), Astro.site).href}
+    />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical.href} />
@@ -175,10 +265,61 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
 
     <header class="site-header">
       <div class="wrap">
-        <a class="brand" href={href()}>鼠标测试</a>
-        <ToolNav current={current} />
-        <!-- 按钮由 ui.ts 的 mountThemeToggle 建出来(文案取 THEME_LABELS) -->
-        <div class="theme-switch" id="theme-switch" role="group" aria-label="外观主题"></div>
+        <a class="brand" href={href()}>{t.common.brand}</a>
+        <ToolNav current={current} locale={locale} />
+
+        {/*
+          报头最右一列。**两个控件住同一个网格列里**,没有开第四列 ——
+          报头是 `auto minmax(0,1fr) auto` 三列,再开一列就等于直接去抢
+          中间导航那 41.2px 的余量(见 `tools.ts` 末尾那段账)。
+
+          ## 中英开关是两枚 `<a>`,不是两个 `<button>`
+          语言是"你在哪个地址",不是"你选了什么偏好" —— 做成链接就同时拿到了
+          可分享、可收录、能新标签页打开三件事,而且不需要 localStorage:URL
+          自己就是持久化。对照 `theme-switch`:那一个是真的偏好,所以它是按钮。
+
+          `aria-current='true'` 标当前语言(不是 `page` —— 它指的不是"这一页",
+          是"当前这一项")。
+        */}
+        <div class="header-controls">
+          <nav class="lang-switch" aria-label={t.common.langGroupAria}>
+            {
+              LOCALES.map((option) => {
+                // 当前语言永远可点(它就是这个地址本身);另一种语言看它有没有这一页
+                const available = option === locale || option === DEFAULT_LOCALE || isTranslated(currentSlug);
+                if (available) {
+                  return (
+                    <a
+                      href={switchTo(option)}
+                      aria-current={option === locale ? 'true' : undefined}
+                      hreflang={HTML_LANG[option]}
+                    >
+                      {LOCALE_LABEL[option]}
+                    </a>
+                  );
+                }
+                /*
+                 * **另一种语言还没有这一页时,渲染成不可点的 `<span>`,不是链接。**
+                 *
+                 * 这不是保守 —— 是踩过的:开关原先无条件把另一种语言算成
+                 * `/en/<当前页>/`,而多数页面没有英文版,**用户点 EN 落到 404 页**
+                 * (用户拿截图报的「没有英文啊」)。
+                 *
+                 * 为什么不干脆把这个词去掉:留着它**说出了"这一页还没翻"**,
+                 * 而凭空少一个按钮只会让人以为开关坏了。灰着 + `title` 是这件事
+                 * 唯一说得清楚的表达。
+                 */
+                return (
+                  <span class="lang-switch__off" title={t.common.langMissing} aria-disabled="true">
+                    {LOCALE_LABEL[option]}
+                  </span>
+                );
+              })
+            }
+          </nav>
+          <!-- 按钮由 ui.ts 的 mountThemeToggle 建出来(一枚图标,文案取目录) -->
+          <div class="theme-switch" id="theme-switch" role="group" aria-label={t.common.themeGroupAria}></div>
+        </div>
       </div>
     </header>
 
@@ -188,8 +329,8 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
 
     <footer class="site-footer">
       <div class="wrap">
-        <p>所有测试均在浏览器本地完成,数据不会上传到服务器。</p>
-        <p>建议使用桌面版 Chrome 或 Edge 以获得最准确的测量结果。</p>
+        <p>{t.chrome.footerPrivacy}</p>
+        <p>{t.chrome.footerRecommend}</p>
         <!--
           维修入口。**放页脚,而且全站每一页都出现** —— 这条是有意的,不是随手加的。
 
@@ -201,7 +342,7 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
           不能低调。整段理由见 `mouse-repair.astro` 的文件头。
         -->
         <p>
-          <a href={href(`${REPAIR.slug}/`)}>{REPAIR.navLabel}</a> —— 本站的测试工具与这项维修服务出自同一人。
+          <a href={pageHref(locale, REPAIR.slug)}>{t.tools['mouse-repair'].navLabel}</a> {t.chrome.footerRepair}
         </p>
       </div>
     </footer>
@@ -237,7 +378,7 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
     -->
     <div class="site-dock">
       <div class="site-dock__panel well">
-        <p class="site-dock__title">鼠标维修</p>
+        <p class="site-dock__title">{t.chrome.dockTitle}</p>
 
         <div class="site-dock__codes">
           {/*
@@ -247,8 +388,8 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
             `<img>`,外面的 `.site-dock__code-box` 一个字不用动。
           */}
           <div class="qr">
-            <span class="qr__box">二维码位</span>
-            <span class="qr__label">微信</span>
+            <span class="qr__box">{t.chrome.dockQrPlaceholder}</span>
+            <span class="qr__label">{t.chrome.dockWechat}</span>
           </div>
 
           {/*
@@ -277,7 +418,7 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
           把细字号的声明从广告面板里挪走是对的:那里没人读它,
           而挂在那儿的唯一效果是把一句招呼挤掉。
         */}
-        <p class="site-dock__note">鼠标不好用了?联系我们看看。</p>
+        <p class="site-dock__note">{t.chrome.dockNote}</p>
       </div>
 
       {/*
@@ -299,7 +440,7 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
         <img
           class="site-dock__trigger-icon"
           src={href('repair-icon.png')}
-          alt={REPAIR.navLabel}
+          alt={t.tools['mouse-repair'].navLabel}
           width="220"
           height="251"
         />

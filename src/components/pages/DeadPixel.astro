@@ -1,0 +1,365 @@
+---
+/*
+ * 屏幕坏点检测页的**主体**。两个薄路由引它:中文的 `/dead-pixel-test/` 和
+ * 英文的 `/en/dead-pixel-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 这一页的特殊处境:它**不出任何读数**
+ *
+ * 全站的主张是"测不准就明说",而这一页推到极致:**它一个数都不给**,
+ * 坏点是**用户自己看出来的**。所以文案里凡涉及结论的地方都保住
+ * "页面不作判断、只有你的眼睛能给结论"这个语气 —— 换语言不能把它换成
+ * 一句中性的操作说明(写得最细的是 `pages/deadPixel.ts` 的文件头)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.deadPixel;
+
+/*
+ * 那几片纯色。
+ *
+ * **它们是硬写的十六进制,刻意不走任何设计令牌。**理由不是"懒得接主题",
+ * 而是这一页的整个前提:**"黑"必须是 #000000,不是主题里的近黑**;白屏要能
+ * 照出亮点,拿主题的 `--bg` 去铺等于什么都没测。这是全站唯一一处允许出现
+ * 任意颜色的地方,理由和仪器窗同源 —— 它是**内容**,不是纸面寄存器。
+ * 换色值之前先读下面那段 `global.css` 的注释。
+ *
+ * 顺序也有讲究:先黑白(最容易看出亮点和暗斑),再 RGB(看单个子像素)。
+ *
+ * `id` 和 `hex` 是**结构**,留在页面里 —— 它们分别挂在按钮的 `data-patch` /
+ * `data-hex` 上,脚本按它们比色。**`label` 是文案,住在目录的 `t.patches`**,
+ * 键就是这个 `id`;所以这里没有第二份要对齐的中文清单。
+ */
+const PATCHES = [
+  { id: 'black', hex: '#000000' },
+  { id: 'white', hex: '#ffffff' },
+  { id: 'red', hex: '#ff0000' },
+  { id: 'green', hex: '#00ff00' },
+  { id: 'blue', hex: '#0000ff' },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="dead-pixel-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['dead-pixel-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['dead-pixel-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <div class="controls">
+    {
+      PATCHES.map((patch, index) => {
+        const label = t.patches[patch.id as keyof typeof t.patches];
+        return (
+          <button
+            type="button"
+            class="patch"
+            data-patch={patch.id}
+            data-hex={patch.hex}
+            data-label={label}
+            aria-pressed={index === 0 ? 'true' : 'false'}
+          >
+            {label}
+          </button>
+        );
+      })
+    }
+    <button type="button" id="full">{t.fullscreenButton}</button>
+    <span class="test-hint" id="hint">{t.hintIdle}</span>
+  </div>
+
+  <div class="pixel-frame">
+    <div class="pixel-field" id="field" data-patch="black" role="img" aria-label={t.fieldAria}>
+      <div class="pixel-field__hint" id="hint-full" hidden>
+        {t.fullscreenHint}
+      </div>
+    </div>
+  </div>
+
+  <p class="prose" id="readout" data-readout="dead-pixel">
+    {t.readout}
+  </p>
+
+  <section class="prose prose--cards">
+    <h2>{t.howHeading}</h2>
+    <ol class="steps">
+      {t.steps.map((step) => <li set:html={faqHtml(step)} />)}
+    </ol>
+
+    <h2>{t.afterHeading}</h2>
+    {t.afterParagraphs.map((paragraph) => <p set:html={faqHtml(paragraph)} />)}
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 检测板。**这一块是全站唯一允许出现任意颜色的地方**,和仪器窗是同一种
+     * 例外:它是**内容**,不是纸面寄存器。纸面的"无彩色"纪律说的是
+     * "不要给界面元素加色相",而这里铺的是一片被测的色场 ——
+     * 把它染成主题色就等于什么都没测。
+     *
+     * **别照着「纸面无色相」把那几个色值改掉**,也别把它们换成设计令牌:
+     * "黑"必须是 #000000,主题里的近黑照不出亮点。
+     *
+     * 它**不套 `.test-area`**:那一层自带虚线框和刻度栅格背景,
+     * 而这一页要的正是一块干净、无纹理、边界明确的底板。
+     */
+    .pixel-field {
+      position: relative;
+      height: 340px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: #000000;
+      cursor: pointer;
+    }
+
+    /*
+     * 全屏时:去掉框和圆角,铺满整屏,并且**藏起光标** ——
+     * 找坏点的时候鼠标箭头压在色场上正好像一个有问题的像素。
+     */
+    .pixel-field:fullscreen {
+      height: 100%;
+      border: 0;
+      border-radius: 0;
+      cursor: none;
+    }
+
+    /*
+     * 全屏里那条提示。它盖在色场上,所以只在刚进全屏时露一下 ——
+     * 找坏点需要一块没有遮挡的色场,长期挂一条说明是在帮倒忙。
+     * 用 `opacity` 淡出而不是撤掉节点:撤掉会让屏幕在那一瞬间跳一下。
+     */
+    .pixel-field__hint {
+      position: absolute;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      padding: 6px 14px;
+      border-radius: var(--radius-pill);
+      background: rgba(0, 0, 0, 0.62);
+      color: #ffffff;
+      font-size: 0.85rem;
+      white-space: nowrap;
+      opacity: 1;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+    }
+
+    .pixel-field__hint[hidden] {
+      display: none;
+    }
+
+    .pixel-field__hint[data-faded='true'] {
+      opacity: 0;
+    }
+
+    @media (max-width: 760px) {
+      .pixel-field {
+        height: 240px;
+      }
+    }
+  </style>
+
+  <script>
+    import { el, setText } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.deadPixel;
+
+    /*
+     * 这一页**既不调 `suppressWorkbenchDefaults()` 也不做能力告警**,两条都有理由。
+     *
+     * 拦截的判据是"这一页的读数会不会被指针的默认行为污染"。这一页没有读数:
+     * 找坏点是你看,不是它算。指针在这里只做一件事 —— 点一下换下一个颜色,
+     * 而右键菜单并不会打断这件事。为它拦住整页的右键,代价是读者连"复制"
+     * 都没了,换来的是一点用都没有的"干净"(`keyboard-test` 不调它同理)。
+     *
+     * 能力告警同理:全屏能不能用是这一页唯一的环境依赖,而它有**自己的出路**
+     * —— 不支持就退回页面内的色块,照旧能看。所以这里用 `document.fullscreenEnabled`
+     * 就地判断并说明,而不是印一串和这一页无关的精度警告。
+     */
+    const field = el('field');
+    const hintFull = el('hint-full');
+
+    if (!field) throw new Error('检测板未就绪');
+
+    /** 色块表。**从 DOM 读回来**,不在脚本里抄第二份 —— frontmatter 变量在 `<script>` 里不存在 */
+    const patches = Array.from(document.querySelectorAll<HTMLElement>('.patch')).map((button) => ({
+      hex: button.dataset.hex ?? '#000000',
+      label: button.dataset.label ?? '',
+      id: button.dataset.patch ?? '',
+      node: button,
+    }));
+
+    let current = 0;
+
+    function render(): void {
+      const patch = patches[current];
+      if (!patch) return;
+
+      // 只改 `background-color` 这一个 longhand,不写 `background` 简写
+      field!.style.backgroundColor = patch.hex;
+      field!.setAttribute('data-patch', patch.id);
+      for (const item of patches) {
+        item.node.setAttribute('aria-pressed', String(item.id === patch.id));
+      }
+      setText(el('readout'), fill(t.readoutMeta, { label: patch.label }));
+    }
+
+    function go(step: number): void {
+      current = (current + step + patches.length) % patches.length;
+      render();
+    }
+
+    for (const item of patches) {
+      item.node.addEventListener('click', () => {
+        current = patches.findIndex((candidate) => candidate.id === item.id);
+        render();
+      });
+    }
+
+    // ---- 全屏 ----
+
+    const fullButton = el('full') as HTMLButtonElement | null;
+
+    /*
+     * `document.fullscreenEnabled` 为 false 时(iOS Safari)、或者请求被拒时,
+     * **如实说一句并让用户继续用页面内的色块**,不假装全屏成功了。
+     */
+    const canFullscreen = Boolean(document.fullscreenEnabled);
+    if (!canFullscreen && fullButton) {
+      fullButton.disabled = true;
+      fullButton.textContent = t.fullscreenUnsupported;
+    }
+
+    /** 淡出计时器。每次重进全屏都要清掉上一次的,否则新提示会被旧的到点收走 */
+    let fadeTimer = 0;
+
+    function showFullscreenHint(): void {
+      window.clearTimeout(fadeTimer);
+      hintFull?.removeAttribute('data-faded');
+      hintFull?.removeAttribute('hidden');
+      fadeTimer = window.setTimeout(() => {
+        hintFull?.setAttribute('data-faded', 'true');
+      }, 3000);
+    }
+
+    function hideFullscreenHint(): void {
+      window.clearTimeout(fadeTimer);
+      hintFull?.setAttribute('hidden', '');
+      hintFull?.removeAttribute('data-faded');
+    }
+
+    fullButton?.addEventListener('click', () => {
+      field.requestFullscreen?.().catch(() => {
+        setText(el('hint'), t.fullscreenRejected);
+      });
+    });
+
+    // 单击换下一个。**只在全屏里管用** —— 页面里的单击留给下面那排按钮,
+    // 否则点一下色块就会跳色,和按钮的选中态对不上
+    field.addEventListener('click', () => {
+      if (document.fullscreenElement === field) go(1);
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      const active = document.fullscreenElement === field;
+      if (active) {
+        showFullscreenHint();
+        setText(el('hint'), t.hintFullscreen);
+      } else {
+        hideFullscreenHint();
+        setText(el('hint'), t.hintIdle);
+      }
+    });
+
+    /*
+     * 键盘。只在全屏里接管:不在全屏时把空格和方向键还给浏览器
+     * (空格是翻页,抢过来是纯粹的骚扰)。
+     */
+    document.addEventListener('keydown', (event) => {
+      if (document.fullscreenElement !== field) return;
+      if (event.key === ' ' || event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        go(1);
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        go(-1);
+      }
+    });
+
+    render();
+  </script>
+</BaseLayout>

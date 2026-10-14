@@ -145,34 +145,20 @@ const jsonLd = {
         <div class="drag-dot" id="dot" hidden></div>
       </div>
 
-      <h2 class="minor">按按键分开看</h2>
-      <p class="prose tight">
-        五个键都在下面列着。破折号表示<strong>这个键一个事件都没收到</strong>——可能是没测它,
-        也可能是鼠标或驱动根本没把它当成鼠标按键上报,<strong>不等于按了 0 次</strong>。
-        按住期间,对应的那一行会高亮。
-      </p>
-      <table class="ref-table by-button">
-        <thead>
-          <tr>
-            <th>按键</th>
-            <th>按住次数</th>
-            <th>疑似瞬断</th>
-            <th>最长一次 (ms)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {
-            BUTTONS.map((button) => (
-              <tr id={`btn-row-${button.code}`} data-current="false">
-                <td>{button.name}</td>
-                <td id={`btn-count-${button.code}`}>—</td>
-                <td id={`btn-drops-${button.code}`}>—</td>
-                <td id={`btn-longest-${button.code}`}>—</td>
-              </tr>
-            ))
-          }
-        </tbody>
-      </table>
+      {/*
+        **「重置」从工作台下面搬到了这里**(用户 2026-10-14:「重置按钮上面还有空间」)。
+        它原来横在两列底下,于是左列(测试区)底边到它之间空出 135px —— 因为右列
+        比左列高一截,那截空全落在左边。
+
+        搬法照 `scroll-test` / `keyboard-test` 的先例:**重置换到装置正下方**,
+        不用往下滚一屏才够得到,顺带把那段空占掉。
+      */}
+      <div class="controls">
+        <button type="button" id="reset">重置</button>
+        <span class="test-hint" id="hint2">
+          指针拖出区域外也会继续跟踪,直到松开为止
+        </span>
+      </div>
     </div>
 
     <div class="workbench__readout">
@@ -200,18 +186,68 @@ const jsonLd = {
     </div>
   </div>
 
-  <div class="controls">
-    <button type="button" id="reset">重置</button>
-    <span class="test-hint" id="hint2">
-      指针拖出区域外也会继续跟踪,直到松开为止
-    </span>
-  </div>
+  {/*
+    **这张表从工作台的左列挪到了这里**(用户 2026-10-14 拿截图报的「上面也有点太空了」)。
 
-  <h2 class="minor">每次拖拽的记录</h2>
+    它原来住在 `.workbench__stage` 里面,于是工作台变成"左列 712px、右列 398px"
+    —— **右列下面空出 314px**,而表格自己也只拿到左列那 646px。挪出来之后它
+    通栏(1060),右列那 314px 的空带也没有了。
+
+    **判据不是"表格要宽",是"它和工作台不是同一条基线上的东西"**:工作台那一行
+    的左右两列是"装置 / 读数",而这是一整节的明细表,该和下面「每次拖拽的记录」
+    并排站,而不是被塞进装置那一列。
+  */}
+  {/*
+    **这两节并成一排**(用户 2026-10-14:「这两个可以改紧凑一点,弄成一排」)。
+
+    它们原来各自通栏 1060,而内容都不满 —— 那张表只有四列,日志每行也只有
+    「编号 / 时长 / 键 / 位移」四段,通栏之后右边空一大片。并排之后两边都收紧,
+    整页也短了。
+
+    `auto-fit` + `minmax(340px, 1fr)`:够宽两列、窄了自己堆成一列 ——
+    **不新增断点**(全站只有 760px 那一个),和 `.mini-grid` 同一个算法。
+  */}
+  <div class="split">
+    <div class="split__col">
+      <h2 class="minor">按按键分开看</h2>
+  <p class="prose tight">
+    五个键都在下面列着。破折号表示<strong>这个键一个事件都没收到</strong>——可能是没测它,
+    也可能是鼠标或驱动根本没把它当成鼠标按键上报,<strong>不等于按了 0 次</strong>。
+    按住期间,对应的那一行会高亮。
+  </p>
+  <table class="ref-table by-button">
+    <thead>
+      <tr>
+        <th>按键</th>
+        <th>按住次数</th>
+        <th>疑似瞬断</th>
+        <th>最长一次 (ms)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        BUTTONS.map((button) => (
+          <tr id={`btn-row-${button.code}`} data-current="false">
+            <td>{button.name}</td>
+            <td id={`btn-count-${button.code}`}>—</td>
+            <td id={`btn-drops-${button.code}`}>—</td>
+            <td id={`btn-longest-${button.code}`}>—</td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+
+    </div>
+
+    <div class="split__col">
+      <h2 class="minor">每次拖拽的记录</h2>
   <p class="prose tight">
     最近 10 次,新的在上面。<span class="mark-danger">红色</span>的那几次里检测到了瞬断。
   </p>
-  <ul class="log-list" id="log"></ul>
+      <ul class="log-list" id="log"></ul>
+    </div>
+  </div>
 
   <section class="prose prose--cards">
     <h2>这项测试测不到什么</h2>
@@ -349,13 +385,32 @@ const jsonLd = {
     }
 
     /*
-     * 第一块住在装置列里,顶上不要再叠一层外边距 —— flex 列里 margin 和 gap
-     * **不会合并**,两条叠起来就是 76px 的空档。
-     * 只顶掉外边距:那条 1px 上边框和 padding 留着,正好把"装置"和"读数"隔开,
-     * 而装置是仪器窗、这张表是纸面,那道线画在这儿是对的。
+     * 「重置」搬进装置列之后,**顶掉它的上外边距** —— flex 列里 margin 和 gap
+     * **不会合并**,`.controls` 自带 20px、外面还有 20px 的 gap,两条叠起来
+     * 就是 40px 的空档。(和 `.workbench__stage > .minor` 当年那条同一个道理。)
      */
-    .workbench__stage > .minor {
+    .workbench__stage > .controls {
       margin-top: 0;
+    }
+
+    /*
+     * 明细表与拖拽日志并排。
+     *
+     * `auto-fit` + `minmax(340px, 1fr)`:够宽排两列、窄了自己堆成一列 ——
+     * **不新增断点**(全站只有 760px 那一个),算法和 `.mini-grid` 一样。
+     * 340 是按日志那一列反算的:`#10  2351 ms  侧键 5 拖动 2582 px` 一行约 300px,
+     * 再加内边距。
+     */
+    .split {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 28px;
+      align-items: start;
+    }
+
+    /* 两列各自那一节:标题的下边距收一点,不然两张表顶边对不齐 */
+    .split__col > .minor {
+      margin-bottom: 0.4rem;
     }
 
     /* .drag-live 的定位、[hidden]、大字和标签都在 global.css 里

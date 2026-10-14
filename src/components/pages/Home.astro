@@ -1,0 +1,268 @@
+---
+/*
+ * 首页的**主体**。两个薄路由引它:中文的 `/` 和英文的 `/en/`。
+ *
+ * ## 中英两版是同一份结构
+ *
+ * 这一页曾经走过一段弯路:**英文首页一开始做成了"一张工具清单"**,而不是中文
+ * 首页的镜像 —— 当时的理由是"卡片文案还没进目录,硬套会半中半英"。用户看到
+ * 之后说得很直接:「首页为什么英文的是这样,就不能在原有的基础上改成英文就好嘛」。
+ * 那是对的:半翻的镜像也比一份诚实的目录页更接近最终形态,而且**结构一旦分成
+ * 两份,以后每改一处都要改两遍**。
+ *
+ * 现在两版走这一个组件,差别只有 `locale`。
+ *
+ * ## 两层文字不在同一个地方渲染(这一条文档里点过名,别找错)
+ *
+ * - **卡片里那一句**(`note`)和读数槽标签、模式名、空态提示 → `t.cards[slug]`,
+ *   由 `MiniCard.astro` 自己读。
+ * - **四档可信度的骨架** → `t.confidenceNote`,只在网格**下面**渲染一次,
+ *   是一份 `<dl>`,靠徽章和七张卡对上。**卡里没有骨架。**
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import MiniCard from '../../components/MiniCard.astro';
+import { DIAGNOSTIC_TOOLS, FUN_TOOLS, PLANNED_TOOLS } from '../../lib/tools';
+import type { Confidence } from '../../lib/tools';
+import { defaultMiniMode, findMiniCard, MINI_CARDS } from '../../lib/mini-cards';
+import { DEFAULT_LOCALE, fill, getCatalog, pageHref, toolCopy } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+import { faqHtml } from '../../lib/faq';
+import { href } from '../../lib/url';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const catalog = getCatalog(locale);
+const t = catalog.pages.home;
+
+/*
+ * 站点根的绝对地址,**由 `site` + `base` 推出来**,不手写。
+ * 手写的话换域名/换子路径时必然漏改一处,而结构化数据里给错 URL
+ * 搜索引擎不会报错,只会静默地把首页认到别处去。
+ */
+const siteUrl = new URL(import.meta.env.BASE_URL, Astro.site).href;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: t.h1,
+  description: t.metaDescription,
+  url: siteUrl,
+};
+
+/*
+ * **四档,不是五档 —— 而那个 `Exclude` 就是这句话本身。**
+ *
+ * `Confidence` 还有第五档 `'none'`(不测量),它**刻意不进这份图例**:这份
+ * `<dl>` 解释的是"首页卡片上那枚徽章是什么意思",而卡片只出诊断工具,`'none'`
+ * 永远不会出现在卡片上。收窄写在类型里,所以哪天有人往这份清单里加一档,
+ * 目录那边会立刻红 —— 而不是静默地多印一行首页上根本用不到的解释。
+ */
+const CONFIDENCE_ORDER: Exclude<Confidence, 'none'>[] = ['exact', 'estimate', 'shape', 'direction'];
+
+/*
+ * **只从 `DIAGNOSTIC_TOOLS` 建卡片。** 趣味工具不上卡片,它们进下面那一节,只给链接。
+ *
+ * **一张卡可以顶几个工具页**(`MiniCard.covers`),所以卡片数**少于**诊断工具数。
+ * `findMiniCard(tool.slug)!` 那个 `!` 由 `tests/mini-cards.test.ts` 的覆盖不变量担保。
+ */
+const covered = new Set(MINI_CARDS.flatMap((card) => card.covers ?? []));
+
+const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((tool) => {
+  const spec = findMiniCard(tool.slug)!;
+  const copy = t.cards[tool.slug];
+  /*
+   * 空态那句话**可以随模式变**,所以首帧就要挑对那一个 —— 判据和驱动复位回空态
+   * 时用的是同一个 `defaultMiniMode`,不写两份。挑出来的是**模式的 key**,
+   * 文案再从目录按那个 key 取。
+   */
+  const mode = defaultMiniMode(spec);
+  return {
+    tool,
+    spec,
+    prompt: (mode && copy?.modes?.[mode.key]?.prompt) ?? copy?.prompt ?? '',
+    covers: (spec.covers ?? []).flatMap((slug) => {
+      const coveredTool = DIAGNOSTIC_TOOLS.find((item) => item.slug === slug);
+      return coveredTool ? [coveredTool] : [];
+    }),
+  };
+});
+
+/** 工具箱那条链接是**行内**的,所以整句留在目录里、用一个占位符把链接填进去 */
+const toolboxLede = fill(t.toolboxLede, {
+  toolboxLink: `<a href="${href('toolbox/')}">${t.toolboxLinkText}</a>`,
+});
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="index"
+  jsonLd={jsonLd}
+  locale={locale}
+>
+  {/*
+    标题下面直接就是卡片。
+
+    原来这里是「导语 → 可用工具 → 名册 → 网格」四段文字,读者要翻过一整屏说明
+    才够得着第一个能点的东西。改成点进来就看见卡片:想测什么直接上手,
+    「这是什么站、那些标记什么意思」挪到网格下面当说明读。
+
+    **正文一句没删,只是换了谁先出场。**
+  */}
+  <h1 class="home-title">{t.h1}</h1>
+
+  <ul class="mini-grid">
+    {
+      cards.map(({ tool, spec, prompt, covers }) => (
+        <MiniCard tool={tool} spec={spec} prompt={prompt} covers={covers} locale={locale} />
+      ))
+    }
+  </ul>
+
+  {/*
+    第二片:**趣味工具,只给链接,不给卡片。**判据在 `mini-cards.ts` 的文件头。
+
+    清单从 `FUN_TOOLS` 派生,**不是手写几个 `<li>`** —— 手写的话加一个趣味工具
+    只改 `tools.ts` 就会从这里静默消失。
+  */}
+  <h2>{t.moreHeading}</h2>
+
+  <p class="prose">{t.moreLede}</p>
+
+  <ul class="more-list">
+    {
+      FUN_TOOLS.map((tool) => (
+        <li>
+          <a class="more-list__item" href={pageHref(locale, tool.slug)}>
+            {toolCopy(tool.slug, locale).name}
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+
+  {/*
+    通向工具箱页的那一条**不放进 `<ul>`** —— 放进去它就成了一枚和上面七个
+    一模一样的药丸,而它指的不是一件工具,是一扇门。
+  */}
+  <p class="prose" set:html={toolboxLede} />
+
+  <h2>{t.aboutHeading}</h2>
+
+  <p class="prose">{t.aboutLede}</p>
+
+  <p class="prose" set:html={faqHtml(t.confidenceLede)} />
+
+  <dl class="confidence-key">
+    {
+      CONFIDENCE_ORDER.map((level) => (
+        <div class="confidence-key__row">
+          <dt class={`confidence confidence--${level}`}>{catalog.confidence[level]}</dt>
+          <dd class="confidence-key__mean">{t.confidenceNote[level]}</dd>
+        </div>
+      ))
+    }
+  </dl>
+
+  {
+    PLANNED_TOOLS.length > 0 && (
+      <>
+        <h2>{t.plannedHeading}</h2>
+        <ul class="mini-grid">
+          {PLANNED_TOOLS.map((tool) => (
+            <li class="mini-card mini-card--planned">
+              <div class="mini-card__head">
+                <span class="mini-card__name">{toolCopy(tool.slug, locale).name}</span>
+                <span class="confidence confidence--direction">{t.plannedBadge}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </>
+    )
+  }
+</BaseLayout>
+
+<script>
+  import { mountMiniCard } from '../../lib/mini-devices';
+  import { findMiniCard } from '../../lib/mini-cards';
+  import { suppressSideButtonNavigation } from '../../lib/side-buttons';
+  import { suppressDefaultsWithin } from '../../lib/ui';
+
+  /*
+   * 默认行为的拦截:右键菜单、中键自动滚动、侧键的**后退/前进**。
+   *
+   * **一次装在整个网格上,不是每张卡各装一份。** 判据本来就是"按下点落在哪儿",
+   * 装七份只是让七份各自记一遍同一个事实。网格是这些测试面共同的外框。
+   *
+   * 为什么不是整页(工具页那样):首页是一篇正文,七张卡只是它中间的一节。
+   * 整页拦会把整篇文章的右键菜单和"按侧键回上一页"一起吃掉,那是耍横不是清理。
+   */
+  for (const grid of document.querySelectorAll('.mini-grid')) {
+    suppressDefaultsWithin(grid);
+    suppressSideButtonNavigation(grid);
+  }
+
+  /*
+   * 把每一张卡里的装置接上。**走一遍 DOM 而不是把 `cards` 传进来** ——
+   * frontmatter 变量在 `<script>` 里不存在,所以两边靠 `data-mini` 上那个 slug 挂钩。
+   *
+   * 装置是**惰性**的:用户碰到哪张卡才建哪张卡的采样器 / 画布。
+   */
+  for (const surface of document.querySelectorAll<HTMLElement>('[data-mini]')) {
+    const slug = surface.dataset.mini;
+    if (!slug) continue;
+    const spec = findMiniCard(slug);
+    const card = surface.closest('.mini-card');
+    if (spec && card instanceof HTMLElement) mountMiniCard(card, spec);
+  }
+</script>
+
+<style>
+  /*
+   * 全站 h1 的下边距是 0.8rem,那是留给紧跟其后的段落的;48px 的中文标题下面
+   * 只隔 13px 就是一片卡片,挤得慌。所以首页单独放宽 —— 但**放宽的那一段现在
+   * 归卡片**,h1 自己收回到 0.5rem。
+   *
+   * **这一条得留在页面里**:`.home-title` 只有首页用,而页面 `<style>` 会被
+   * 加上 `data-astro-cid`,它命中的元素由这个组件渲染,所以作用域对得上。
+   */
+  .home-title {
+    margin-bottom: 0.5rem;
+  }
+
+  /*
+   * 「更多工具」那一排链接。用的是 `.site-nav__item` 那套:淡底药丸 + 悬停换底色。
+   * **为什么不加描边或者下划线**:描边药丸是 `.confidence` 徽章的长相,而徽章就在
+   * 上面那些卡片里 —— 同一节里出现两批长得很像的药丸,读者会以为它们是同一种东西。
+   *
+   * `list-style: none` + `padding: 0` 自己去掉了项目符号:`ul` 在这里只是"若干项"
+   * 的结构,视觉上是一排链接,不是一份带点的清单。
+   *
+   * 窄屏交给 `flex-wrap` 自己折行 —— 全站**只有 760px 那一个断点**,这里不新增。
+   */
+  .more-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 1.75rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .more-list__item {
+    display: inline-block;
+    padding: 4px 11px;
+    border-radius: var(--radius-pill);
+    color: var(--text-dim);
+  }
+
+  .more-list__item:hover {
+    background: var(--bg-inset);
+    color: var(--text);
+    text-decoration: none;
+  }
+</style>

@@ -1,12 +1,13 @@
 ---
-import { CONFIDENCE_LABEL } from '../lib/tools';
+import { CLICK_CHATTER_MS } from '../lib/analysis';
 import type { Tool } from '../lib/tools';
 import { DEFAULT_TRACE_SLOTS } from '../lib/mini-cards';
 import type { MiniCard } from '../lib/mini-cards';
 import { MOUSE_FIGURE_SVG } from '../lib/mouse-figure';
 import { TOOL_MOTIF } from '../lib/tool-motifs';
 import { TOOL_HUE } from '../lib/tool-hues';
-import { href } from '../lib/url';
+import { DEFAULT_LOCALE, fill, getCatalog, pageHref, toolCopy } from '../lib/i18n';
+import type { Locale } from '../lib/i18n';
 
 interface Props {
   tool: Tool;
@@ -26,9 +27,25 @@ interface Props {
    * `findTool`,而那是页面那一侧的事;卡片只需要短名和链接。
    */
   covers?: Tool[];
+  /** 这一页是哪个语言。卡上的每个字、每一条链接都跟着它走 */
+  locale?: Locale;
 }
 
-const { tool, spec, prompt, covers = [] } = Astro.props;
+const { tool, spec, prompt, covers = [], locale = DEFAULT_LOCALE } = Astro.props;
+
+/*
+ * **卡上那两层文字也分语言**,所以和 `tool.description` 一样得从目录取。
+ * 原来它们住在 `src/lib/mini-cards.ts` 的 `MINI_CARDS` 里,现在那边只剩结构,
+ * 文案在 `i18n/pages/home.ts` 的 `cards` 下(按主 slug 取)。
+ */
+const cat = getCatalog(locale);
+const t = cat.pages.home;
+const copy = t.cards[tool.slug];
+const toolName = toolCopy(tool.slug, locale).name;
+/** 卡名/摘要缺省落回**这一页**的名字与描述 —— 中文那份来自 `tools.ts`,
+ *  英文那份由目录里的 `faceDesc` 给(所以英文那侧六张卡都补了)` */
+const cardName = copy?.faceName ?? toolName;
+const cardDesc = copy?.faceDesc ?? tool.description;
 
 /*
  * 首页的一张卡片。
@@ -86,7 +103,8 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
       **29px**,所以只要不超过它,卡头高度不变、首页总高就一格不涨
       (这一页的高度在文档里是钉住的)。26 < 29,安全。
     */}
-    <span class="mini-card__icon" aria-hidden="true">
+    <a class="mini-card__name" href={pageHref(locale, tool.slug)}>
+      <span class="mini-card__icon" aria-hidden="true">
       <svg
         viewBox="0 0 24 24"
         fill="none"
@@ -96,14 +114,15 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
         stroke-linejoin="round"
         set:html={TOOL_MOTIF[tool.slug]}
       />
-    </span>
-    <a class="mini-card__name" href={href(`${tool.slug}/`)}>{spec.faceName ?? tool.name}</a>
+      </span>
+      {cardName}
+    </a>
     {spec.kind !== null && (
       <button
         type="button"
         class="mini-card__reset"
         data-mini-reset={tool.slug}
-        aria-label={`清空「${spec.faceName ?? tool.name}」这张卡上的读数`}
+        aria-label={fill(t.clearCardAria, { name: cardName })}
       >
         <svg class="mini-card__reset-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path d="M2 8a6 6 0 1 0 6-6 6.5 6.5 0 0 0-4.49 1.83L2 5.33" />
@@ -113,14 +132,14 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
     )}
     <a
       class={`confidence confidence--${tool.confidence}`}
-      href={href(`${tool.slug}/`)}
-      aria-label={`${CONFIDENCE_LABEL[tool.confidence]},去「${spec.faceName ?? tool.name}」这一页`}
+      href={pageHref(locale, tool.slug)}
+      aria-label={fill(t.goPageAria, { confidence: cat.confidence[tool.confidence], name: cardName })}
     >
-      {CONFIDENCE_LABEL[tool.confidence]}
+      {cat.confidence[tool.confidence]}
     </a>
   </div>
 
-  <p class="mini-card__desc">{spec.faceDesc ?? tool.description}</p>
+  <p class="mini-card__desc">{cardDesc}</p>
 
   {/*
     模式开关。位置在**描述和装置面之间** —— 模式说的是"这台仪器怎么测",
@@ -131,7 +150,7 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
     `button[aria-pressed='true']`,这里不另写一个状态色。
   */}
   {spec.modes && spec.modes.length > 0 && (
-    <div class="mini-modes" role="group" aria-label={`${tool.name}的模式`}>
+    <div class="mini-modes" role="group" aria-label={fill(t.modesAria, { name: cardName })}>
       {spec.modes.map((mode, index) => (
         <button
           type="button"
@@ -139,7 +158,7 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
           data-mini-mode={`${tool.slug}:${mode.key}`}
           aria-pressed={(mode.default ?? index === 0) ? 'true' : 'false'}
         >
-          {mode.label}
+          {copy?.modes?.[mode.key]?.label ?? mode.label}
         </button>
       ))}
     </div>
@@ -169,7 +188,7 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
       <Fragment set:html={MOUSE_FIGURE_SVG} />
     )}
     {spec.kind === null
-      ? <p class="mini-device__why">{spec.fallback}</p>
+      ? <p class="mini-device__why">{copy?.fallback ?? spec.fallback}</p>
       : <p class="mini-device__prompt">{prompt}</p>}
   </div>
 
@@ -186,7 +205,7 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
            * 它表达的事(红格 = 反向毛刺)在卡底那行小注里有文字。
            */
           <div class="mini-read__item mini-read__item--trace">
-            <span class="mini-read__label">{readout.label}</span>
+            <span class="mini-read__label">{copy?.readouts?.[readout.key] ?? readout.label}</span>
             <span
               class="mini-trace"
               data-mini-trace={`${tool.slug}:${readout.key}`}
@@ -199,7 +218,7 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
           </div>
         ) : (
           <div class="mini-read__item">
-            <span class="mini-read__label">{readout.label}</span>
+            <span class="mini-read__label">{copy?.readouts?.[readout.key] ?? readout.label}</span>
             <span class="mini-read__num">
               <span class="mini-read__value" data-mini-out={`${tool.slug}:${readout.key}`}>—</span>
               {readout.unit && <span class="mini-read__unit">{readout.unit}</span>}
@@ -222,14 +241,14 @@ const { tool, spec, prompt, covers = [] } = Astro.props;
     `set:html` —— 那会把全站的小注都变成"要当 HTML 读"的数据。
   */}
   <p class="mini-card__note">
-    {spec.note}
+    {fill(copy?.note ?? spec.note, { ms: CLICK_CHATTER_MS })}
     {covers.length > 0 && (
       <span class="mini-card__also">
-        独立页面:
+        {t.independentLabel}
         {covers.map((covered, index) => (
           <>
             {index > 0 && ' · '}
-            <a href={href(`${covered.slug}/`)}>{covered.navLabel}</a>
+            <a href={pageHref(locale, covered.slug)}>{toolCopy(covered.slug, locale).navLabel}</a>
           </>
         ))}
       </span>

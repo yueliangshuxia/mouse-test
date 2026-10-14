@@ -49,13 +49,17 @@ export const THEME_KEY = 'mouse-test:theme';
 
 export type Theme = 'light' | 'dark';
 
-/** 开关上按钮的顺序 */
-export const THEME_ORDER: readonly Theme[] = ['light', 'dark'];
-
-export const THEME_LABELS: Record<Theme, string> = {
-  light: '浅色',
-  dark: '深色',
-};
+/*
+ * **`THEME_ORDER` 和 `THEME_LABELS` 已经删了。**
+ *
+ * 它们服务的是"两个文字按钮(浅色 / 深色)"那一版开关。2026-10-14 为了给
+ * 中英开关腾出报头那 41.2px 的余量,开关压成了一枚图标按钮 —— 没有"顺序"
+ * 可言(只有一个),按钮上也没有文字了。
+ *
+ * 文案搬到 `src/lib/i18n/zh.ts` 的 `common.themeToLight` / `themeToDark`:
+ * 它现在要分语言,而**分语言的东西必须住在目录里**,不能散在常量文件里。
+ * 图标字面量在 `ui.ts`(`THEME_ICON`)—— 那是长相,不是主题常量。
+ */
 
 /**
  * 给 `<meta name="theme-color">` 用的纸面底色(手机状态栏)。

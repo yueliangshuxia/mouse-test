@@ -116,12 +116,6 @@ const jsonLd = {
         </div>
       </div>
 
-      <h2>间隔记录</h2>
-      <p class="prose tight">
-        最近 20 次点击的间隔,新的在上面。<span class="mark-danger">红色</span>的那几条
-        就是微动在抖——如果你并没有连续快速点击却出现了红色条目,那只鼠标的微动已经开始老化了。
-      </p>
-      <ul class="log-list" id="log"></ul>
     </div>
 
     <div class="workbench__readout">
@@ -148,6 +142,21 @@ const jsonLd = {
       </div>
     </div>
   </div>
+
+  {/*
+    **这一块从工作台的左列挪到了这里**(用户 2026-10-14 报的「上面也有点太空了」)。
+    它原来住在 `.workbench__stage` 里,于是左列 653px、右列 461px —— **右边空出 192px**。
+    挪出来通栏之后那一列对平了。
+
+    **判据是哪一列长,不是"表格/日志都该在外面"**:`scroll-test` 的处境正好相反
+    (左列短、右列高),那一页的内容是**故意**搬进左列补空的 —— 见那一页的注释。
+  */}
+  <h2>间隔记录</h2>
+  <p class="prose tight">
+    最近 20 次点击的间隔,新的在上面。<span class="mark-danger">红色</span>的那几条
+    就是微动在抖——如果你并没有连续快速点击却出现了红色条目,那只鼠标的微动已经开始老化了。
+  </p>
+  <ul class="log-list" id="log"></ul>
 
   <section class="prose prose--cards">
     <h2>怎么测才有意义</h2>

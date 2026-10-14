@@ -1,0 +1,559 @@
+---
+/*
+ * CPS 测试页的**主体**。两个薄路由引它:中文的 `/cps-test/` 和英文的 `/en/cps-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 这一页是"逐页翻译"的**样板**
+ *
+ * 剩下 20 页照它做,四步:
+ *   1. 文案搬进 `src/lib/i18n/pages/<slug>.ts`(`zh` 逐字照抄现有中文,`en` 是译文)
+ *   2. 模板里的静态文字换成 `t.…`;带 `**强调**` 的整段走 `faqHtml()`
+ *   3. `<script>` 里那些拼出来的句子:语言从 `currentLocale()` 读(**从
+ *      `<html lang>` 读回来**,因为 frontmatter 在 `<script>` 里不存在),
+ *      句子本身走 `fill()` 填占位符
+ *   4. 主体搬进这里,加两个薄路由
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.cps;
+
+/** 时长选项。**key 是毫秒**,因为脚本要用它当 `data-ms` */
+const DURATIONS = Object.entries(t.durations).map(([ms, label]) => ({
+  ms: Number(ms),
+  label,
+}));
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="cps-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['cps-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['cps-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    {
+      DURATIONS.map((option) => (
+        <button type="button" class="duration" data-ms={option.ms}>
+          {option.label}
+        </button>
+      ))
+    }
+    <button type="button" id="toggle">{t.reset}</button>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well cps-pad" id="pad" data-running="false">
+        <div class="test-area__hint" id="hint">
+          <span class="cps-start">
+            <span class="cps-start__call">{t.startCall}</span>
+            <span class="cps-start__meta" id="hint-meta"></span>
+          </span>
+        </div>
+        <div class="cps-live" id="live" hidden>
+          <div class="cps-live__count" id="live-count">0</div>
+          <div class="cps-live__meta" id="live-meta"></div>
+        </div>
+        {/*
+          这一行原来是「次点击 · 剩余 <span id="live-left"> 秒 · <span id="live-cps"> CPS」
+          三个节点拼的。**合并成一个节点**是因为那两个 span 身上一条样式都没有
+          (它们只是脚本的更新靶子),而分开之后文案就得为了插值被切成三段 ——
+          翻译的人看不到完整的句子,译文必然别扭。现在整行走 `fill()` 填占位符。
+        */}
+        <div class="cps-over" id="over" hidden>
+          <div class="cps-live__count" id="over-count">0</div>
+          <div class="cps-live__meta">{t.overMeta}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="stat-grid">
+        <StatPanel id="average" label={t.stats.average.label} primary hint={t.stats.average.hint} />
+        <StatPanel id="peak" label={t.stats.peak.label} hint={t.stats.peak.hint} />
+        <StatPanel id="clicks" label={t.stats.clicks.label} />
+        <StatPanel id="best" label={t.stats.best.label} hint={t.stats.best.hint} />
+      </div>
+    </div>
+  </div>
+
+  <h2>{t.chart.heading}</h2>
+  <p class="prose tight" set:html={faqHtml(t.chart.lede)} />
+  <div class="rate-chart" id="chart"></div>
+  <div class="histogram-axis">
+    <span id="chart-left">—</span>
+    <span id="chart-right">—</span>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.referenceHeading}</h2>
+    <p set:html={faqHtml(t.referenceLede)} />
+    <table class="ref-table">
+      {/*
+        这一张必须固定前两列的宽度。第三列的说明比别的表长得多,auto 布局会把
+        宽度几乎全给它,把第二列压到 58px(窄屏 41px)。第一列 5rem 够「25 以上」
+        不折行,第二列 6rem 够最长的档位名。
+      */}
+      <colgroup>
+        <col style="width: 5rem" />
+        <col style="width: 6rem" />
+        <col />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>{t.referenceColumns.range}</th>
+          <th>{t.referenceColumns.level}</th>
+          <th>{t.referenceColumns.note}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          t.reference.map((row) => (
+            <tr>
+              <td>{row.range}</td>
+              <td>{row.level}</td>
+              <td>{row.note}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>{t.whichHeading}</h2>
+    <p set:html={faqHtml(t.whichBody)} />
+    <p set:html={faqHtml(t.whichTimer)} />
+
+    <h2>{t.fewerHeading}</h2>
+    <p set:html={faqHtml(t.fewerLede)} />
+    <ul>
+      {
+        t.fewerPoints.map((point) => (
+          <li>
+            <strong>{point.title}</strong>
+            {point.body}
+          </li>
+        ))
+      }
+    </ul>
+    <p set:html={faqHtml(t.fewerTail)} />
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .cps-pad {
+      height: 300px;
+      cursor: pointer;
+    }
+
+    .cps-pad[data-running='true'] {
+      border-color: var(--accent);
+    }
+
+    /*
+     * 测试面正中那行"点击开始"。
+     *
+     * **只加内层这两个类,不动 `.test-area__hint`** —— 那个类还被 DPI、拖拽、
+     * 滚轮、轨迹四页共用,改它等于改四个页面。
+     */
+    .cps-start {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cps-start__call {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    .cps-start__meta {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    /*
+     * .cps-live / .cps-over 的定位、[hidden]、大字和次要文字都在 global.css 里
+     * ——它们和 DPI、拖拽、滚轮三页的实时读数共用同一套规则。
+     *
+     * 下面这条是这里独有的:结算之后那个数不再是"实时读数",而是一个**结论**,
+     * 所以要用正文色而不是强调色。
+     */
+    .cps-over .cps-live__count {
+      color: var(--text);
+    }
+
+    /* 连点很容易顺带选中页面文字,测试期间一律抑制 */
+    :global(html.is-testing) {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+  </style>
+
+  <script>
+    import { computeCps, RESTART_LOCK_MS } from '../../lib/analysis';
+    import {
+      createTicker,
+      el,
+      format,
+      loadBest,
+      mountCapabilityNotices,
+      saveBest,
+      setHint,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.cps;
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // 右键菜单 / 中键自动滚动会盖住测试区、打断连点。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    const BEST_KEY = 'mouse-test:cps-best';
+
+    const pad = el('pad');
+    const hint = el('hint');
+    const live = el('live');
+    const over = el('over');
+    const toggleButton = el('toggle') as HTMLButtonElement | null;
+    const chartHost = el('chart');
+
+    /** 当前选中的时长(毫秒) */
+    let durationMs = 5000;
+
+    let running = false;
+    let startedAt = 0;
+    /** 点击时刻,相对 `startedAt`。测试结束后保留,用于重算和画图 */
+    let clickTimes: number[] = [];
+
+    let stopTicker: (() => void) | null = null;
+
+    /*
+     * `RESTART_LOCK_MS` 住在 `analysis.ts` —— 首页那张 CPS 卡片的 5 秒模式有
+     * **一模一样**的问题(窗口由计时器关闭,结算那刻手还在惯性连点),两处必须
+     * 共用一个值。
+     */
+    /** 在这个时刻之前,测试面上的点击不触发新一轮 */
+    let lockUntil = 0;
+
+    // ---- 时长选择 ----
+
+    function renderDurations(): void {
+      let label = '';
+      for (const button of document.querySelectorAll<HTMLElement>('.duration')) {
+        const selected = Number(button.dataset.ms) === durationMs;
+        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        if (selected) label = button.textContent?.trim() ?? '';
+      }
+      // 时长标签从按钮上读,不从目录里再取一遍:按钮的标签已经由模板渲染好了,
+      // 从 DOM 读回来就没有第二份字符串
+      setText(el('hint-meta'), fill(t.hintMeta, { label }));
+    }
+
+    for (const button of document.querySelectorAll<HTMLElement>('.duration')) {
+      button.addEventListener('click', () => {
+        if (running) return;
+        durationMs = Number(button.dataset.ms) || 5000;
+        renderDurations();
+        reset();
+      });
+    }
+
+    renderDurations();
+
+    // ---- 画图 ----
+
+    /**
+     * 每秒点击次数柱状图。
+     *
+     * 分桶用**测试时钟**而不是真实时间,所以最后一格即使不满一秒也照画。
+     */
+    function renderChart(): void {
+      if (!chartHost) return;
+
+      if (clickTimes.length === 0) {
+        chartHost.replaceChildren();
+        setText(el('chart-left'), '—');
+        setText(el('chart-right'), '—');
+        return;
+      }
+
+      const bucketCount = Math.ceil(durationMs / 1000);
+      const buckets = new Array<number>(bucketCount).fill(0);
+      for (const time of clickTimes) {
+        const index = Math.min(bucketCount - 1, Math.floor(time / 1000));
+        buckets[index]++;
+      }
+
+      let max = 0;
+      for (const count of buckets) if (count > max) max = count;
+      if (max === 0) return;
+
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < bucketCount; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'rate-chart__bar';
+        // 最低留 2% 高度,否则 0 次的那一秒和 1 次的那一秒在视觉上没区别
+        bar.style.height = `${Math.max(2, (buckets[i] / max) * 100)}%`;
+        bar.title = fill(t.chart.barTitle, { n: i + 1, count: buckets[i] });
+        fragment.appendChild(bar);
+      }
+      chartHost.replaceChildren(fragment);
+
+      setText(el('chart-left'), t.chart.left);
+      setText(el('chart-right'), fill(t.chart.right, { seconds: bucketCount, max }));
+    }
+
+    // ---- 结算 ----
+
+    function finish(): void {
+      stopTicker?.();
+      stopTicker = null;
+      running = false;
+      // 结算后先锁一小段,让人看清成绩 —— 理由见 `RESTART_LOCK_MS`
+      lockUntil = performance.now() + RESTART_LOCK_MS;
+      pad?.setAttribute('data-running', 'false');
+      document.documentElement.classList.remove('is-testing');
+      setText(toggleButton, t.reset);
+
+      live?.setAttribute('hidden', '');
+      over?.removeAttribute('hidden');
+      setText(el('over-count'), String(clickTimes.length));
+
+      const stats = computeCps(clickTimes, { durationMs });
+      setStat('clicks', String(clickTimes.length));
+      setStat('average', stats ? format(stats.average, 2) : '0');
+      setStat('peak', stats ? String(stats.peak) : '0');
+
+      const previousBest = loadBest(BEST_KEY);
+      const isRecord = Boolean(
+        stats && stats.peak > 0 && (previousBest === null || stats.peak > previousBest),
+      );
+      if (stats && stats.peak > 0) saveBest(BEST_KEY, stats.peak);
+
+      const best = loadBest(BEST_KEY);
+      setStat('best', best === null ? '—' : String(best));
+      setHint('best', isRecord ? t.bestRecord : t.bestPlain);
+
+      renderChart();
+    }
+
+    // ---- 计时 ----
+
+    function tick(): void {
+      const elapsed = performance.now() - startedAt;
+      const remaining = Math.max(0, durationMs - elapsed);
+
+      // 实时数字用**已过时间**算,而不是等结算,否则跑到一半看不到进度
+      const cps = elapsed > 0 ? (clickTimes.length / elapsed) * 1000 : 0;
+      setText(el('live-count'), String(clickTimes.length));
+      setText(
+        el('live-meta'),
+        fill(t.liveMeta, { left: (remaining / 1000).toFixed(1), cps: cps.toFixed(1) }),
+      );
+
+      setStat('clicks', String(clickTimes.length));
+      setStat('average', cps.toFixed(2));
+
+      if (remaining <= 0) finish();
+    }
+
+    /**
+     * 开始一轮。
+     *
+     * `atMs` 由**触发起始的那一次点击**传进来(见下面的 pointerdown),这样第一下
+     * 点击的偏移正好是 0,而且这一下本身也计入成绩。不传时退回 `performance.now()`。
+     *
+     * 这里必须是**事件自己的时刻**而不是现取 `performance.now()`:`event.timeStamp`
+     * 和 `performance.now()` 同源、可以直接相减,但后取的会晚于事件发生的时刻,
+     * 于是第一下的偏移变成负数。
+     */
+    function start(atMs?: number): void {
+      clickTimes = [];
+      startedAt = atMs ?? performance.now();
+      running = true;
+
+      pad?.setAttribute('data-running', 'true');
+      document.documentElement.classList.add('is-testing');
+      hint?.setAttribute('hidden', '');
+      live?.removeAttribute('hidden');
+      over?.setAttribute('hidden', '');
+      // 测试中这个钮是"取消",所以**不能**像早先那样 disable —— 那会让人中途退不出来
+      setText(toggleButton, t.cancel);
+
+      setStat('clicks', '0');
+      setStat('average', '0');
+      setStat('peak', '0');
+      chartHost?.replaceChildren();
+
+      stopTicker?.();
+      stopTicker = createTicker(80, tick);
+    }
+
+    function reset(): void {
+      stopTicker?.();
+      stopTicker = null;
+      running = false;
+      clickTimes = [];
+      // 这是人主动按的,不该再锁着:重置完立刻点测试面应当马上开局
+      lockUntil = 0;
+
+      pad?.setAttribute('data-running', 'false');
+      document.documentElement.classList.remove('is-testing');
+      hint?.removeAttribute('hidden');
+      live?.setAttribute('hidden', '');
+      over?.setAttribute('hidden', '');
+      setText(toggleButton, t.reset);
+
+      for (const id of ['average', 'peak']) setStat(id, '—');
+      setStat('clicks', '0');
+      const best = loadBest(BEST_KEY);
+      setStat('best', best === null ? '—' : String(best));
+      setHint('best', t.bestPlain);
+      chartHost?.replaceChildren();
+      setText(el('chart-left'), '—');
+      setText(el('chart-right'), '—');
+    }
+
+    // ---- 交互 ----
+
+    /*
+     * 这个钮不再负责"开始"——开始交给测试面本身,点一下就开始连点,少一步。
+     * 它现在只剩一件事:把状态清回起点。测试中按下是"取消",有成绩时按下是
+     * "重置",两者收尾是同一套,所以共用 `reset()`。
+     */
+    toggleButton?.addEventListener('click', () => reset());
+
+    /**
+     * 只认左键,而且只认**在测试面上按下**的那一次。
+     *
+     * 用 `pointerdown` 的 `event.button === 0` 而不是 `mousedown`:指针事件是
+     * 这个站上其他页面统一在用的那一套,而且 `button === 0` 在所有实现里都
+     * 确定地表示左键(`buttons` 的位序就不一样了,中键和右键是反的)。
+     * 每次按下只会派发一次 `pointerdown`,所以不存在重复计数。
+     *
+     * **空闲时按下就开局**,而且这一下同时算作第一次点击 —— 先把计时起点定成
+     * 这一下的时刻,再按同一时刻记进 `clickTimes`,偏移正好是 0。反过来先
+     * `start()` 再由它取 `performance.now()` 的话,起点会晚于这一下,偏移就成了负数。
+     *
+     * 唯一的例外是刚结算完的那一小段(`RESTART_LOCK_MS`):那时手还在惯性连点,
+     * 由着它开局的话成绩根本来不及看。
+     */
+    pad?.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+
+      if (!running) {
+        // 刚结算完的余韵里,手还在惯性连点 —— 那几下不算"想再来一轮",
+        // 丢掉它们,成绩才留得住。锁定期一到,点击恢复成开局。
+        if (performance.now() < lockUntil) return;
+        start(event.timeStamp);
+      }
+
+      // 用事件的时刻而不是处理函数里的 `performance.now()`:连点很容易让浏览器
+      // 把好几次按下攒进同一个任务里派发,那时 `performance.now()` 的差会塌到 0,
+      // 一秒窗口里能塞进的次数就被虚报了。`event.timeStamp` 与 `performance.now()`
+      // 同源,可以直接和 `startedAt` 相减。
+      const offset = event.timeStamp - startedAt;
+
+      // 计时到点由 ticker 每 80ms 结算一次,所以截止之后、`finish()` 之前落进来的
+      // 点击会被顺手记下 —— 那几下**不在这一轮的时间窗里**,计进去就是实打实的
+      // 虚报(点得越密越明显)。窗口外的直接丢。
+      if (offset > durationMs) return;
+      clickTimes.push(offset);
+    });
+
+    // 连点很容易连带触发文字选中与拖拽,两样都会打断节奏
+    pad?.addEventListener('dragstart', (event) => event.preventDefault());
+    pad?.addEventListener('dblclick', (event) => event.preventDefault());
+
+    reset();
+
+    window.addEventListener('pagehide', () => {
+      stopTicker?.();
+      document.documentElement.classList.remove('is-testing');
+    });
+  </script>
+</BaseLayout>
