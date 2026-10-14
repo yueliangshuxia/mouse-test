@@ -156,9 +156,17 @@ describe('slug 与页面文件', () => {
 });
 
 describe('工具箱页', () => {
-  /** 剥掉注释,免得注释里提到的名字被当成"代码引用了它" */
+  /**
+   * 剥掉注释,免得注释里提到的名字被当成"代码引用了它"。
+   *
+   * **读的是组件,不是页面文件。** 这一页做双语时主体搬进了
+   * `components/pages/Toolbox.astro`,而 `src/pages/toolbox.astro` 只剩三行
+   * (中英两个路由各引它一次)。**判据跟着页面走** —— 和这条 describe 里
+   * 「每一件都有预览图形」那条从 `FUN_TOOLS` 改成 `NAV.dropdown` 是同一个处理:
+   * 页面搬了家而判据没跟着搬,这条用例就会守着一个空壳,永远为真。
+   */
   function toolboxSource(): string {
-    return readFileSync(fileURLToPath(new URL('src/pages/toolbox.astro', ROOT)), 'utf8')
+    return readFileSync(fileURLToPath(new URL('src/components/pages/Toolbox.astro', ROOT)), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/\/\/[^\n]*/g, '');

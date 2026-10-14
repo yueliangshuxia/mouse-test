@@ -1,0 +1,949 @@
+---
+/*
+ * DPI 测试页的**主体**。两个薄路由引它:中文的 `/dpi-test/` 和英文的 `/en/dpi-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 三处句子里嵌着节点的,都在这里拆开
+ *
+ * 目录里的句子一律是**完整的**(翻译的人要先看到整句),而模板里那几处中间住着
+ * 一个由脚本写的节点(比值那两个 `<span>`、提示条里那个 `<strong>`),所以按占位符
+ * 把它切开、把节点嵌回去 —— 句子的顺序仍然只有目录那一份。逐条见下面各处的注释。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { CM_PER_INCH, DPI_NOISE_BAND, STANDARD_DPI } from '../../lib/analysis';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.dpi;
+
+/**
+ * 默认要推的距离。
+ *
+ * **1 厘米不是随手填的,是被屏幕宽度逼出来的。** 鼠标每移动一英寸产生 DPI 个
+ * 计数,系统 1:1 映射成光标在屏幕上走的像素 —— 800 DPI 推 10 厘米,光标要走
+ * 3150 像素,而一屏 1920 的窗口可用宽度也就 1800 上下。顶到边光标就不动了,
+ * 量到的距离被悄悄截短。所以先拿短距离测出一个大致值,再按结果告诉用户
+ * 这只鼠标最多能推多远。详见正文和 FAQ。
+ */
+const DEFAULT_CM = 1;
+
+/** 这个偏差落在本页自身的误差里,说明不了鼠标偏没偏 */
+const NOISE_PERCENT = Math.round(DPI_NOISE_BAND * 100);
+
+/**
+ * `stripHint` 中间那个 `\n` 就是原文的 `<br />`。整句留在**一个键**里(拆开之后
+ * 翻译的人看不到完整的句子),在这里按 `\n` 拆回两行 —— 直接整句渲染的话,它会被
+ * HTML 折成一个空格,读起来也通顺,但那道换行就静默地没了。
+ */
+const stripLines = t.stripHint.split('\n');
+
+/**
+ * 结果里那行偏差。`compareMeta` 给的是**整句**(`标称 {nominal} · 偏差 {delta}`),
+ * 而模板里那两个值各自住在一个 `<span id="cmp-nominal">` / `<span id="cmp-delta">`
+ * 里、由脚本分别写 —— 所以在两个占位符处把句子切开,把两个 span 嵌回去。
+ */
+const [cmpHead, cmpTail] = t.compareMeta.split('{nominal}');
+const [cmpMid, cmpEnd] = cmpTail.split('{delta}');
+
+/**
+ * 测量中那条提示条同理:整句在目录里(`toastMeta`),而 `{cm}` 那个数住在一个
+ * `<strong id="toast-cm">` 里由脚本写 —— 在占位符处切开。
+ */
+const [toastHead, toastTail] = t.toastMeta.split('{cm}');
+
+/**
+ * 参考档位表第三列取哪一句。
+ *
+ * **键对应的是标称值区间,不是档位值** —— 区间本身是结构,住在页面里;文案在目录
+ * (`referenceUses`)里。
+ */
+function useFor(dpi: number): string {
+  if (dpi <= 800) return t.referenceUses.office;
+  if (dpi <= 1600) return t.referenceUses.game;
+  if (dpi <= 3200) return t.referenceUses.highRes;
+  return t.referenceUses.driver;
+}
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: faqText(fill(item.a, { noisePercent: NOISE_PERCENT })),
+        },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="dpi-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['dpi-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['dpi-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <h2>{t.beforeHeading}</h2>
+  <ol class="steps">
+    {t.steps.map((step) => <li set:html={faqHtml(step)} />)}
+  </ol>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <label class="field">
+      <span class="field__label">{t.fields.distance}</span>
+      <input
+        type="number"
+        id="distance"
+        min="0.5"
+        max="50"
+        step="0.5"
+        value={DEFAULT_CM}
+        inputmode="decimal"
+      />
+    </label>
+    <label class="field">
+      <span class="field__label">{t.fields.nominal}</span>
+      <input type="number" id="nominal" placeholder="800" min="1" step="1" inputmode="numeric" />
+    </label>
+    <label class="field">
+      <span class="field__label">{t.fields.scale}</span>
+      <select id="scale"></select>
+    </label>
+    <button type="button" id="reset">{t.reset}</button>
+  </div>
+  <p class="test-hint" id="distance-note"></p>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well dpi-pad" id="pad" data-phase="idle">
+        <!--
+          起点带。**右边那条虚线是这一页唯一一个能拿物理世界去对的记号** ——
+          用户把尺子的 0 刻度对上它,再点这一带设起点。所以它在测量的整个过程里
+          都留着(参考站在开始之后把它整个撤掉了,那条对齐线也跟着没了)。
+        -->
+        <div class="dpi-strip" id="strip">
+          <span class="dpi-strip__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <circle cx="12" cy="12" r="6.5"></circle>
+              <path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22"></path>
+            </svg>
+          </span>
+        </div>
+
+        <p class="dpi-hint">
+          {stripLines[0]}<br />
+          {stripLines[1]}
+        </p>
+
+        <p class="dpi-toast" id="toast" data-edge="false">
+          <i class="dpi-toast__dot" aria-hidden="true"></i>
+          <span class="dpi-toast__text">
+            {toastHead}<strong id="toast-cm">{DEFAULT_CM}</strong>{toastTail}
+          </span>
+          <span class="dpi-toast__edge">{t.toastEdge}</span>
+        </p>
+
+        <svg class="dpi-link" aria-hidden="true"><line x1="0" y1="0" x2="0" y2="0"></line></svg>
+        <span class="dpi-mark dpi-mark--start" id="mark-start"></span>
+        <span class="dpi-mark dpi-mark--now" id="mark-now"></span>
+        <span class="dpi-px" id="px-label">0 px</span>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">{t.verdictLabel}</div>
+          <div>
+            <span class="verdict__value" id="dpi-main">—</span><span class="verdict__unit">DPI</span>
+          </div>
+          <div class="verdict__compare" id="dpi-compare" hidden>
+            {cmpHead}<span id="cmp-nominal">—</span>{cmpMid}<span id="cmp-delta">—</span>{cmpEnd}
+          </div>
+          <div class="verdict__note" id="dpi-note">{t.noteIdle}</div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="tier-badge">{t.badges.idle}</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="pixels" label={t.stats.pixels.label} unit="px" hint={t.stats.pixels.hint} />
+        <StatPanel id="duration" label={t.stats.duration.label} unit="ms" hint={t.stats.duration.hint} />
+        <StatPanel id="speed" label={t.stats.speed.label} unit="px/s" hint={t.stats.speed.hint} />
+        <StatPanel id="drift" label={t.stats.drift.label} unit="px" hint={t.stats.drift.hint} />
+      </div>
+    </div>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.cpiHeading}</h2>
+    <p set:html={faqHtml(t.cpiBody)} />
+
+    <h2>{t.referenceHeading}</h2>
+    <p set:html={faqHtml(t.referenceLede)} />
+    <table class="ref-table ref-table--kv">
+      <thead>
+        <tr>
+          <th>{t.referenceColumns.tier}</th>
+          <th>{t.referenceColumns.counts}</th>
+          <th>{t.referenceColumns.use}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          STANDARD_DPI.map((dpi) => (
+            <tr data-ref-dpi={dpi}>
+              <td>{fill(t.referenceTier, { dpi })}</td>
+              <td>{(dpi / CM_PER_INCH).toFixed(0)}</td>
+              <td>{useFor(dpi)}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>{t.reachHeading}</h2>
+    <p set:html={faqHtml(t.reachBody)} />
+    <p set:html={faqHtml(t.reachTrial)} />
+
+    <h2>{t.errorsHeading}</h2>
+    <ul>
+      {t.errors.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(fill(item.a, { noisePercent: NOISE_PERCENT }))} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .dpi-pad {
+      /*
+       * **240 → 320(2026-10-14)。** 两个理由:
+       *
+       * ① 工作台的右列(判定 + 四格读数)实测 **486px 高**,而左列只有 240 ——
+       *    **左边下面空出 246px**。加高到 320 之后差缩到 166。
+       * ② 这一页的测试面本来就要"把指针推出去",高一点对那个手势是好事:
+       *    起点带、两个标记、连线都在里面画,空间富余一些。
+       *
+       * 它不影响量到的数(`ruler.ts` 用的是原始 `clientX`)。
+       */
+      height: 320px;
+      cursor: crosshair;
+    }
+
+    /* ---- 起点带 ---- */
+
+    .dpi-strip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 96px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* 那条虚线就是"把尺子的 0 刻度对上去"的对齐线。它不是装饰 */
+      border-right: 1px dashed var(--border-strong);
+      background: color-mix(in srgb, var(--accent) 7%, transparent);
+    }
+
+    /* 开测之后带子留着(对齐线得一直在),但不再扮成一个按钮 */
+    .dpi-pad:not([data-phase='idle']) .dpi-strip {
+      background: transparent;
+      border-right-color: var(--border);
+    }
+
+    .dpi-pad[data-phase='idle'] .dpi-strip {
+      cursor: pointer;
+    }
+
+    .dpi-pad[data-phase='idle'] .dpi-strip:hover {
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+    .dpi-strip__icon {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--border-strong);
+      color: var(--accent);
+    }
+
+    .dpi-strip__icon svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    .dpi-pad:not([data-phase='idle']) .dpi-strip__icon {
+      opacity: 0.35;
+    }
+
+    /* ---- 空态提示 ---- */
+
+    /* 可见性一律由 `data-phase` 管,**不用 `[hidden]`** —— 任何 `display` 声明都会
+       压掉浏览器默认的 `[hidden] { display: none }`,这个坑 global.css 里的
+       `.test-area__hint[hidden]` 就是为它补的。一个属性管全部就不会漏。 */
+    .dpi-hint {
+      position: absolute;
+      inset: 0 0 0 96px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 0 20px;
+      text-align: center;
+      color: var(--text-faint);
+      font-size: 0.95rem;
+      line-height: 1.8;
+      pointer-events: none;
+    }
+
+    .dpi-pad:not([data-phase='idle']) .dpi-hint {
+      display: none;
+    }
+
+    /* ---- 测量中的提示条 ---- */
+
+    .dpi-toast {
+      position: absolute;
+      top: 12px;
+      left: 96px;
+      right: 0;
+      width: max-content;
+      max-width: calc(100% - 112px);
+      margin: 0 auto;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 16px;
+      border-radius: var(--radius-pill);
+      background: var(--well-raised);
+      border: 1px solid var(--well-border-strong);
+      color: var(--text);
+      font-size: 0.85rem;
+      pointer-events: none;
+    }
+
+    .dpi-pad[data-phase='measuring'] .dpi-toast {
+      display: flex;
+    }
+
+    .dpi-toast__dot {
+      flex: none;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .dpi-toast__edge {
+      display: none;
+    }
+
+    /* 顶到屏幕边:换成朱砂。这是全站唯一一个"这个测量已经废了"的提示位 */
+    .dpi-toast[data-edge='true'] {
+      border-color: var(--danger);
+    }
+
+    .dpi-toast[data-edge='true'] .dpi-toast__dot {
+      background: var(--danger);
+    }
+
+    .dpi-toast[data-edge='true'] .dpi-toast__text {
+      display: none;
+    }
+
+    .dpi-toast[data-edge='true'] .dpi-toast__edge {
+      display: inline;
+    }
+
+    /* ---- 两个标记 + 连线 + px 标签 ---- */
+
+    /*
+     * 位置全部由脚本写成 `transform`,**不写 left/top 数值** —— 跟随光标时
+     * 那是每帧一次布局,transform 只走合成。
+     * 这四个节点由**模板**渲染(不是 createElement),所以页面 <style> 的 cid
+     * 对得上,不需要 `:global()`。见 CLAUDE.md 里那条 cid 陷阱。
+     */
+    .dpi-mark {
+      position: absolute;
+      left: 0;
+      top: 0;
+      display: none;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .dpi-pad[data-phase='measuring'] .dpi-mark,
+    .dpi-pad[data-phase='done'] .dpi-mark {
+      display: block;
+    }
+
+    .dpi-mark--start {
+      width: 14px;
+      height: 14px;
+      margin: -7px 0 0 -7px;
+      background: var(--accent);
+      /* 一圈底色,让连线不要贴到圆点上 */
+      box-shadow: 0 0 0 3px var(--well);
+    }
+
+    .dpi-mark--now {
+      width: 30px;
+      height: 30px;
+      margin: -15px 0 0 -15px;
+      border: 2px solid var(--accent);
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+
+    /* 结束之后两个标记都冻在原地;把跟随的那个收淡一点,好和"还在动"区分开 */
+    .dpi-pad[data-phase='done'] .dpi-mark--now {
+      background: transparent;
+      opacity: 0.6;
+    }
+
+    .dpi-link {
+      position: absolute;
+      inset: 0;
+      display: none;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .dpi-pad[data-phase='measuring'] .dpi-link,
+    .dpi-pad[data-phase='done'] .dpi-link {
+      display: block;
+    }
+
+    .dpi-link line {
+      stroke: var(--accent);
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .dpi-px {
+      position: absolute;
+      left: 0;
+      top: 0;
+      display: none;
+      width: 60px;
+      margin: 22px 0 0 -30px;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      pointer-events: none;
+    }
+
+    .dpi-pad[data-phase='measuring'] .dpi-px,
+    .dpi-pad[data-phase='done'] .dpi-px {
+      display: block;
+    }
+
+    /* ---- 结果里那行偏差 ---- */
+
+    .verdict__compare {
+      margin-top: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 显式写,不指望浏览器默认那条 —— 见上面 dpi-hint 的注释 */
+    .verdict__compare[hidden] {
+      display: none;
+    }
+
+    /* 测量中锁住两个输入框:否则框里显示的数字和这一次量到的对不上 */
+    input#distance:disabled,
+    input#nominal:disabled {
+      opacity: 0.55;
+    }
+
+    /* ---- 窄档 ---- */
+
+    @media (max-width: 760px) {
+      .dpi-strip {
+        width: 68px;
+      }
+
+      .dpi-hint {
+        inset: 0 0 0 68px;
+        font-size: 0.875rem;
+      }
+
+      .dpi-toast {
+        left: 68px;
+        max-width: calc(100% - 80px);
+        padding: 6px 12px;
+        font-size: 0.8rem;
+      }
+    }
+  </style>
+
+  <script>
+    import {
+      classifyDpi,
+      dpiDeviation,
+      DPI_NOISE_BAND,
+      estimateDpi,
+      maxRulerDistanceCm,
+    } from '../../lib/analysis';
+    import { createRulerMeasurement, type RulerResult } from '../../lib/ruler';
+    import {
+      el,
+      format,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.dpi;
+
+    // 这一页的结论是"像素 ÷ 距离",只读坐标,**一个时间戳都不读**。
+    // 所以四条与时间戳精度有关的告警一条都不该发 —— 判据和手稳度页一样。
+    mountCapabilityNotices(el('cap-notice'), { timing: false });
+
+    // 右键菜单 / 中键自动滚动会打断"沿尺子推"的手势。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    /** frontmatter 变量在 <script> 里不存在,这几个数只能各写一份 */
+    const DEFAULT_CM = 1;
+    const MIN_CM = 0.5;
+    const MAX_CM = 50;
+    /** 低于它就还是"试测量",提示语换一套 */
+    const TRIAL_CM = 2;
+    /** 建议距离留的余量:推到贴边时,在那个位置上点准一下本身就很别扭 */
+    const SUGGEST_MARGIN = 0.8;
+    /** 光标离屏幕边界少于这么多像素就算"顶到边了" */
+    const EDGE_PX = 1;
+    /** px 标签要占的高度,标记的 y 让出这么多,免得标签被 overflow 裁掉 */
+    const LABEL_ROOM = 46;
+
+    const pad = el('pad');
+    const strip = el('strip');
+    const toast = el('toast');
+    const startMark = el('mark-start');
+    const nowMark = el('mark-now');
+    const pxLabel = el('px-label');
+    const linkLine = document.querySelector<SVGLineElement>('.dpi-link line');
+    const distanceInput = el('distance') as HTMLInputElement | null;
+    const nominalInput = el('nominal') as HTMLInputElement | null;
+    const compareRow = el('dpi-compare');
+
+    type Phase = 'idle' | 'measuring' | 'done';
+
+    let phase: Phase = 'idle';
+    /** 这一次量的是多长。**在钉起点那一刻定下来** —— 中途改输入框不影响这一次 */
+    let measuredCm = DEFAULT_CM;
+    let scale = window.devicePixelRatio || 1;
+    let atEdge = false;
+
+    function clamp(value: number, lo: number, hi: number): number {
+      return Math.min(Math.max(value, lo), hi);
+    }
+
+    // ---- 显示缩放 ----
+
+    /**
+     * 缩放候选值。
+     *
+     * 首项是系统实测的 `devicePixelRatio`。这个值同时包含**系统缩放**和
+     * **浏览器缩放**两层,页面无法把两者分开——所以注明了"按 Ctrl+0 复位"。
+     */
+    function buildScaleOptions(): void {
+      const select = el('scale') as HTMLSelectElement | null;
+      if (!select) return;
+
+      const detected = window.devicePixelRatio || 1;
+      const candidates = [detected, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+      const seen = new Set<number>();
+
+      for (const value of candidates) {
+        const rounded = Math.round(value * 100) / 100;
+        if (seen.has(rounded)) continue;
+        seen.add(rounded);
+
+        const option = document.createElement('option');
+        option.value = String(rounded);
+        option.textContent =
+          rounded === detected ? fill(t.scaleDetected, { scale: rounded }) : `${rounded}×`;
+        select.appendChild(option);
+      }
+
+      select.value = String(detected);
+    }
+
+    buildScaleOptions();
+
+    el('scale')?.addEventListener('change', (event) => {
+      const value = Number((event.target as HTMLSelectElement).value);
+      if (Number.isFinite(value) && value > 0) scale = value;
+    });
+
+    // ---- 目标距离 ----
+
+    function readDistance(): number {
+      const raw = Number(distanceInput?.value);
+      if (!Number.isFinite(raw) || raw < MIN_CM) return DEFAULT_CM;
+      return Math.min(raw, MAX_CM);
+    }
+
+    function nominalFromInput(): number | null {
+      const raw = Number(nominalInput?.value);
+      return Number.isFinite(raw) && raw > 0 ? raw : null;
+    }
+
+    function renderDistanceNote(): void {
+      const cm = readDistance();
+      setText(
+        el('distance-note'),
+        cm < TRIAL_CM ? t.distanceNotes.trial : t.distanceNotes.full,
+      );
+      setText(el('toast-cm'), String(cm));
+    }
+
+    distanceInput?.addEventListener('input', renderDistanceNote);
+    distanceInput?.addEventListener('change', () => {
+      const cm = readDistance();
+      if (distanceInput) distanceInput.value = String(cm);
+      renderDistanceNote();
+    });
+
+    renderDistanceNote();
+
+    // ---- 画面 ----
+
+    let anchorPoint = { x: 0, y: 0 };
+    let nowPoint = { x: 0, y: 0 };
+
+    /**
+     * 把指针的屏幕坐标换成面板内的坐标。
+     *
+     * y **只用于画面**,所以钳进面板是允许的(不然那枚 px 标签会被
+     * `overflow: hidden` 裁掉)。**量到的数一点没动** —— `ruler.ts` 用的是原始
+     * `clientX`,和这里无关。
+     */
+    function localPoint(event: { clientX: number; clientY: number }): { x: number; y: number } | null {
+      const rect = pad?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return null;
+      return {
+        x: clamp(event.clientX - rect.left, 0, rect.width),
+        y: clamp(event.clientY - rect.top, 18, Math.max(18, rect.height - LABEL_ROOM)),
+      };
+    }
+
+    function draw(): void {
+      if (startMark) startMark.style.transform = `translate(${anchorPoint.x}px, ${anchorPoint.y}px)`;
+      if (nowMark) nowMark.style.transform = `translate(${nowPoint.x}px, ${nowPoint.y}px)`;
+      if (pxLabel) pxLabel.style.transform = `translate(${nowPoint.x}px, ${nowPoint.y}px)`;
+      if (linkLine) {
+        linkLine.setAttribute('x1', String(anchorPoint.x));
+        linkLine.setAttribute('y1', String(anchorPoint.y));
+        linkLine.setAttribute('x2', String(nowPoint.x));
+        linkLine.setAttribute('y2', String(nowPoint.y));
+      }
+    }
+
+    /**
+     * 光标是不是顶到屏幕边了。
+     *
+     * 判据用 `screenX` 对屏幕宽,**不看窗口** —— 窗口没最大化时 `clientX` 会跑到
+     * `[0, innerWidth]` 之外,那不代表顶到了边。多显示器上把指针移到另一块屏时
+     * 这一条可能误报,而那时候鼠标照旧能继续推,用户看 px 还在涨就会知道不用理它。
+     */
+    function isAtScreenEdge(event: PointerEvent): boolean {
+      return event.screenX <= EDGE_PX || event.screenX >= window.screen.width - EDGE_PX;
+    }
+
+    // ---- 读数 ----
+
+    function resetReadouts(): void {
+      for (const id of ['pixels', 'duration', 'speed', 'drift']) setStat(id, '—');
+      setText(el('dpi-main'), '—');
+      setBadge(el('tier-badge'), t.badges.idle, 'idle');
+      setText(el('dpi-note'), t.noteIdle);
+      if (compareRow) compareRow.hidden = true;
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-dpi]')) {
+        row.dataset.current = 'false';
+      }
+    }
+
+    function setInputsDisabled(next: boolean): void {
+      if (distanceInput) distanceInput.disabled = next;
+      if (nominalInput) nominalInput.disabled = next;
+    }
+
+    function showResult(result: RulerResult): void {
+      setStat('pixels', format(result.pixels, 0));
+      setStat('duration', format(result.durationMs, 0));
+      setStat('speed', format(result.speedPxPerSec, 0));
+      setStat('drift', format(result.crossAxisDriftPx, 0));
+
+      const dpi = estimateDpi({ pixels: result.pixels, distanceCm: measuredCm, scale });
+      setText(el('dpi-main'), format(dpi, 0));
+
+      if (dpi === null) {
+        setBadge(el('tier-badge'), t.badges.failed, 'idle');
+        setText(el('dpi-note'), t.noteInsufficient);
+        if (compareRow) compareRow.hidden = true;
+        return;
+      }
+
+      const tier = classifyDpi(dpi);
+      setBadge(
+        el('tier-badge'),
+        tier === null ? t.badges.unknownTier : fill(t.badges.tier, { tier }),
+        tier === null ? 'fair' : 'good',
+      );
+
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-dpi]')) {
+        row.dataset.current =
+          tier !== null && Number(row.dataset.refDpi) === tier ? 'true' : 'false';
+      }
+
+      const notes: string[] = [
+        fill(t.noteResult, {
+          cm: measuredCm,
+          pixels: format(result.pixels, 0),
+          seconds: format(result.durationMs / 1000, 2),
+        }),
+      ];
+
+      // 推歪了会让净位移小于实际路程,结果系统性偏低 —— 这是最该提示的一项
+      if (result.crossAxisDriftPx > result.pixels * 0.15) {
+        notes.push(fill(t.noteDrift, { px: format(result.crossAxisDriftPx, 0) }));
+      }
+
+      // 标称对比。**只算给你看,不判通过与否** —— 见 dpiDeviation 的文件注释
+      const nominal = nominalFromInput();
+      const deviation = dpiDeviation(dpi, nominal);
+      if (deviation === null || nominal === null) {
+        if (compareRow) compareRow.hidden = true;
+      } else {
+        const pct = deviation * 100;
+        const signed = `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${format(Math.abs(pct), 1)}%`;
+        if (compareRow) compareRow.hidden = false;
+        setText(el('cmp-nominal'), format(nominal, 0));
+        setText(el('cmp-delta'), signed);
+
+        // 1 毫米在这一次的距离上占多少 —— 本页误差的主项
+        const perMm = format((0.1 / measuredCm) * 100, 0);
+        if (Math.abs(deviation) <= DPI_NOISE_BAND) {
+          notes.push(
+            fill(t.noteDeviationWithin, { delta: signed, cm: measuredCm, perMm }),
+          );
+        } else {
+          notes.push(fill(t.noteDeviationOver, { delta: signed }));
+        }
+      }
+
+      // 这一次量的是多长、下一次该量多长
+      const availablePx = Math.max(0, window.innerWidth - 24);
+      const maxCm = maxRulerDistanceCm({
+        dpi,
+        availablePx,
+        scale,
+        margin: SUGGEST_MARGIN,
+      });
+      if (maxCm !== null && maxCm > measuredCm * 1.5) {
+        notes.push(
+          fill(t.noteMaxDistance, {
+            dpi: format(dpi, 0),
+            px: format(availablePx, 0),
+            maxCm: format(maxCm, 1),
+            suggestCm: Math.floor(maxCm),
+          }),
+        );
+      }
+
+      setText(el('dpi-note'), notes.join(' '));
+    }
+
+    // ---- 测量 ----
+
+    const ruler = createRulerMeasurement({
+      // 起止都是点出来的,不做任何静止判定 —— 推的过程中停一下不该被当成推完了
+      trigger: 'manual',
+      onProgress: (current, event) => {
+        setStat('pixels', format(current.pixels, 0));
+        setStat('duration', format(current.durationMs, 0));
+        setStat('speed', format(current.speedPxPerSec, 0));
+        setText(pxLabel, `${format(current.pixels, 0)} px`);
+
+        const next = localPoint(event);
+        if (next) {
+          nowPoint = next;
+          draw();
+        }
+
+        const edge = isAtScreenEdge(event);
+        if (edge !== atEdge) {
+          atEdge = edge;
+          toast?.setAttribute('data-edge', String(edge));
+        }
+      },
+      onFinish: (result) => {
+        phase = 'done';
+        pad?.setAttribute('data-phase', 'done');
+        setInputsDisabled(false);
+
+        if (!result) {
+          resetReadouts();
+          setBadge(el('tier-badge'), t.badges.noMove, 'idle');
+          setText(el('dpi-note'), t.noteNoMove);
+          return;
+        }
+        showResult(result);
+      },
+    });
+
+    function finish(): void {
+      if (phase === 'measuring') ruler.finish();
+    }
+
+    function reset(): void {
+      ruler.cancel();
+      phase = 'idle';
+      atEdge = false;
+      pad?.setAttribute('data-phase', 'idle');
+      toast?.setAttribute('data-edge', 'false');
+      setInputsDisabled(false);
+      setText(pxLabel, '0 px');
+      resetReadouts();
+    }
+
+    pad?.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+
+      if (phase === 'measuring') {
+        // 在面板里点一下就结束。**同一个事件不能再冒到 window 上** ——
+        // 那儿还挂着一条"点面板外面也结束",不掐断会被记成两次
+        event.stopPropagation();
+        finish();
+        return;
+      }
+
+      // 只有起点带能开局:别处点一下不该把一次测量莫名其妙地点起来
+      if (!strip?.contains(event.target as Node)) return;
+
+      const point = localPoint(event);
+      if (!point) return;
+
+      measuredCm = readDistance();
+      ruler.anchorAt(event.clientX, event.clientY);
+      anchorPoint = point;
+      nowPoint = point;
+      draw();
+
+      phase = 'measuring';
+      atEdge = false;
+      pad?.setAttribute('data-phase', 'measuring');
+      toast?.setAttribute('data-edge', 'false');
+      setText(pxLabel, '0 px');
+      setInputsDisabled(true);
+      resetReadouts();
+      setBadge(el('tier-badge'), t.badges.measuring, 'idle');
+      setText(el('dpi-note'), fill(t.noteMeasuring, { cm: measuredCm }));
+
+      // 别让这同一下冒到 window 上,被那条"点别处结束"的监听当成终点
+      event.stopPropagation();
+    });
+
+    /*
+     * 第二下**不限定在面板里**:用户把指针推出面板是常事,而"点面板外面就结束不了"
+     * 会把人卡住。落在控件上的一律放行 —— 这条判据和 ui.ts 拦默认行为用的是同一份,
+     * 全站一套。所以点导航、点按钮都不会顺手把测量结算掉。
+     */
+    window.addEventListener('pointerdown', (event) => {
+      if (phase !== 'measuring' || event.button !== 0) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('a, button, input, select, textarea')) return;
+      finish();
+    });
+
+    // 空格是第三条出路。指针飘到哪儿都不影响它
+    window.addEventListener('keydown', (event) => {
+      if (event.code !== 'Space' || phase !== 'measuring') return;
+      event.preventDefault();
+      finish();
+    });
+
+    el('reset')?.addEventListener('click', reset);
+
+    reset();
+    window.addEventListener('pagehide', () => ruler.destroy());
+  </script>
+</BaseLayout>

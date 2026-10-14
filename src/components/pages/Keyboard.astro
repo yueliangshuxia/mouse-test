@@ -1,0 +1,684 @@
+---
+/*
+ * 键盘按键测试页的**主体**。两个薄路由引它:中文的 `/keyboard-test/`
+ * 和英文的 `/en/keyboard-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各写三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 两处这一页特有的
+ *
+ * - **104 枚键帽上的字不来自目录。** `label` 以及日志里"这个键叫什么"都走
+ *   `keyboard-layout.ts` 的 `keyLabel()`,那些字是**物理键帽上印的东西**
+ *   (`Esc` / `F1` / `Space` / `↑` …),两边语言逐字相同 —— 理由写在
+ *   `pages/keyboard.ts` 的文件头。**别把它们搬进目录**,那会凭空多出 208 条
+ *   永远翻译不了的键。
+ * - **井下面那条 notice 里的九处 `<code>` 变成了 `**`。** 判据和 `Button.astro`
+ *   那条完全相同:`faqHtml()` 只认 `**`、而且会把 `<`/`>` 转义掉,留着 `<code>`
+ *   屏幕上会**原样印出标签**,所以取 `**`(权衡记在 `pages/keyboard.ts` 的文件头)。
+ *   这一页的正文章节同样全走 `faqHtml()` + `set:html`。
+ *
+ * **这一页一条站内链接都没有** —— 所以没有 `pageHref()` 的调用点,
+ * 也就没有那个 import(不留死引用)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { ALL_KEYS, MAIN_ROWS, NAV_ROWS, NUMPAD, isGap } from '../../lib/keyboard-layout';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.keyboard;
+
+const KEY_COUNT = ALL_KEYS.length;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="keyboard-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['keyboard-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['keyboard-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={fill(faqHtml(t.lede), { count: KEY_COUNT })} />
+
+  <div id="cap-notice"></div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="keyboard well" id="keyboard">
+        <div class="keyboard__main">
+          {
+            MAIN_ROWS.map((row) => (
+              <div class="kb-row">
+                {row.map((item) =>
+                  isGap(item) ? (
+                    <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
+                  ) : (
+                    <div
+                      class="kb-key"
+                      data-code={item.code}
+                      data-held="false"
+                      data-tested="false"
+                      style={`flex:${item.width ?? 1}`}
+                    >
+                      <span class="kb-key__label">{item.label}</span>
+                      <span class="kb-key__n"></span>
+                    </div>
+                  ),
+                )}
+              </div>
+            ))
+          }
+        </div>
+
+        <div class="keyboard__side">
+          <div class="kb-grid kb-grid--nav">
+            {
+              NAV_ROWS.map((row) => (
+                <div class="kb-row">
+                  {row.map((item) =>
+                    isGap(item) ? (
+                      <div class="kb-gap" style={`flex:${item.width}`} aria-hidden="true" />
+                    ) : (
+                      <div
+                        class="kb-key kb-key--small"
+                        data-code={item.code}
+                        data-held="false"
+                        data-tested="false"
+                        style={`flex:${item.width ?? 1}`}
+                      >
+                        <span class="kb-key__label">{item.label}</span>
+                        <span class="kb-key__n"></span>
+                      </div>
+                    ),
+                  )}
+                </div>
+              ))
+            }
+          </div>
+
+          <div class="kb-grid kb-grid--numpad">
+            {
+              NUMPAD.map((key) => (
+                <div
+                  class="kb-key kb-key--small"
+                  data-code={key.code}
+                  data-held="false"
+                  data-tested="false"
+                  style={`${key.colSpan ? `grid-column: span ${key.colSpan};` : ''}${key.rowSpan ? `grid-row: span ${key.rowSpan};` : ''}`}
+                >
+                  <span class="kb-key__label">{key.label}</span>
+                  <span class="kb-key__n"></span>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+
+      {/*
+        这段「浏览器抢在前面处理掉的组合」原本长在导语和 `.workbench` **之间** ——
+        于是它把整页往下推了一屏,而键盘那块井的右边空着一大片(读数栏比井高)。
+
+        现在它挪到井**下面**,成了舞台里的第二块。这不算新结构:`button-test` 的舞台
+        本来就是「按键示意图 + 采样区」两块,`.workbench__stage` 自己是一列,收得下。
+        视觉上也对 —— 它说的是"这几个键测不到",紧挨着那副键盘比隔着一屏近得多。
+
+        **必须留在 `workbench__stage` 里,不能塞进 `.test-area`** —— 井就是采样面,
+        键盘事件从文档走,但这类"挪进测试区"的改动迟早会踩到那条约束(见 CLAUDE.md)。
+      */}
+      <div class="notice notice--info">
+        <ul>
+          <li set:html={faqHtml(t.noticeBlocked)} />
+          <li set:html={faqHtml(t.noticeFnKeys)} />
+        </ul>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">{t.verdictLabel}</div>
+          <div><span class="verdict__value" id="held">0</span><span class="verdict__unit">{t.verdictUnit}</span></div>
+          <div class="verdict__note" id="held-note">{t.verdictNoteIdle}</div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="state-badge">{t.runtime.badgeIdle}</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="presses" label={t.stats.presses.label} primary hint={t.stats.presses.hint} />
+        <StatPanel id="unique" label={t.stats.unique.label} hint={fill(t.stats.unique.hint, { count: KEY_COUNT })} />
+        <StatPanel id="max-held" label={t.stats.maxHeld.label} unit={t.stats.maxHeld.unit} hint={t.stats.maxHeld.hint} />
+        <StatPanel id="stuck" label={t.stats.stuck.label} hint={t.stats.stuck.hint} />
+      </div>
+
+      {/*
+        重置 和 按键记录 原本长在键盘**下面**,于是要按一下重置得先往下滚一屏 ——
+        而它俩说的正是这块读数栏里的事。现在并进读数栏:列在桌面是并排的,
+        读数栏就在键盘右边、起手第一个视口里,不用滚。
+
+        **`重置` 必须排在 `按键记录` 上面**,不然日志一长(最多 12 条)又把它顶下去。
+      */}
+      <div class="controls">
+        <button type="button" id="reset">{t.reset}</button>
+        <span class="test-hint">
+          {t.controlsHint}
+        </span>
+      </div>
+
+      <h2>{t.logHeading}</h2>
+      <p class="prose tight">{t.logLede}</p>
+      <ul class="log-list" id="log"></ul>
+    </div>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.stepsHeading}</h2>
+    <ol class="steps">
+      {t.steps.map((step) => <li set:html={faqHtml(step)} />)}
+    </ol>
+
+    <h2>{t.boundaryHeading}</h2>
+    {t.boundaryPoints.map((point) => <p set:html={faqHtml(point)} />)}
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /* 底色、边框、圆角由 global.css 的 .well 提供 —— 键帽是"仪器"那一侧的 */
+    .keyboard {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      padding: 16px;
+      /*
+       * 让下面那条 @container 量的是**井自己的内容宽**,而不是视口宽。
+       *
+       * 这里非用容器查询不可:同样一条 `flex: 1 1 520px` 的主键区,井的内容宽
+       * 在视口 900 时是 828px(读数栏被挤到下面去了),到了 1100 反而掉回 614px
+       * (读数栏回到右边)——**不是单调的**,媒体查询表达不了"够宽就并排"。
+       */
+      container-type: inline-size;
+    }
+
+    .keyboard__main {
+      flex: 1 1 520px;
+      min-width: 0;
+    }
+
+    /*
+     * 编辑键区和数字键区**横着并排**,不竖着叠。
+     *
+     * 原来是 `flex-direction: column`:两块各自 180 / 176px 高,叠起来 368px,
+     * 而左边的主键区只有 260px —— 井的高度被这两块撑到 680px,里面空出一大片。
+     * 并排之后取较高的那个(约 180px),整块降到约 490px。
+     *
+     * `flex-wrap: wrap` + `max-width: 100%` 是给窄屏兜底的:两块并排要 332px,
+     * 窄到装不下时自动退回上下两块。**不夹这一下的话 `flex: 0 0 auto`(不收缩)
+     * 会让它直接溢出井外** —— 溢出不会报错,只会让井自己撑宽。
+     */
+    .keyboard__side {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      flex: 0 0 auto;
+      max-width: 100%;
+    }
+
+    /*
+     * 井够宽(内容宽 ≥ 721px)时改回竖着叠 —— 这时它**整块坐在主键区右边**,
+     * 一行就放下了,井只有 402px 高,比并排着掉到第二行(492px)还矮。
+     * 721 = 主键区 520 + 间距 18 + 编辑键/数字键区 183,三个数都是量出来的
+     * (实测:内容宽 688 时还是两行,748 时已经并成一行,721 落在中间)。
+     *
+     * 只在装不下、横竖都得掉到第二行时,并排才是赢的那一方。
+     */
+    @container (min-width: 721px) {
+      .keyboard__side {
+        flex-direction: column;
+      }
+    }
+
+    /*
+     * 井下面那条说明(见模板里的注释)。`.notice` 自带 `margin: 0 0 20px`,
+     * 而舞台是 flex 列 —— **flex 里 margin 不折叠**,那个 20px 会和 `gap: 20px`
+     * 叠成 40px,井和它之间凭空多出一道空隙。这里只收下边距,`gap` 已经管住了间距。
+     */
+    .workbench__stage > .notice {
+      margin-bottom: 0;
+    }
+
+    /*
+     * 读数栏里那个「按键记录」标题:全站 `h2` 带 3.5rem 上边距,那是给
+     * 3000px 长页排节奏用的;**在 386px 宽的读数栏里它变成一道 56px 的空洞**
+     * ——量过,从上一行的说明文字到"按键记录"四个字之间空出 121px。
+     *
+     * 只收上边距,**那条分节线一根不动**:线才是"这里开始是新的一节"的记号
+     * (见 global.css 里 `h2` 那段注释),而 56px 的间距是页面级的呼吸,
+     * 在已经贴着上一行的侧栏里没有呼吸可给。收完是 44px。
+     */
+    .workbench__readout h2 {
+      margin-top: 0;
+    }
+
+    .kb-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+
+    .kb-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .kb-grid--numpad {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-auto-rows: 32px;
+      gap: 4px;
+    }
+
+    .kb-gap {
+      flex: none;
+    }
+
+    .kb-key {
+      /* 右上角那个计数的定位基准 */
+      position: relative;
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 40px;
+      padding: 0 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      text-align: center;
+      overflow: hidden;
+      white-space: nowrap;
+      transition: background 0.05s linear, border-color 0.05s linear;
+      user-select: none;
+    }
+
+    /*
+     * 键帽右上角那个**按下次数**(用户拿参考站提的:「有显示按的次数」)。
+     *
+     * 数从 `summarizeKeyboard(events).perKey` 来 —— **页面不另记计数器**,
+     * 理由写在 `analysis.ts` 那个字段上:键帽上的数和读数栏的「累计按下」
+     * 并排显示,两套计数差一个就穿帮。
+     *
+     * **空字符串 = 不显示。** `setText` 写进去的是 `''` 而不是 `'0'`,
+     * 这里用 `:not(:empty)` 把它收掉 —— 全站那条「没数据不画空槽」落到键帽上
+     * 就是这个样子:一个 0 会被读成"按过,次数是零",而它一次都没被按到过。
+     *
+     * 颜色走 `var(--accent)`,而键帽长在 `.well` 里,所以它自动是磷光绿 ——
+     * 和「按过」那一档同一个色,不需要写死任何值。
+     */
+    .kb-key__n {
+      position: absolute;
+      top: 1px;
+      right: 3px;
+      display: none;
+      font-size: 0.58rem;
+      line-height: 1.2;
+      color: var(--accent);
+    }
+
+    .kb-key__n:not(:empty) {
+      display: block;
+    }
+
+    .kb-key--small {
+      height: 32px;
+      flex: none;
+    }
+
+    /*
+     * 按过的键:字母/数字变成**磷光绿**。
+     *
+     * 原来是 `color: var(--text)` —— 井里 `--text` 是 `#dce5ec`,也就是**白字**。
+     * 用户报的正是这个:「按过之后字母、数字上显示白色」。
+     *
+     * 绿在这里不是"新开一个颜色":键帽本来就长在 `.well` 里(见上面
+     * `class="keyboard well"`),而井里的 `--accent` 就是磷光绿 `#5ed69b`。
+     * 所以这一档**既不新增令牌、也不碰主题** —— 浅色深色下都自动是绿的。
+     */
+    .kb-key[data-tested='true'] {
+      color: var(--accent);
+      border-color: var(--border-strong);
+    }
+
+    /*
+     * 正按着的键:深绿底 + 绿字 + 绿框。**这一档是原来的长相,没动过。**
+     *
+     * 两档必须分得开,`data-tested` 只染字、`data-held` 连底带框一起变。
+     * 两条规则特异度相同(0,2,0),**靠源码顺序分胜负** —— held 必须写在后面。
+     * (held 一定同时是 tested,见 `renderKey()`,所以顺序反了就两档全塌成 tested。)
+     */
+    .kb-key[data-held='true'] {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    @media (max-width: 720px) {
+      .keyboard__main {
+        flex-basis: 100%;
+      }
+
+      .kb-key {
+        height: 34px;
+        font-size: 0.62rem;
+      }
+
+      /* 键帽缩了,右上角那个数也跟着缩一档,否则会盖住键名 */
+      .kb-key__n {
+        font-size: 0.52rem;
+        right: 2px;
+      }
+    }
+  </style>
+
+  <script>
+    import { summarizeKeyboard, type KeyEvent } from '../../lib/analysis';
+    import { ALL_KEYS, keyLabel } from '../../lib/keyboard-layout';
+    import { el, mountCapabilityNotices, setBadge, setStat, setText } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.keyboard;
+
+    // 重新算一遍而不是引用 frontmatter 里的同名变量:Astro 的 `<script>` 会被
+    // 单独打包成外链模块,frontmatter 的变量在那个作用域里根本不存在。
+    const KEY_COUNT = ALL_KEYS.length;
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    /**
+     * 这些键不拦的话,按下时浏览器会做别的事:Tab 会跳走焦点、空格和方向键会滚动页面、
+     * 退格可能触发后退、斜杠和单引号是 Firefox 的快速查找。拦掉它们,测试才连得下去。
+     */
+    const INTERCEPTED = new Set([
+      'Tab',
+      'Space',
+      'Backspace',
+      'Enter',
+      'ArrowUp',
+      'ArrowDown',
+      'ArrowLeft',
+      'ArrowRight',
+      'PageUp',
+      'PageDown',
+      'Home',
+      'End',
+      'Slash',
+      'Quote',
+      'F1',
+      'F3',
+      'F5',
+      'F7',
+    ]);
+
+    const LOG_LIMIT = 12;
+
+    const logHost = el('log');
+
+    /** 按住的键 -> 按下的时刻,用来在松开时算按住时长 */
+    const heldSince = new Map<string, number>();
+
+    /**
+     * 完整的按下/松开序列。所有统计量都从它派生(见 `summarizeKeyboard`),
+     * 页面自己不再另记一套计数器——两套计数迟早会不一致,而"累计按下 42 次"
+     * 和"已触发的键 43 个"同时出现在屏幕上,用户只会认为整个页面都是错的。
+     */
+    const events: KeyEvent[] = [];
+
+    /** 最近若干次按键的展示用记录 */
+    const logEntries: { label: string; holdMs: number | null }[] = [];
+
+    /**
+     * 刷新一个键帽。
+     *
+     * `perKey` 是**可选**的,而且只有传了才去动那个计数格 —— 这一点不是随手写的:
+     * 失焦那条路(`clearHeld`)只按"这个键不再按着"去刷,它手里没有一份当前的
+     * 计数表;要是那种调用也去写计数格,窗口一失焦整块键盘的数字就全被抹成 0 了。
+     * **不传 = 不动那一格**,而不是"当成 0"。
+     */
+    function renderKey(code: string, held: boolean, perKey?: Map<string, number>): void {
+      const node = document.querySelector<HTMLElement>(`.kb-key[data-code="${code}"]`);
+      if (!node) return;
+      node.dataset.held = held ? 'true' : 'false';
+      if (held) node.dataset.tested = 'true';
+
+      const count = node.querySelector<HTMLElement>('.kb-key__n');
+      if (count && perKey) {
+        const n = perKey.get(code) ?? 0;
+        /*
+         * 没按过的键写**空字符串而不是 "0"**。这是全站那条「没数据不画空槽」
+         * 落到键帽上的样子:一个 0 会被读成"这个键按过,次数是零",
+         * 而它其实一次都没被按到过。CSS 那边也是按 `:empty` 收的。
+         */
+        setText(count, n > 0 ? String(n) : '');
+      }
+    }
+
+    /**
+     * `stats` 可以由调用方传进来。热路径(`keydown` / `keyup`)每一下都要同时刷
+     * 键帽和读数栏,**两边用同一份** —— 各算一次不算错(它是纯函数),但键帽上
+     * 那个数和读数栏那个数并排显示,让它们由同一次遍历产生是最省事的保证。
+     */
+    function renderSummary(stats = summarizeKeyboard(events)): void {
+
+      setStat('presses', String(stats.presses));
+      setStat('unique', fill(t.runtime.uniqueValue, { unique: stats.uniqueKeys, total: KEY_COUNT }));
+      setStat('max-held', String(stats.maxSimultaneous));
+      setStat('stuck', String(stats.stuck));
+      setText(el('held'), String(stats.stuck));
+
+      if (stats.stuck > 0) {
+        const names = [...heldSince.keys()].map(keyLabel).join(t.runtime.nameJoiner);
+        setText(el('held-note'), names);
+        setBadge(el('state-badge'), t.runtime.badgeHeld, 'good');
+      } else if (stats.presses > 0) {
+        setText(el('held-note'), t.runtime.noteNone);
+        setBadge(el('state-badge'), t.runtime.badgeIdle, 'idle');
+      }
+    }
+
+    function renderLog(): void {
+      if (!logHost) return;
+      if (logEntries.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'log-empty';
+        empty.textContent = t.runtime.logEmpty;
+        logHost.replaceChildren(empty);
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      for (let i = logEntries.length - 1; i >= 0; i--) {
+        const entry = logEntries[i];
+        const item = document.createElement('li');
+        item.className = 'log-item';
+
+        const index = document.createElement('span');
+        index.className = 'log-item__index';
+        index.textContent = fill(t.runtime.logIndex, { n: i + 1 });
+
+        const value = document.createElement('span');
+        value.className = 'log-item__value';
+        value.textContent = entry.label;
+
+        const note = document.createElement('span');
+        note.className = 'log-item__note';
+        note.textContent =
+          entry.holdMs === null
+            ? t.runtime.logOpen
+            : fill(t.runtime.logHold, { ms: entry.holdMs.toFixed(0) });
+
+        item.append(index, value, note);
+        fragment.appendChild(item);
+      }
+      logHost.replaceChildren(fragment);
+    }
+
+    /**
+     * 把已经不合法的"按住"状态清掉。
+     *
+     * 唯一的来源是窗口失焦:用户切走了,浏览器不再派发 keyup,页面就无从知道
+     * 那些键已经松了。**不记时长**——真去量的话会得到几十秒的假数字。
+     *
+     * 这里必须**补发合成的松开事件**,而不是只清 DOM。统计量全部派生自
+     * `events` 序列,光把界面上的高亮抹掉的话,`summarizeKeyboard` 仍然认为
+     * 那些键按着,"仍未松开"会一直挂着一个不存在的故障。
+     */
+    function clearHeld(): void {
+      if (heldSince.size === 0) return;
+
+      const now = performance.now();
+      for (const code of heldSince.keys()) {
+        events.push({ t: now, code, down: false });
+        renderKey(code, false);
+      }
+      heldSince.clear();
+      renderSummary();
+    }
+
+    window.addEventListener('keydown', (event) => {
+      // 带 Ctrl/Alt/Meta 的组合交给浏览器 —— 那些拦不住(见页面上的说明),
+      // 强行 preventDefault 只会让 Ctrl+C 之类也用不了
+      if (!event.ctrlKey && !event.altKey && !event.metaKey && INTERCEPTED.has(event.code)) {
+        event.preventDefault();
+      }
+
+      // 系统的自动重复:按住不放时操作系统每秒发几十次,那是软件模拟的连击,
+      // 不是用户在按。混进计数里会让"累计按下"完全失去意义。
+      if (event.repeat) return;
+
+      heldSince.set(event.code, performance.now());
+      events.push({ t: event.timeStamp, code: event.code, down: true });
+
+      const stats = summarizeKeyboard(events);
+      renderKey(event.code, true, stats.perKey);
+      renderSummary(stats);
+
+      // 先占个位,松开时再补时长
+      logEntries.push({ label: keyLabel(event.code), holdMs: null });
+      if (logEntries.length > LOG_LIMIT) logEntries.shift();
+      renderLog();
+    });
+
+    window.addEventListener('keyup', (event) => {
+      const startedAt = heldSince.get(event.code);
+      heldSince.delete(event.code);
+      events.push({ t: event.timeStamp, code: event.code, down: false });
+      renderKey(event.code, false, summarizeKeyboard(events).perKey);
+
+      if (startedAt !== undefined) {
+        // 找到这条按键在日志里的位置,把按住时长补上。日志容量有限,
+        // 按得太多时早期条目已经被挤掉了,这时找不到就跳过。
+        for (let i = logEntries.length - 1; i >= 0; i--) {
+          if (logEntries[i].label === keyLabel(event.code) && logEntries[i].holdMs === null) {
+            logEntries[i].holdMs = performance.now() - startedAt;
+            break;
+          }
+        }
+        renderLog();
+      }
+
+      renderSummary();
+    });
+
+    // 窗口失焦时按键状态不再可信 —— 用户在别处松的手,这里收不到 keyup
+    window.addEventListener('blur', clearHeld);
+
+    el('reset')?.addEventListener('click', () => {
+      heldSince.clear();
+      events.length = 0;
+      logEntries.length = 0;
+
+      for (const node of document.querySelectorAll<HTMLElement>('.kb-key')) {
+        node.dataset.held = 'false';
+        node.dataset.tested = 'false';
+      }
+
+      renderSummary();
+      renderLog();
+    });
+
+    renderSummary();
+    renderLog();
+  </script>
+</BaseLayout>

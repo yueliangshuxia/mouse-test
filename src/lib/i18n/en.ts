@@ -17,11 +17,25 @@
  */
 
 import type { Catalog } from './zh';
+import { buttonEn } from './pages/button';
 import { cpsEn } from './pages/cps';
+import { dpiEn } from './pages/dpi';
+import { holdDragEn } from './pages/holdDrag';
+import { scrollEn } from './pages/scroll';
+import { doubleClickEn } from './pages/doubleClick';
+import { pollingEn } from './pages/polling';
 import { homeEn } from './pages/home';
 import { deadPixelEn } from './pages/deadPixel';
 import { doodleEn } from './pages/doodle';
 import { sensitivityEn } from './pages/sensitivity';
+import { accelerationEn } from './pages/acceleration';
+import { keyboardEn } from './pages/keyboard';
+import { reactionEn } from './pages/reaction';
+import { aimEn } from './pages/aim';
+import { steadinessEn } from './pages/steadiness';
+import { trailEn } from './pages/trail';
+import { refreshEn } from './pages/refresh';
+import { toolboxEn } from './pages/toolbox';
 
 export const en: Catalog = {
   common: {
@@ -76,6 +90,15 @@ export const en: Catalog = {
     'duration-fair': 'Usable stretch is {seconds}s; draw circles for at least 3 seconds before reading.',
   },
 
+  buttons: {
+    '0': { name: 'Left', note: 'Primary' },
+    '1': { name: 'Middle', note: 'Wheel click' },
+    '2': { name: 'Right', note: 'Secondary' },
+    '3': { name: 'Side 4', note: 'Back' },
+    '4': { name: 'Side 5', note: 'Forward' },
+    unknown: { name: 'Button {code}', note: '' },
+  },
+
   chrome: {
     footerPrivacy: 'Every test runs locally in your browser — nothing is uploaded.',
     footerRecommend: 'Desktop Chrome or Edge gives the most accurate readings.',
@@ -90,8 +113,22 @@ export const en: Catalog = {
   pages: {
     cps: cpsEn,
     home: homeEn,
+    button: buttonEn,
+    dpi: dpiEn,
+    polling: pollingEn,
+    holdDrag: holdDragEn,
+    scroll: scrollEn,
+    doubleClick: doubleClickEn,
     doodle: doodleEn,
     deadPixel: deadPixelEn,
     sensitivity: sensitivityEn,
+    acceleration: accelerationEn,
+    keyboard: keyboardEn,
+    reaction: reactionEn,
+    aim: aimEn,
+    steadiness: steadinessEn,
+    trail: trailEn,
+    refresh: refreshEn,
+    toolbox: toolboxEn,
   },
 };

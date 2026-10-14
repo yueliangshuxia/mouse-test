@@ -1,0 +1,736 @@
+---
+/*
+ * 反应速度测试页的**主体**。两个薄路由引它:中文的 `/reaction-test/`
+ * 和英文的 `/en/reaction-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各写三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 这一页的文案**大半住在 `<script>` 里**
+ *
+ * 四类作废(抢跑 / 可疑 / 超时 / 作废)、中位数那行结算语、逐次记录每一行,全是
+ * 运行时拼出来的。它们整句住在目录的 `runtime` 命名空间里,由脚本
+ * `getCatalog(currentLocale())` 取回来、`fill()` 填占位符 —— 理由见
+ * `pages/reaction.ts` 的文件头(那是这一页最长的一节,动手前先读)。
+ *
+ * ## 测量逻辑一个字都没动
+ *
+ * 帧首锚点、随机等待、四类作废的判定、`event.timeStamp - anchor` 那条口径、
+ * 以及 `summarizeFrameCadence` / `summarizeReaction` 两个纯函数全部原样保留。
+ * 搬进组件时只换了 `import` 的层级和那些用户看得见的字符串。
+ *
+ * **这一页一条站内链接都没有** —— 所以没有 `pageHref()` 的调用点,
+ * 也就没有那个 import(不留死引用,同 `Scroll.astro`)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import {
+  MIN_VALID_TRIALS,
+  RT_IMPLAUSIBLE_MS,
+  RT_TIMEOUT_MS,
+  RT_WAIT_MAX_MS,
+  RT_WAIT_MIN_MS,
+  TRIALS_PER_ROUND,
+} from '../../lib/analysis';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.reaction;
+
+/**
+ * 构建期常量,正文 / FAQ 的答案 / 结构化数据里各要填一遍。
+ *
+ * **只算一遍** —— 三处各写一次的话,以后加一条带占位符的句子迟早漏掉一处,
+ * 而漏掉的样子是屏幕上原样印着 `{trials}`(同 `DoubleClick.astro` 的 `placeholders`)。
+ *
+ * 文案里的数字**全部从模块常量插值**,不手抄一份。手抄一遍的话,改了判据忘了改文案,
+ * 页面上就会印一个和实际行为对不上的数,而且**没有任何东西会报错**。
+ * `waitMin` / `waitMax` 是**秒**(FAQ 第 4 条那两句),所以除 1000。
+ */
+const placeholders = {
+  trials: TRIALS_PER_ROUND,
+  minValid: MIN_VALID_TRIALS,
+  implausibleMs: RT_IMPLAUSIBLE_MS,
+  timeoutMs: RT_TIMEOUT_MS,
+  waitMin: RT_WAIT_MIN_MS / 1000,
+  waitMax: RT_WAIT_MAX_MS / 1000,
+};
+
+/*
+ * 「延迟有多长」那张表的四行住在目录里(`t.offsetRows`)。
+ *
+ * **那些 `total` 是推算出来的界,不是量出来的修正量。** 每一行 = 一整帧(锚点在帧首,
+ * 所以必然多等一整帧)+ 约半个刷新周期的扫描输出 + 2–10ms 的面板灰阶响应
+ * + 鼠标按键的回报周期。页面只用它说明"为什么这个数一定偏大",
+ * **绝不拿它去减任何结果** —— 减掉一个估算值就是全站禁止的那个假数字。
+ */
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: fill(item.q, placeholders),
+        acceptedAnswer: { '@type': 'Answer', text: faqText(fill(item.a, placeholders)) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="reaction-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['reaction-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['reaction-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(fill(t.lede, placeholders))} />
+
+  <p class="prose" set:html={faqHtml(t.honesty)} />
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <button type="button" id="toggle">{t.runtime.start}</button>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      {/*
+        `data-stim` 而不是 `data-phase`:`mini-devices.ts` 已经在首页卡片的装置面上
+        拥有 `data-phase`,词汇是 idle|running|done|static。同一个名字底下再挂一套
+        不同的词汇,是给下一个人挖的坑。
+
+        提示层直接用 `.test-area__hint`(七个页面共用那个类)。**不新加覆盖元素**:
+        它是 `pointer-events: none`,于是"颜色还没出就按"的那一下会**穿透文字落在
+        `.test-area` 上** —— 监听器正在那儿,才能被读成抢跑。换成真元素会把它吞掉。
+      */}
+      <div class="test-area well reaction-pad" id="pad" data-stim="idle">
+        <div class="test-area__hint" id="hint">
+          {/*
+            `.test-area__hint` 是 `display: flex`(横向),所以这两行必须包在一个
+            `flex-direction: column` 的壳里才能上下排 —— 直接当兄弟节点会并排。
+            CPS 页的 `.cps-start` 就是这个壳,这里照抄一份。
+          */}
+          <span class="reaction-start">
+            <span class="reaction-call" id="call">{t.runtime.callIdle}</span>
+            <span class="reaction-meta" id="meta">
+              {fill(t.runtime.metaIdle, placeholders)}
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="stat-grid">
+        <StatPanel
+          id="median"
+          label={t.stats.median.label}
+          unit={t.stats.median.unit}
+          primary
+          hint={fill(t.stats.median.hint, placeholders)}
+        />
+        <StatPanel
+          id="fastest"
+          label={t.stats.fastest.label}
+          unit={t.stats.fastest.unit}
+          hint={t.stats.fastest.hint}
+        />
+        <StatPanel id="valid" label={t.stats.valid.label} />
+        <StatPanel id="foul" label={t.stats.foul.label} hint={t.stats.foul.hint} />
+        <StatPanel
+          id="suspect"
+          label={t.stats.suspect.label}
+          hint={fill(t.stats.suspect.hint, placeholders)}
+        />
+        <StatPanel
+          id="hz"
+          label={t.stats.hz.label}
+          unit={t.stats.hz.unit}
+          hint={t.stats.hz.hint}
+        />
+      </div>
+    </div>
+  </div>
+
+  <h2>{t.logHeading}</h2>
+  <p class="prose tight" set:html={faqHtml(t.logLede)} />
+  <ul class="log-list" id="log"></ul>
+
+  <section class="prose prose--cards">
+    <h2>{t.chainHeading}</h2>
+    <p set:html={faqHtml(t.chainBody)} />
+    <table class="ref-table ref-table--kv">
+      <thead>
+        <tr>
+          <th>{t.offsetColumns.hz}</th>
+          <th>{t.offsetColumns.frame}</th>
+          <th>{t.offsetColumns.total}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          t.offsetRows.map((row) => (
+            <tr>
+              <td>{row.hz}</td>
+              <td>{row.frame}</td>
+              <td>{row.total}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+    <p set:html={faqHtml(t.frameBody)} />
+    <p set:html={faqHtml(t.isolationBody)} />
+
+    <h2>{t.varyHeading}</h2>
+    <ul>
+      {t.varyPoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{fill(item.q, placeholders)}</div>
+            <p class="faq__a" set:html={faqHtml(fill(item.a, placeholders))} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * `.test-area__hint` 被**七个页面**共用(按键 / DPI / 拖拽 / CPS / 双击 / 滚轮 /
+     * 轨迹),所以一条规则都不能往它身上加 —— 加在这里等于改那七个页面。
+     * 做法和 CPS 页一样:新增内层的 `.reaction-call` / `.reaction-meta`,
+     * 共用那个类只被读 `hidden`(它的 `[hidden]` 规则已经写在 global.css 里)。
+     */
+    .reaction-start {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .reaction-call {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    .reaction-meta {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    /*
+     * 刺激:整块刷成亮色。
+     *
+     * **只写 `background-color` 这一条 longhand,绝不写 `background` 简写** ——
+     * `.test-area` 的刻度栅格是 `background-image` 给的,简写会把它一并重置成
+     * none。同理也**不要顺手补一句 `background-image: none`**:栅格是白色低透明度,
+     * 压在近白的闪烁上本来就看不见,两个 longhand 各管各的。
+     *
+     * 色值取 `--well-text` 而不是 `--text`:**刺激的亮度是测量参数,不能随主题变。**
+     * `.well` 那组前景色令牌在两个主题下本来就是同一份,写 `--well-*` 是把这个
+     * 意图说出来 —— 真写成纸面的令牌,浅色和深色用户拿到的刺激亮度就不一样,
+     * 数字会因为和用户无关的原因移动。
+     *
+     * **刻意没有 `transition`。** 过渡会把刺激的起始沿按时长抹开,直接毁掉这次测量。
+     * 全局那条 `prefers-reduced-motion` 夹子夹的是 `transition-duration`,
+     * 这里没有过渡可夹,正好不受影响。**这是测量,不是动画。**
+     */
+    .reaction-pad[data-stim='go'] {
+      background-color: var(--well-text);
+    }
+
+    /*
+     * 抢跑**不做第二次全屏闪**:闪一下配上"你错了"什么也教不了,而且是短时间内
+     * 第二个亮度事件。改成底色不变 + 朱砂描边 + 提示文字转朱砂 ——
+     * 提示文字必须换色:`--well-text-faint` 压在 `--well-danger-dim` 上只有约
+     * 3.2:1,低于 AA;`--well-danger` 是约 6.3:1。
+     */
+    .reaction-pad[data-stim='foul'] {
+      border-color: var(--well-danger);
+    }
+
+    .reaction-pad[data-stim='foul'] .test-area__hint {
+      color: var(--well-danger);
+    }
+
+    .reaction-pad {
+      cursor: pointer;
+    }
+  </style>
+
+  <script>
+    import {
+      MIN_VALID_TRIALS,
+      RT_IMPLAUSIBLE_MS,
+      RT_TIMEOUT_MS,
+      RT_WAIT_MAX_MS,
+      RT_WAIT_MIN_MS,
+      TRIALS_PER_ROUND,
+      summarizeFrameCadence,
+      summarizeReaction,
+    } from '../../lib/analysis';
+    import type { ReactionTrial } from '../../lib/analysis';
+    import {
+      createTicker,
+      el,
+      format,
+      loadBest,
+      mountCapabilityNotices,
+      saveBest,
+      setHint,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     *
+     * 四类作废的句子、中位数那行结算语、逐次记录每一行的注 —— 全在这份目录里。
+     */
+    const t = getCatalog(currentLocale()).pages.reaction;
+
+    mountCapabilityNotices(el('cap-notice'));
+    // 右键菜单会盖住测试区;中键自动滚动会让指针底下的采样面溜走
+    suppressWorkbenchDefaults();
+
+    const BEST_KEY = 'mouse-test:reaction-best-ms';
+
+    /** 每一次尝试之后停多久,让用户看清刚才那一下 */
+    const FEEDBACK_MS = 800;
+
+    const pad = el('pad');
+    const hint = el('hint');
+    const call = el('call');
+    const meta = el('meta');
+    const toggle = el('toggle');
+    const logHost = el('log');
+
+    /*
+     * 机器状态和显示状态是**两件事**,刻意不合成一个变量。
+     *
+     * 机器状态只有三个,它决定"还能不能按下":`idle` 按了没用、`waiting` 按了是抢跑、
+     * `go` 按了才算数。而「抢跑」是一个**显示**状态 —— 它出现在机器已经回到空闲的
+     * 那段时间里。合成一个变量的话,就会写出 `setPhase('foul' as 'idle')`
+     * 这种必须靠类型断言才编得过去的谎话。
+     */
+    let phase: 'idle' | 'waiting' | 'go' = 'idle';
+    let trials: ReactionTrial[] = [];
+    /** 这一轮是否已经开始过 —— 决定那个按钮写「开始」还是「重置」 */
+    let started = false;
+
+    /** 刺激刷上去的那一帧的**帧首**时刻,和 `performance.now()` 同一时基 */
+    let anchor = 0;
+    /** 当前这一步的截止时刻 */
+    let deadline = 0;
+    let stopTicker: (() => void) | null = null;
+    let laterTimer = 0;
+
+    /** 帧间隔采样。只用来报一个**实测**刷新率,不参与任何换算 */
+    let lastFrame = 0;
+    const frameGaps: number[] = [];
+
+    // ---------- 渲染 ----------
+
+    function setStim(next: string): void {
+      pad?.setAttribute('data-stim', next);
+    }
+
+    function say(title: string, detail: string): void {
+      setText(call, title);
+      setText(meta, detail);
+      if (hint) hint.hidden = false;
+    }
+
+    // ---------- 逐次记录 ----------
+
+    /** 一条记录怎么显示。**统计口径不在这里** —— 那在 `summarizeReaction` 里 */
+    function describe(trial: ReactionTrial): { cls: string; value: string; note: string } {
+      if (trial.outcome === 'foul') {
+        return { cls: 'log-item log-item--warn', value: t.runtime.dash, note: t.runtime.logFoul };
+      }
+      if (trial.outcome === 'timeout') {
+        return {
+          cls: 'log-item log-item--alert',
+          value: t.runtime.dash,
+          note: fill(t.runtime.logTimeout, { timeoutMs: RT_TIMEOUT_MS }),
+        };
+      }
+      if (trial.outcome === 'void') {
+        return {
+          cls: 'log-item log-item--alert',
+          value: t.runtime.dash,
+          note: t.runtime.logVoidHidden,
+        };
+      }
+      // 剩下的一定是 timed;坏值在这里归到"作废",和纯函数那边同一口径
+      if (!Number.isFinite(trial.ms) || trial.ms <= 0) {
+        return {
+          cls: 'log-item log-item--alert',
+          value: t.runtime.dash,
+          note: t.runtime.logVoidStamp,
+        };
+      }
+      if (trial.ms < RT_IMPLAUSIBLE_MS) {
+        return {
+          cls: 'log-item log-item--warn',
+          value: format(trial.ms),
+          note: fill(t.runtime.logSuspect, { implausibleMs: RT_IMPLAUSIBLE_MS }),
+        };
+      }
+      return { cls: 'log-item', value: format(trial.ms), note: t.runtime.logValid };
+    }
+
+    function renderLog(): void {
+      if (!logHost) return;
+
+      if (trials.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'log-empty';
+        empty.textContent = fill(t.runtime.logEmpty, { trials: TRIALS_PER_ROUND });
+        logHost.replaceChildren(empty);
+        return;
+      }
+
+      // 新的在上面 —— 最近那一次才是此刻在看的那一次
+      const shown = trials.slice(Math.max(0, trials.length - 40));
+      const fragment = document.createDocumentFragment();
+      for (let i = shown.length - 1; i >= 0; i--) {
+        const { cls, value, note } = describe(shown[i]);
+        const item = document.createElement('li');
+        item.className = cls;
+
+        const index = document.createElement('span');
+        index.className = 'log-item__index';
+        index.textContent = fill(t.runtime.logIndex, { n: i + 1 });
+
+        const valueNode = document.createElement('span');
+        valueNode.className = 'log-item__value';
+        valueNode.textContent = value;
+
+        const noteNode = document.createElement('span');
+        noteNode.className = 'log-item__note';
+        noteNode.textContent = note;
+
+        item.append(index, valueNode, noteNode);
+        fragment.appendChild(item);
+      }
+      logHost.replaceChildren(fragment);
+    }
+
+    // ---------- 读数 ----------
+
+    /**
+     * 实测刷新率 —— **量法与刷新率目视测试共用同一份实现**
+     * (`analysis.ts` 的 `summarizeFrameCadence`)。
+     *
+     * 原来这里自己算了一遍中位数。两页印的是同一个量,而用户会拿它们互相对照,
+     * 两份实现迟早会漂;漂的那天没有任何一处会报错。所以连同"什么算一帧"
+     * (间隔 > 100ms 的采样不算)一起搬进了那个纯函数,由单测钉住。
+     *
+     * 它只是**参照**:里那个毫秒数**绝不减掉由它推算出来的任何值**。
+     */
+    function currentHz(): number | null {
+      return summarizeFrameCadence(frameGaps).hz;
+    }
+
+    function renderStats(): void {
+      const s = summarizeReaction(trials);
+      setStat('median', format(s.medianMs));
+      setStat('fastest', format(s.fastestMs));
+      setStat('valid', String(s.valid));
+      setStat('foul', String(s.foul));
+      setStat('suspect', String(s.suspect));
+
+      // `format()` 对 `null` 出破折号 —— 样本不够时就是它,不是 0
+      setStat('hz', format(currentHz()));
+
+      const best = loadBest(BEST_KEY);
+      setHint(
+        'median',
+        best === null
+          ? fill(t.stats.median.hint, { minValid: MIN_VALID_TRIALS })
+          : fill(t.runtime.hintBest, { best: format(best) }),
+      );
+    }
+
+    // ---------- 一轮的推进 ----------
+
+    function stopAll(): void {
+      stopTicker?.();
+      stopTicker = null;
+      if (laterTimer !== 0) {
+        window.clearTimeout(laterTimer);
+        laterTimer = 0;
+      }
+    }
+
+    /** 停一会儿再做下一步(留出看清反馈的时间) */
+    function later(fn: () => void, ms: number): void {
+      laterTimer = window.setTimeout(() => {
+        laterTimer = 0;
+        fn();
+      }, ms);
+    }
+
+    /** 记一条尝试,然后进下一次(或结算) */
+    function push(trial: ReactionTrial, pauseMs: number): void {
+      trials.push(trial);
+      renderLog();
+      renderStats();
+
+      if (trials.length >= TRIALS_PER_ROUND) {
+        later(finish, pauseMs);
+        return;
+      }
+      later(arm, pauseMs);
+    }
+
+    /**
+     * 等一段随机时间,然后刷出刺激。
+     *
+     * **等待、刷新率采样、翻转全在同一个 rAF 回调里**,而且锚在它交上来的 `now`
+     * —— 那是这一帧的**开始**时刻(`createTicker` 用 rAF,交上来的就是 rAF 的
+     * timestamp,和 `performance.now()` 同一时基)。
+     *
+     * 这不是风格问题:锚点既然是帧首、翻转又是那一帧里的第一次 DOM 写,那么
+     * "颜色出现到你按下"的偏移才是一个**固定**值(一整帧 + 半个扫描周期);
+     * 改成在回调里现取 `performance.now()`,偏移就变成每轮都不一样 ——
+     * 那正是"五次的中位数"会抖的原因。
+     */
+    function arm(): void {
+      stopAll();
+
+      if (trials.length >= TRIALS_PER_ROUND) {
+        finish();
+        return;
+      }
+
+      phase = 'waiting';
+      setStim('waiting');
+      say(t.runtime.callWait, t.runtime.metaWait);
+
+      // 每轮重新随机:固定延迟会把这个测试变成"节奏预判测试"
+      deadline =
+        performance.now() + RT_WAIT_MIN_MS + Math.random() * (RT_WAIT_MAX_MS - RT_WAIT_MIN_MS);
+
+      stopTicker = createTicker(0, (now) => {
+        /*
+         * 顺带采一段帧间隔,结算时报一个实测刷新率。
+         *
+         * **这里只管往缓冲里塞原样的数,不在这里筛。** "什么算一帧"(间隔为负、
+         * 或者超过 100ms 的长停)是 `summarizeFrameCadence` 的判据 —— 筛选放在
+         * 采样那一侧,另一页就会各写一份,两份的口径迟早不一样。
+         *
+         * 只保留最近 240 个:那是**缓冲区**的大小,和判据无关。
+         */
+        if (lastFrame > 0) {
+          frameGaps.push(now - lastFrame);
+          if (frameGaps.length > 240) frameGaps.shift();
+        }
+        lastFrame = now;
+
+        if (now < deadline) return;
+
+        stopAll();
+        anchor = now;
+        phase = 'go';
+        setStim('go');
+        // 提示整块让位 —— 它是测量面,不能再压字上去
+        if (hint) hint.hidden = true;
+        armTimeout();
+      });
+    }
+
+    /** 刺激已经出来了,等着按下;一直不按就作废 */
+    function armTimeout(): void {
+      deadline = performance.now() + RT_TIMEOUT_MS;
+      stopTicker = createTicker(100, (now) => {
+        if (now < deadline) return;
+        stopAll();
+        phase = 'idle';
+        setStim('timeout');
+        say(t.runtime.callTimeout, fill(t.runtime.metaTimeout, { timeoutMs: RT_TIMEOUT_MS }));
+        push({ outcome: 'timeout' }, FEEDBACK_MS);
+      });
+    }
+
+    function finish(): void {
+      stopAll();
+      phase = 'idle';
+      setStim('idle');
+      setText(toggle, t.runtime.again);
+
+      const s = summarizeReaction(trials);
+      const hz = currentHz();
+
+      if (s.medianMs === null) {
+        say(
+          t.runtime.callTooFew,
+          fill(t.runtime.metaTooFew, { minValid: MIN_VALID_TRIALS, valid: s.valid }),
+        );
+      } else {
+        // 反应时间是**越小越好** —— 这一位传错是静默的,所以写成选项对象
+        const isRecord = saveBest(BEST_KEY, Math.round(s.medianMs), { lowerIsBetter: true });
+        say(
+          fill(t.runtime.callMedian, { ms: format(s.medianMs) }),
+          fill(t.runtime.metaMedian, {
+            valid: s.valid,
+            fastest: format(s.fastestMs),
+            record: isRecord ? t.runtime.recordNew : t.runtime.recordNone,
+          }),
+        );
+        if (hz !== null) {
+          setHint('hz', fill(t.runtime.hintHzFrame, { ms: (1000 / hz).toFixed(1) }));
+        }
+      }
+      renderStats();
+    }
+
+    // ---------- 交互 ----------
+
+    /*
+     * 判定一律用 `button === 0`(左键)。
+     *
+     * **CDP 合成的点击几乎必然落进"可疑"那一档**(快于 `RT_IMPLAUSIBLE_MS`)——
+     * 那是对的行为,不是 bug。合成点击的时间戳和帧调度都是测试装置的,不是人的。
+     * 所以**别为了让它变绿去删那个下限**,也别指望在 CDP 里量出这个页面的数值:
+     * 状态机、逐次表、各类计数可以在 CDP 里验,**那个毫秒数只能真机手测**。
+     */
+    pad?.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+
+      if (phase === 'waiting') {
+        // 抢跑:颜色还没出。这一次作废,重起一段随机等待
+        stopAll();
+        phase = 'idle';
+        setStim('foul');
+        say(t.runtime.callFoul, t.runtime.metaFoul);
+        push({ outcome: 'foul' }, 900);
+        return;
+      }
+
+      if (phase !== 'go') return;
+
+      stopAll();
+      phase = 'idle';
+      /*
+       * **两次事件之间的差必须取 `event.timeStamp`**,不能取处理函数里的
+       * `performance.now()`:浏览器会把攒在一起的事件放进同一个任务里派发,
+       * 那一刻两个处理函数几乎是同时跑的,那个差会塌到 0 —— 一次正常的人手
+       * 点击会被报成"零毫秒反应"。
+       */
+      const ms = event.timeStamp - anchor;
+      setStim('idle');
+      say(
+        fill(t.runtime.callMeasured, { ms: format(ms) }),
+        ms < RT_IMPLAUSIBLE_MS
+          ? t.runtime.metaSuspect
+          : fill(t.runtime.metaMeasured, { n: trials.length + 1 }),
+      );
+      push({ outcome: 'timed', ms }, FEEDBACK_MS);
+    });
+
+    toggle?.addEventListener('click', () => {
+      stopAll();
+
+      if (started) {
+        // 「重置」:清空,回到最初
+        trials = [];
+        frameGaps.length = 0;
+        lastFrame = 0;
+        started = false;
+        phase = 'idle';
+        setStim('idle');
+        setText(toggle, t.runtime.start);
+        say(t.runtime.callIdle, fill(t.runtime.metaIdle, { trials: TRIALS_PER_ROUND }));
+        setHint('hz', t.stats.hz.hint);
+        renderLog();
+        renderStats();
+        return;
+      }
+
+      trials = [];
+      frameGaps.length = 0;
+      lastFrame = 0;
+      started = true;
+      setText(toggle, t.runtime.reset);
+      renderLog();
+      renderStats();
+      arm();
+    });
+
+    /*
+     * 页面被切走就作废这一轮。
+     *
+     * 锚点本身仍然是对的(帧时间戳不因切走而失效),但用户注意力已经不在,
+     * 那个样本是垃圾 —— **记一个几百毫秒的"反应时间"比不记还糟**。
+     */
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) return;
+      if (phase !== 'waiting' && phase !== 'go') return;
+
+      stopAll();
+      phase = 'idle';
+      setStim('void');
+      say(t.runtime.callHidden, t.runtime.metaHidden);
+      push({ outcome: 'void' }, 900);
+    });
+
+    renderLog();
+    renderStats();
+  </script>
+</BaseLayout>

@@ -1,0 +1,558 @@
+---
+/*
+ * 加速度测试页的**主体**。两个薄路由引它:中文的 `/acceleration-test/`
+ * 和英文的 `/en/acceleration-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各写三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 这一页特有的两处
+ *
+ * - **判定表第一列那三个比值(`< 1.10` / `1.10 – 1.30` / `≥ 1.30`)留在页面里**,
+ *   由 `analysis.ts` 的 `ACCEL_MILD_RATIO` / `ACCEL_STRONG_RATIO` 现算 ——
+ *   它是**判据不是文案**(同 `scroll.ts` 那张换算表"除数不抄进目录")。目录里的
+ *   `refRows` 只带走后两列。
+ * - **距离按钮的标签按 `cm` 从目录查,不按下标对齐。** 两张表的顺序不保证一致,
+ *   按下标对齐哪天一动就会静默错位(见 `pages/acceleration.ts` 的文件头)。
+ *
+ * **这一页一条站内链接都没有** —— 所以没有 `pageHref()` 的调用点,
+ * 也就没有那个 import(不留死引用)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { ACCEL_MILD_RATIO, ACCEL_STRONG_RATIO } from '../../lib/analysis';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.acceleration;
+
+/**
+ * 三个可选距离。**页面自己只留 `cm`** —— 它写进按钮的 `data-cm`,两种语言逐字
+ * 相同;标签按 `cm` 从目录查,**不按下标对齐**(见 `pages/acceleration.ts` 的文件头)。
+ */
+const DISTANCES = [5, 10, 20].map((cm) => {
+  const copy = t.distances.find((item) => item.cm === cm);
+  return { cm, label: copy ? copy.label : String(cm) };
+});
+
+/**
+ * 判定表的三行。第一列是页面现算的判据(见文件头),后两列按 `level` 从目录查
+ * —— **不按下标对齐**,理由同上。
+ */
+const REF_ROWS = [
+  { level: 'none', ratio: `< ${ACCEL_MILD_RATIO.toFixed(2)}` },
+  {
+    level: 'mild',
+    ratio: `${ACCEL_MILD_RATIO.toFixed(2)} – ${ACCEL_STRONG_RATIO.toFixed(2)}`,
+  },
+  { level: 'strong', ratio: `≥ ${ACCEL_STRONG_RATIO.toFixed(2)}` },
+].map((row) => {
+  const copy = t.refRows.find((item) => item.level === row.level);
+  return {
+    level: row.level,
+    ratio: row.ratio,
+    verdict: copy ? copy.verdict : '',
+    note: copy ? copy.note : '',
+  };
+});
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="acceleration-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['acceleration-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['acceleration-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <p class="prose" set:html={faqHtml(t.ledeNoDisable)} />
+
+  <h2>{t.stepsHeading}</h2>
+  <ol class="steps">
+    {t.steps.map((step) => <li set:html={faqHtml(step)} />)}
+  </ol>
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    {
+      DISTANCES.map((option, index) => (
+        <button
+          type="button"
+          class="distance"
+          data-cm={option.cm}
+          aria-pressed={index === 1 ? 'true' : 'false'}
+        >
+          {option.label}
+        </button>
+      ))
+    }
+    <button type="button" id="reset">{t.reset}</button>
+    <span class="test-hint" id="hint">{t.hint}</span>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="runs">
+        <div class="run" id="run-slow" data-state="idle">
+          <div class="run__head">
+            <span class="run__index">{t.runs.slow.index}</span>
+            <span class="run__title">{t.runs.slow.title}</span>
+          </div>
+          <div class="run__value"><span id="slow-px">{t.dash}</span><span class="run__unit">{t.runUnit}</span></div>
+          <div class="run__meta" id="slow-meta">{t.runs.slow.metaIdle}</div>
+          <div class="run__foot">
+            <button type="button" id="start-slow">{t.startButton}</button>
+            <span class="run__speed" id="slow-speed">{t.dash}</span>
+          </div>
+        </div>
+
+        <div class="run" id="run-fast" data-state="idle">
+          <div class="run__head">
+            <span class="run__index">{t.runs.fast.index}</span>
+            <span class="run__title">{t.runs.fast.title}</span>
+          </div>
+          <div class="run__value"><span id="fast-px">{t.dash}</span><span class="run__unit">{t.runUnit}</span></div>
+          <div class="run__meta" id="fast-meta">{t.runs.fast.metaIdle}</div>
+          <div class="run__foot">
+            <button type="button" id="start-fast" disabled>{t.startButton}</button>
+            <span class="run__speed" id="fast-speed">{t.dash}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">{t.verdict.label}</div>
+          <div>
+            <span class="verdict__value" id="ratio">{t.dash}</span><span class="verdict__unit" id="ratio-unit">{t.verdict.unit}</span>
+          </div>
+          <div class="verdict__note" id="verdict-note">{t.verdict.noteIdle}</div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="level-badge">{t.badges.idle}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.criteriaHeading}</h2>
+    <p set:html={faqHtml(t.criteriaBody)} />
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>{t.refColumns.ratio}</th>
+          <th>{t.refColumns.verdict}</th>
+          <th>{t.refColumns.note}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          REF_ROWS.map((row) => (
+            <tr data-ref-level={row.level}>
+              <td>{row.ratio}</td>
+              <td>{row.verdict}</td>
+              <td>{row.note}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>{t.whyHeading}</h2>
+    <p set:html={faqHtml(t.whyBody1)} />
+    <p set:html={faqHtml(t.whyBody2)} />
+
+    <h2>{t.limitsHeading}</h2>
+    <ul>
+      {t.limitsPoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .runs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .run {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      /* 和按键页的 .mouse-button 同一档:都是纸面上的"面板",圆角对齐 */
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      transition: border-color 0.1s linear;
+    }
+
+    .run[data-state='running'] {
+      border-color: var(--accent);
+    }
+
+    .run[data-state='done'] {
+      border-color: var(--border-strong);
+    }
+
+    .run__head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .run__index {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1px 6px;
+    }
+
+    .run__title {
+      font-weight: 600;
+    }
+
+    .run__value {
+      font-family: var(--font-mono);
+      font-size: 2.4rem;
+      font-weight: 700;
+      line-height: 1;
+      margin: 14px 0 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .run__unit {
+      font-size: 0.95rem;
+      color: var(--text-dim);
+      margin-left: 4px;
+      font-family: inherit;
+      font-weight: 400;
+    }
+
+    .run__meta {
+      color: var(--text-dim);
+      font-size: 0.88rem;
+      min-height: 1.3em;
+    }
+
+    .run__foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .run__speed {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--text-dim);
+    }
+
+  </style>
+
+  <script>
+    import { compareAcceleration, estimateDpi } from '../../lib/analysis';
+    import { createRulerMeasurement, type RulerResult } from '../../lib/ruler';
+    import {
+      el,
+      format,
+      mountCapabilityNotices,
+      setBadge,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.acceleration;
+
+    // 结论只读 两个 DPI(像素 ÷ 距离),比的不是一个事件到另一个事件多久 —— **一个事件时间戳都不读**,所以四条与时间戳精度
+    // 有关的告警一条都不该发。判据和手稳度 / DPI 两页是同一条:
+    // 「这一页的结论吃不吃**两个事件之间**差多久」。
+    mountCapabilityNotices(el('cap-notice'), { timing: false });
+
+    // 右键菜单 / 中键自动滚动会打断"沿尺子推"的手势。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    /**
+     * 显示缩放倍数。
+     *
+     * 这里的结论是两次的**比值**,而缩放倍数在分子分母上会约掉——
+     * 所以它对本页的判定没有任何影响。带上它只是为了让两次列出来的
+     * 估算 DPI 和 DPI 测试页显示的是同一个数,免得两页对不上让人困惑。
+     */
+    const scale = window.devicePixelRatio || 1;
+
+    let distanceCm = 10;
+
+    let slowResult: RulerResult | null = null;
+    let fastResult: RulerResult | null = null;
+
+    const slowButton = el('start-slow') as HTMLButtonElement | null;
+    const fastButton = el('start-fast') as HTMLButtonElement | null;
+
+    // ---- 距离选择 ----
+
+    function renderDistances(): void {
+      for (const button of document.querySelectorAll<HTMLElement>('.distance')) {
+        button.setAttribute(
+          'aria-pressed',
+          Number(button.dataset.cm) === distanceCm ? 'true' : 'false',
+        );
+      }
+    }
+
+    for (const button of document.querySelectorAll<HTMLElement>('.distance')) {
+      button.addEventListener('click', () => {
+        if (slowRuler.running || fastRuler.running) return;
+        distanceCm = Number(button.dataset.cm) || 10;
+        renderDistances();
+        reset();
+      });
+    }
+
+    renderDistances();
+
+    // ---- 两次测量 ----
+
+    /**
+     * 两次测量共用同一套回调,靠 `which` 区分。
+     *
+     * 用同一个 `createRulerMeasurement` 建两个实例,而不是建一个反复用:
+     * 一次手势的起止点、极值都要独立保存,共用一个实例会让第二次覆盖掉第一次。
+     */
+    function makeRuler(which: 'slow' | 'fast') {
+      return createRulerMeasurement({
+        onProgress: (current) => {
+          setText(el(`${which}-px`), current.pixels.toFixed(0));
+        },
+        onFinish: (result) => {
+          setRunState(which, result ? 'done' : 'idle');
+          if (which === 'slow') slowResult = result;
+          else fastResult = result;
+
+          if (!result) {
+            setText(el(`${which}-meta`), t.noteTooShort);
+            render();
+            return;
+          }
+
+          setText(el(`${which}-px`), result.pixels.toFixed(0));
+          setText(
+            el(`${which}-speed`),
+            fill(t.speedMeta, { speed: result.speedPxPerSec.toFixed(0) }),
+          );
+          setText(el(`${which}-meta`), describe(result));
+          render();
+        },
+      });
+    }
+
+    const slowRuler = makeRuler('slow');
+    const fastRuler = makeRuler('fast');
+
+    function describe(result: RulerResult): string {
+      const dpi = estimateDpi({ pixels: result.pixels, distanceCm, scale });
+      const axis = result.axis === 'x' ? t.axisX : t.axisY;
+      const drift =
+        result.crossAxisDriftPx > result.pixels * 0.15
+          ? t.runMetaDrift
+          : '';
+      return fill(t.runMeta, {
+        cm: distanceCm,
+        px: result.pixels.toFixed(0),
+        axis,
+        dpi: format(dpi),
+        drift,
+      });
+    }
+
+    function setRunState(which: 'slow' | 'fast', state: 'idle' | 'running' | 'done'): void {
+      el(`run-${which}`)?.setAttribute('data-state', state);
+    }
+
+    // ---- 结论 ----
+
+    function render(): void {
+      const comparison = compareAcceleration(
+        slowResult ? estimateDpi({ pixels: slowResult.pixels, distanceCm, scale }) : null,
+        fastResult ? estimateDpi({ pixels: fastResult.pixels, distanceCm, scale }) : null,
+      );
+
+      // 第一次没做完之前不该让人开始第二次:顺序反了的话,两次的物理距离
+      // 就没法保证一致,比出来的比值没有意义
+      if (fastButton) fastButton.disabled = slowResult === null || fastRuler.running;
+
+      for (const row of document.querySelectorAll<HTMLElement>('[data-ref-level]')) {
+        row.dataset.current = row.dataset.refLevel === comparison.level ? 'true' : 'false';
+      }
+
+      if (comparison.ratio === null) {
+        setText(el('ratio'), t.dash);
+        setText(el('ratio-unit'), t.verdict.unit);
+        setBadge(el('level-badge'), t.badges.idle, 'idle');
+        setText(el('verdict-note'), t.verdict.noteIdle);
+        return;
+      }
+
+      setText(el('ratio'), comparison.ratio.toFixed(2));
+      setText(el('ratio-unit'), t.verdict.unit);
+
+      const notes: string[] = [];
+
+      // 速度差太小的话比值没有意义 —— 这一点必须由页面主动指出来,
+      // 否则用户会把"藏起来了"当成"没有加速"
+      const slowSpeed = slowResult?.speedPxPerSec ?? 0;
+      const fastSpeed = fastResult?.speedPxPerSec ?? 0;
+      const speedRatio = slowSpeed > 0 ? fastSpeed / slowSpeed : 0;
+
+      switch (comparison.level) {
+        case 'none':
+          setBadge(el('level-badge'), t.badges.none, 'good');
+          notes.push(t.notes.none);
+          break;
+        case 'mild':
+          setBadge(el('level-badge'), t.badges.mild, 'fair');
+          notes.push(t.notes.mild);
+          break;
+        case 'strong':
+          setBadge(el('level-badge'), t.badges.strong, 'poor');
+          notes.push(t.notes.strong);
+          break;
+        default:
+          setBadge(el('level-badge'), t.badges.unknown, 'idle');
+          notes.push(t.notes.unknown);
+      }
+
+      if (speedRatio > 0 && speedRatio < 2) {
+        notes.push(fill(t.noteSpeedGap, { ratio: speedRatio.toFixed(2) }));
+      }
+
+      if (comparison.level !== 'none' && comparison.level !== 'unknown') {
+        notes.push(t.noteTurnOff);
+      }
+
+      setText(el('verdict-note'), notes.join(' '));
+    }
+
+    // ---- 按钮 ----
+
+    slowButton?.addEventListener('click', () => {
+      slowResult = null;
+      setText(el('slow-px'), t.dash);
+      setText(el('slow-speed'), t.dash);
+      setText(el('slow-meta'), t.runs.slow.metaRunning);
+      setRunState('slow', 'running');
+      render();
+      slowRuler.start();
+    });
+
+    fastButton?.addEventListener('click', () => {
+      fastResult = null;
+      setText(el('fast-px'), t.dash);
+      setText(el('fast-speed'), t.dash);
+      setText(el('fast-meta'), t.runs.fast.metaRunning);
+      setRunState('fast', 'running');
+      render();
+      fastRuler.start();
+    });
+
+    function reset(): void {
+      slowRuler.cancel();
+      fastRuler.cancel();
+      slowResult = null;
+      fastResult = null;
+
+      setRunState('slow', 'idle');
+      setRunState('fast', 'idle');
+      setText(el('slow-px'), t.dash);
+      setText(el('fast-px'), t.dash);
+      setText(el('slow-speed'), t.dash);
+      setText(el('fast-speed'), t.dash);
+      setText(el('slow-meta'), t.runs.slow.metaIdle);
+      setText(el('fast-meta'), t.runs.fast.metaIdle);
+
+      if (slowButton) slowButton.disabled = false;
+      render();
+    }
+
+    el('reset')?.addEventListener('click', reset);
+
+    window.addEventListener('pagehide', () => {
+      slowRuler.destroy();
+      fastRuler.destroy();
+    });
+
+    reset();
+  </script>
+</BaseLayout>

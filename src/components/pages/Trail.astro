@@ -1,0 +1,981 @@
+---
+/*
+ * 鼠标轨迹测试页的**主体**。两个薄路由引它:中文的 `/trail-test/`
+ * 和英文的 `/en/trail-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各写三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 这一页特有的两条
+ *
+ * - **`metrics[2].note` 同时带占位符和 `**` 标记,`fill()` 必须在 `faqHtml()`
+ *   之前**(形状同 `Scroll.astro` 的 `stripLede`、`HoldDrag.astro` 的
+ *   `logLedeMark`)。那两个数字是 `analysis.ts` 的 `TRAIL_JUMP_FACTOR` /
+ *   `TRAIL_JUMP_FLOOR_PX`,在**接线时**填;反过来的话,填进去的数字会被
+ *   后面的转义当句子的一部分处理。所以下面先把整张表算出来再渲染。
+ * - **`noticePoints` 里的 `**` 走 `faqHtml()`**,那两条 `.notice` 里各有一处强调。
+ *
+ * **这一页一条站内链接都没有** —— 所以没有 `pageHref()` 的调用点,
+ * 也就没有那个 import(不留死引用)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { TRAIL_JUMP_FACTOR, TRAIL_JUMP_FLOOR_PX } from '../../lib/analysis';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.trail;
+
+/**
+ * 「怎么读这些数」那张表的四行。`note` 带 `**` 标记、第三行还带
+ * `{factor}` / `{floor}` 两个占位符(见文件头)。**`fill()` 在 `faqHtml()` 之前**。
+ *
+ * 给每一行都填一遍是无害的:没有占位符的行 `fill()` 找不到 `{}` 就原样返回。
+ */
+const METRIC_ROWS = t.metrics.map((row) => ({
+  metric: row.metric,
+  look: row.look,
+  noteHtml: faqHtml(
+    fill(row.note, { factor: TRAIL_JUMP_FACTOR, floor: TRAIL_JUMP_FLOOR_PX }),
+  ),
+}));
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="trail-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['trail-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['trail-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <div class="notice">
+    <ul>
+      {t.noticePoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+  </div>
+
+  <div id="cap-notice"></div>
+
+  <!--
+    模式开关。两个模式共用同一片测试区、同一个采样器,区别只在拿到缓冲区之后
+    走哪一套分析:画圈看丢帧,画直线看角度吸附。
+
+    直线模式是**试验性**的,判定本身不可靠 —— 原因写在它那一侧的判定说明里,
+    不长篇大论但必须说清楚。见 `analysis.ts` 的「轨迹:角度吸附」一节。
+  -->
+  <div class="controls">
+    <span class="test-hint">{t.modeLabel}</span>
+    <button type="button" id="mode-loop" class="mode-btn" aria-pressed="true">{t.modeLoop}</button>
+    <button type="button" id="mode-line" class="mode-btn" aria-pressed="false">{t.modeLine}</button>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="toggle">{t.drawStart}</button>
+    <button type="button" id="clear">{t.clear}</button>
+    <span class="test-hint" id="hint">{t.hintLoopIdle}</span>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well trail-area" id="area" data-drawing="false">
+        <canvas id="canvas"></canvas>
+        <div class="test-area__hint" id="overlay">{t.overlayLoop}</div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label" id="verdict-label">{t.verdictLabelLoop}</div>
+          <div>
+            <span class="verdict__value" id="jumps">—</span
+            ><span class="verdict__unit" id="verdict-unit">{t.verdictUnitLoop}</span>
+          </div>
+          <div class="verdict__note" id="verdict-note">
+            {t.verdictNoteIdle}
+          </div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="state-badge">{t.badges.idle}</span>
+        </div>
+      </div>
+
+      <!-- 采样点数是两个模式共用的,放在换挡的两块面板外面,免得切模式时一起消失 -->
+      <div class="stat-grid">
+        <StatPanel id="samples" label={t.stats.samples.label} />
+      </div>
+
+      <div class="stat-grid" id="stats-loop">
+        <StatPanel
+          id="duration"
+          label={t.stats.duration.label}
+          unit={t.stats.duration.unit}
+          hint={t.stats.duration.hint}
+        />
+        <StatPanel
+          id="over-count"
+          label={t.stats.overCount.label}
+          hint={t.stats.overCount.hint}
+        />
+        <StatPanel
+          id="median-step"
+          label={t.stats.medianStep.label}
+          unit={t.stats.medianStep.unit}
+          hint={t.stats.medianStep.hint}
+        />
+        <StatPanel id="max-step" label={t.stats.maxStep.label} unit={t.stats.maxStep.unit} />
+      </div>
+
+      <div class="stat-grid" id="stats-line" hidden>
+        <StatPanel
+          id="snap-strokes"
+          label={t.stats.snapStrokes.label}
+          hint={t.stats.snapStrokes.hint}
+        />
+        <StatPanel id="snap-near" label={t.stats.snapNear.label} hint={t.stats.snapNear.hint} />
+        <StatPanel id="snap-hit" label={t.stats.snapHit.label} hint={t.stats.snapHit.hint} />
+        <StatPanel id="snap-axes" label={t.stats.snapAxes.label} />
+      </div>
+
+      <!--
+        每条笔画各自的数。**这张表才是这一页真正要给人看的东西。**
+        判定本身不可信(见下面那段说明),但"这条线离它自己的拟合线最远差了
+        几个像素"是个可以直接照着看的量——用户能拿它跟自己的手感对上。
+      -->
+      <table class="ref-table stroke-table" id="stroke-table" hidden>
+        <thead>
+          <tr>
+            <th>{t.strokeColumns.index}</th>
+            <th>{t.strokeColumns.direction}</th>
+            <th>{t.strokeColumns.length}</th>
+            <th>{t.strokeColumns.axisDeviation}</th>
+            <th>{t.strokeColumns.maxResidual}</th>
+            <th>{t.strokeColumns.verdict}</th>
+          </tr>
+        </thead>
+        <tbody id="stroke-rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.metricsHeading}</h2>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>{t.metricColumns.metric}</th>
+          <th>{t.metricColumns.look}</th>
+          <th>{t.metricColumns.note}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          METRIC_ROWS.map((row) => (
+            <tr>
+              <td>{row.metric}</td>
+              <td>{row.look}</td>
+              <td set:html={row.noteHtml} />
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>{t.driftHeading}</h2>
+    <p set:html={faqHtml(t.driftLede)} />
+    <div class="controls">
+      <button type="button" id="drift-start">{t.driftStart}</button>
+      <span class="test-hint" id="drift-hint">{t.driftHintIdle}</span>
+    </div>
+    <div class="stat-grid">
+      <StatPanel
+        id="drift-samples"
+        label={t.stats.driftSamples.label}
+        hint={t.stats.driftSamples.hint}
+      />
+      <StatPanel
+        id="drift-path"
+        label={t.stats.driftPath.label}
+        unit={t.stats.driftPath.unit}
+        hint={t.stats.driftPath.hint}
+      />
+      <StatPanel
+        id="drift-span"
+        label={t.stats.driftSpan.label}
+        unit={t.stats.driftSpan.unit}
+        hint={t.stats.driftSpan.hint}
+      />
+      <StatPanel id="drift-verdict" label={t.stats.driftVerdict.label} />
+    </div>
+    <p class="prose" set:html={faqHtml(t.driftZero)} />
+    <p class="prose" set:html={faqHtml(t.driftAmbiguity)} />
+    <p class="prose" set:html={faqHtml(t.driftHandOff)} />
+  </section>
+
+  <section class="prose prose--cards">
+    <h2>{t.limitsHeading}</h2>
+
+    {/*
+      和 `hold-drag-test` 同一处改法:**两个 `<p>`,每段里已经有一个加粗的点,
+      只是埋在句子中间**。改排成清单之后那两点变成卡片,**句子原文一个字没改**,
+      只把点提到开头、把「最重要的一条是前面反复说的」「同理,」这两句承接
+      收进句子里。
+    */}
+    <ul>
+      {t.limitsPoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .trail-area {
+      height: 420px;
+      cursor: crosshair;
+
+      /*
+       * **抬到流星拖尾上面。**
+       *
+       * 拖尾是壳里那层 `z-index: 3` 的固定画布,压在正文之上;而这一页的指针
+       * 本来就一直在动,于是那条绿尾巴会**一直画在你自己画的轨迹上** —— 更糟的是
+       * 这一页画的轨迹**也是磷光绿**,两种绿叠在一起分不出谁是谁。
+       *
+       * `.test-area` 自己就是 `position: relative`,所以 `z-index` 直接生效。
+       * 星空是 `-1`,照样在后面 —— 抬这一层不影响它。
+       */
+      z-index: 4;
+    }
+
+    /*
+     * 模式按钮**没有本页样式**:选中态由全局的 `button[aria-pressed='true']`
+     * 给(实心药丸 + 反色字),和双击页的 `.target`、CPS 页的 `.duration`
+     * 是同一套。这里曾经写过一条 `[data-active='true'] { 描边 + 墨色字 }`,
+     * 那是同一件事的第二种说法 —— 两套并存迟早有一套忘记跟着改。
+     */
+
+    /* 每条笔画一行,数字要能竖着对齐扫下来 */
+    .stroke-table {
+      margin-top: 14px;
+    }
+
+    /* 同 global.css 里 `.site-nav__more[hidden]` 那条:显式管住,不指望 UA 规则 */
+    .stroke-table[hidden] {
+      display: none;
+    }
+
+    .stroke-table td {
+      font-variant-numeric: tabular-nums;
+      padding: 7px 14px 7px 0;
+    }
+
+    .stroke-table th {
+      padding: 7px 14px 7px 0;
+    }
+
+
+    .trail-area[data-drawing='true'] {
+      border-color: var(--accent);
+    }
+
+    /* 画布铺满测试区。颜色由渲染层从 --trail-color 读取,不在 TS 里硬编码 */
+    .trail-area canvas {
+      position: absolute;
+      inset: 0;
+    }
+
+    /*
+     * 绘制期间抑制文字选中。指针在画布上拖动会顺带选中页面上的正文,
+     * 高亮一片蓝色,看起来像页面出了问题。
+     */
+    :global(html.is-testing) {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+  </style>
+
+  <script>
+    import {
+      analyzeSegments,
+      detectAngleSnap,
+      detectTrailJumps,
+      isNearAxis,
+      isSnapped,
+      measureDrift,
+      segmentTimestamps,
+      snapAxis,
+      strokeShape,
+      type StrokeShape,
+    } from '../../lib/analysis';
+    import { createTrailRenderer, observeResize } from '../../lib/renderer';
+    import { createMoveSampler } from '../../lib/sampler';
+    import {
+      createTicker,
+      el,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.trail;
+
+    // 结论只读 x / y(`detectTrailJumps` 整段没有时间戳,`measureDrift` 只有计数和跨度) —— **一个事件时间戳都不读**,所以四条与时间戳精度
+    // 有关的告警一条都不该发。判据和手稳度 / DPI 两页是同一条:
+    // 「这一页的结论吃不吃**两个事件之间**差多久」。
+    mountCapabilityNotices(el('cap-notice'), { timing: false });
+
+    // 右键菜单 / 中键自动滚动会打断画圈和沿尺子推的手势。判据和实现见 ui.ts
+    suppressWorkbenchDefaults();
+
+    const DRIFT_MS = 5000;
+
+    const area = el('area');
+    const canvas = el('canvas') as HTMLCanvasElement | null;
+    const overlay = el('overlay');
+    const toggle = el('toggle') as HTMLButtonElement | null;
+    const driftStart = el('drift-start') as HTMLButtonElement | null;
+
+    if (!area || !canvas) throw new Error('测试区未就绪');
+
+    /**
+     * 画轨迹用的采样面是**测试区**,并且**关掉指针捕获**。
+     *
+     * 捕获会把指针事件全部重定向到画布上,画布的移动事件确实不会丢,
+     * 但捕获同时会把 `click` 一起重定向过去——页面上的按钮就再也点不动了。
+     * 画圈本来也不会甩出区域,这个代价不值得付。
+     *
+     * 采样面只取测试区,是因为轨迹也只该画在这个框里。
+     */
+    const sampler = createMoveSampler(area, { capture: false });
+    // 等用户点"开始绘制"再采。否则从页面加载起就一直在收事件,既浪费,
+    // 也会把用户移向按钮的路线混进轨迹里
+    sampler.stop();
+
+    /**
+     * 静止漂移用**另一个**采样器,面是**整个文档**。这一条不是随便选的。
+     *
+     * 漂移测试要求用户把手离开鼠标,而手离开之后指针就停在最后一次点击的位置
+     * ——也就是"开始静止测试"那个按钮上,而那个按钮在测试区**外面**。
+     * `pointermove` 只会派发到指针所在元素及其祖先,所以采样面如果只有测试区,
+     * 缓冲区永远是空的:不管鼠标是好是坏,都会报"完全静止"。
+     * 一个永远测不出故障的测试比没有测试更糟,所以这里必须铺到整个文档。
+     *
+     * 两者在时间上互斥,但面不同,没法共用一个实例。
+     */
+    const driftSampler = createMoveSampler(document.documentElement, {
+      capture: false,
+      capacity: 60_000,
+    });
+    driftSampler.stop();
+
+    const renderer = createTrailRenderer(canvas, sampler.buffer, { fade: 0.02 });
+
+    /**
+     * 漂移测试的阶段。
+     *
+     * - `arming`:等第一个采样到来,用来**证明页面收得到信号**
+     * - `settling`:确认已经停手(采样数不再增长)
+     * - `measuring`:真正的 5 秒窗口
+     *
+     * `arming` 这一步是必需的:没有它,"0 个采样"既可能是鼠标真的安静,
+     * 也可能是指针根本不在浏览器窗口里、页面压根没在听。两者在数据上完全一样,
+     * 而结论天差地别。用"先收到过信号"把后者排除掉,0 才真正等于静止。
+     */
+    type DriftPhase = 'idle' | 'arming' | 'settling' | 'measuring';
+    let driftPhase: DriftPhase = 'idle';
+    let driftStartedAt = 0;
+    let driftTimer = 0;
+    /** `settling` 期间用来判断"采样数已经不再增长" */
+    let driftLastN = 0;
+    let driftGrewAt = 0;
+    /** 等第一个采样的上限。超了就说明收不到信号,如实报告而不是判成"静止" */
+    const ARM_TIMEOUT_MS = 15_000;
+    /** 采样数不再增长多久,才认为用户已经停手 */
+    const SETTLE_MS = 600;
+
+    let drawing = false;
+
+    // ---- 模式 ----
+
+    type Mode = 'loop' | 'line';
+    let mode: Mode = 'loop';
+
+    /**
+     * 直线模式下判断"两条笔画之间"的停顿阈值,比画圈那套用的 50ms 宽。
+     *
+     * 画圈时手腕的微停顿不该切断轨迹;而直线模式里换一条线是**刻意**的,
+     * 用户会明显停一下。宽一点才切得准 —— 切不准的代价不对称:把两条方向
+     * 不同的线缝成一条,拟合出来的"残差"就完全是假的。
+     */
+    const LINE_MAX_GAP_MS = 120;
+
+    /** 一条笔画至少要几个采样才送去量形状(与 analysis 的 SNAP_MIN_SAMPLES 对齐) */
+    const LINE_MIN_SAMPLES = 20;
+
+    const LOOP_HINT = t.hintLoopIdle;
+    const LINE_HINT = t.hintLineIdle;
+
+    // ---- 轨迹绘制 ----
+
+    function startDrawing(): void {
+      if (driftPhase !== 'idle') return;
+      drawing = true;
+      sampler.reset();
+      renderer.clear();
+      sampler.start();
+      renderer.start();
+
+      area?.setAttribute('data-drawing', 'true');
+      overlay?.setAttribute('hidden', '');
+      document.documentElement.classList.add('is-testing');
+      setBadge(el('state-badge'), t.badges.drawing, 'good');
+      setText(
+        el('hint'),
+        mode === 'line' ? t.hintLineDrawing : t.hintLoopDrawing,
+      );
+      if (toggle) toggle.textContent = t.drawStop;
+    }
+
+    function stopDrawing(): void {
+      if (!drawing) return;
+      drawing = false;
+      sampler.stop();
+      renderer.stop();
+
+      area?.setAttribute('data-drawing', 'false');
+      document.documentElement.classList.remove('is-testing');
+      if (toggle) toggle.textContent = t.drawRestart;
+      analyze();
+    }
+
+    /** 把两套读数一起清空。模式切换和“清空轨迹”都要用,别各写一份。 */
+    function clearReadouts(): void {
+      setText(el('jumps'), '—');
+      setBadge(el('state-badge'), t.badges.idle, 'idle');
+      setText(el('verdict-note'), t.verdictNoteIdle);
+      for (const id of ['samples', 'duration', 'over-count', 'median-step', 'max-step'])
+        setStat(id, '—');
+      for (const id of ['snap-strokes', 'snap-near', 'snap-hit', 'snap-axes']) setStat(id, '—');
+      el('stroke-rows')?.replaceChildren();
+      el('stroke-table')?.setAttribute('hidden', '');
+    }
+
+    /** 画完之后按当前模式分派。两套分析共用同一个缓冲区。 */
+    function analyze(): void {
+      if (mode === 'line') analyzeStrokes();
+      else analyzeJumps();
+    }
+
+    /**
+     * 直线模式:把每一笔拟合成一条线,量它离**自己的拟合线**有多远。
+     *
+     * 判定给不给得出来是次要的 —— 这一页真正有信息量的是那张逐条笔画的表。
+     * 判定本身在浏览器数据上不可靠,原因见下面那段说明。
+     */
+    function analyzeStrokes(): void {
+      const buffer = sampler.buffer;
+
+      /*
+       * 靠**停顿**切段:用户画完一条线换下一条时会停一下,那段时间鼠标一个
+       * 报文都不发,缓冲区里留下一个空档。阈值给得比画圈那套宽,理由见
+       * LINE_MAX_GAP_MS。
+       */
+      const segments = segmentTimestamps(buffer.t, buffer.n, {
+        maxGapMs: LINE_MAX_GAP_MS,
+        minSamples: LINE_MIN_SAMPLES,
+        minDurationMs: 0,
+      });
+
+      const shapes: StrokeShape[] = [];
+      for (const seg of segments) {
+        const shape = strokeShape(buffer.x, buffer.y, seg.start, seg.end);
+        if (shape) shapes.push(shape);
+      }
+
+      setStat('samples', String(buffer.n));
+      renderStrokeTable(shapes);
+
+      if (shapes.length === 0) {
+        setText(el('jumps'), '—');
+        setBadge(el('state-badge'), t.badges.tooFewStrokes, 'idle');
+        setText(
+          el('verdict-note'),
+          segments.length === 0
+            ? t.runtime.strokesNone
+            : fill(t.runtime.strokesTooShort, { segments: segments.length }),
+        );
+        for (const id of ['snap-strokes', 'snap-near', 'snap-hit', 'snap-axes'])
+          setStat(id, '—');
+        return;
+      }
+
+      const stats = detectAngleSnap(shapes);
+      setStat('snap-strokes', String(shapes.length));
+      setStat('snap-near', String(stats.nearAxisStrokes));
+      setStat('snap-hit', String(stats.snappedStrokes));
+      setStat(
+        'snap-axes',
+        stats.axes.length
+          ? stats.axes
+              .map((a) => (a === 0 ? t.runtime.axisHorizontal : t.runtime.axisVertical))
+              .join(t.runtime.axisJoiner)
+          : '—',
+      );
+      setText(el('jumps'), String(stats.snappedStrokes));
+
+      if (!stats.conclusive) {
+        setBadge(el('state-badge'), t.badges.inconclusive, 'idle');
+        setText(
+          el('verdict-note'),
+          fill(t.runtime.strokesInconclusive, { near: stats.nearAxisStrokes }),
+        );
+        return;
+      }
+
+      if (!stats.hasSnapping) {
+        setBadge(el('state-badge'), t.badges.noSnapping, 'good');
+        setText(
+          el('verdict-note'),
+          fill(t.runtime.strokesNoSnap, {
+            near: stats.nearAxisStrokes,
+            snapped: stats.snappedStrokes,
+          }),
+        );
+        return;
+      }
+
+      setBadge(el('state-badge'), t.badges.snapping, 'fair');
+      setText(
+        el('verdict-note'),
+        fill(t.runtime.strokesSnapped, {
+          near: stats.nearAxisStrokes,
+          snapped: stats.snappedStrokes,
+        }),
+      );
+    }
+
+    /** 把每条笔画的数摊成一张表 —— 判定可能不可信,但残差是能直接看的量。 */
+    function renderStrokeTable(shapes: readonly StrokeShape[]): void {
+      const tbody = el('stroke-rows');
+      const table = el('stroke-table');
+      if (!tbody || !table) return;
+
+      if (shapes.length === 0) {
+        tbody.replaceChildren();
+        table.setAttribute('hidden', '');
+        return;
+      }
+      table.removeAttribute('hidden');
+
+      tbody.replaceChildren(
+        ...shapes.map((shape, i) => {
+          const tr = document.createElement('tr');
+          const cells = [
+            String(i + 1),
+            snapAxis(shape.angleDeg) === 0 ? t.runtime.axisHorizontal : t.runtime.axisVertical,
+            shape.length.toFixed(0),
+            fill(t.runtime.strokeAxisDeviation, { deg: shape.axisDeviationDeg.toFixed(2) }),
+            shape.maxResidual.toFixed(3),
+            !isNearAxis(shape)
+              ? t.runtime.strokeVerdictNotJudged
+              : isSnapped(shape)
+                ? t.runtime.strokeVerdictSnapped
+                : '—',
+          ];
+          for (const text of cells) {
+            const td = document.createElement('td');
+            td.textContent = text;
+            tr.append(td);
+          }
+          return tr;
+        }),
+      );
+    }
+
+    /** 画圈模式:数轨迹里的孤立尖峰。判据见 `detectTrailJumps`。 */
+    function analyzeJumps(): void {
+      const buffer = sampler.buffer;
+      // 只取最长的一段连续运动:中间停顿留下的空档会把中位步长拉低,
+      // 从而把判定门槛也一起拉低,凭空造出一堆"跳变"
+      const analysis = analyzeSegments(buffer.t, buffer.n);
+      if (!analysis) {
+        setText(el('jumps'), '—');
+        setBadge(el('state-badge'), t.badges.insufficient, 'idle');
+        setText(el('verdict-note'), t.runtime.jumpsTooShort);
+        for (const id of ['over-count', 'median-step', 'max-step']) setStat(id, '—');
+        return;
+      }
+
+      const jumps = detectTrailJumps(buffer.x, buffer.y, analysis.segment);
+      setStat('samples', String(buffer.n));
+      setStat('duration', analysis.durationMs.toFixed(0));
+
+      if (!jumps) {
+        setText(el('jumps'), '—');
+        setBadge(el('state-badge'), t.badges.insufficient, 'idle');
+        setText(el('verdict-note'), t.runtime.jumpsTooFewSamples);
+        for (const id of ['over-count', 'median-step', 'max-step']) setStat(id, '—');
+        return;
+      }
+
+      setStat('over-count', String(jumps.jumps));
+      setStat('median-step', jumps.medianStep.toFixed(1));
+      setStat('max-step', jumps.maxStep.toFixed(1));
+
+      // 标题给的是**孤立尖峰**而不是超线间隔总数。
+      //
+      // 超线间隔里混着"手甩快了"造成的连续隆起,那个数只能当分母用;
+      // 而孤立尖峰——自己超线、左右两个邻居都没超——才是丢帧的形状。
+      // 页面反复讲"跳变不等于丢帧",标题就不能再端出一个两者混在一起的数。
+      setText(el('jumps'), String(jumps.isolated));
+
+      if (jumps.jumps === 0) {
+        setBadge(el('state-badge'), t.badges.noJumps, 'good');
+        setText(
+          el('verdict-note'),
+          fill(t.runtime.jumpsAllWithin, {
+            steps: jumps.steps,
+            threshold: jumps.threshold.toFixed(1),
+            maxStep: jumps.maxStep.toFixed(1),
+          }),
+        );
+        return;
+      }
+
+      if (jumps.isolated === 0) {
+        // 超线的一个都不孤立 —— 全是连着出现的,也就是一整段隆起
+        setBadge(el('state-badge'), t.badges.noIsolated, 'good');
+        setText(
+          el('verdict-note'),
+          fill(t.runtime.jumpsAllClustered, {
+            jumps: jumps.jumps,
+            threshold: jumps.threshold.toFixed(1),
+          }),
+        );
+        return;
+      }
+
+      // 有孤立尖峰也不直接判故障 —— 手在某几下抖一下同样会是孤立尖峰,
+      // 所以照旧只把形态摊开,判读权留给用户
+      setBadge(el('state-badge'), t.badges.isolated, 'fair');
+      setText(
+        el('verdict-note'),
+        fill(t.runtime.jumpsIsolated, {
+          steps: jumps.steps,
+          jumps: jumps.jumps,
+          isolated: jumps.isolated,
+          threshold: jumps.threshold.toFixed(1),
+          maxStep: jumps.maxStep.toFixed(1),
+        }),
+      );
+    }
+
+    /**
+     * 切换模式。两套读数、标签、提示文案、按钮高亮一起换,缓冲区清掉重来。
+     *
+     * 两种画法是**互斥的**:画圈的数据里没有直线笔画,画直线的数据里也没有
+     * 圆滑的轨迹。共用一片测试区就必须换模式,不能同时分析。
+     */
+    function setMode(next: Mode): void {
+      if (mode === next) return;
+      // 先按**旧**模式收尾出结果,再整体清掉 —— 顺序反了会拿新判据去分析
+      // 旧数据,那是纯粹的假结论
+      if (drawing) stopDrawing();
+      mode = next;
+
+      const line = next === 'line';
+      // 选中态走全局的 `button[aria-pressed='true']` —— 和双击页的 `.target`、
+      // CPS 页的 `.duration` 是同一套。别再各写一个 `data-active` 加一条规则。
+      el('mode-loop')?.setAttribute('aria-pressed', String(!line));
+      el('mode-line')?.setAttribute('aria-pressed', String(line));
+
+      // 注意:`.stat-grid` 是 display: grid,而 `[hidden]` 那条 UA 规则
+      // 压不过它 —— 页面的 <style> 里补了 .stat-grid[hidden] { display: none }
+      el('stats-loop')?.toggleAttribute('hidden', line);
+      el('stats-line')?.toggleAttribute('hidden', !line);
+
+      setText(el('verdict-label'), line ? t.verdictLabelLine : t.verdictLabelLoop);
+      setText(el('verdict-unit'), line ? t.verdictUnitLine : t.verdictUnitLoop);
+      overlay?.removeAttribute('hidden');
+      setText(
+        el('overlay'),
+        line ? t.overlayLine : t.overlayLoop,
+      );
+      setText(el('hint'), line ? LINE_HINT : LOOP_HINT);
+
+      sampler.reset();
+      renderer.clear();
+      clearReadouts();
+      if (toggle) toggle.textContent = t.drawStart;
+    }
+
+    el('mode-loop')?.addEventListener('click', () => setMode('loop'));
+    el('mode-line')?.addEventListener('click', () => setMode('line'));
+
+    toggle?.addEventListener('click', () => {
+      if (drawing) stopDrawing();
+      else startDrawing();
+    });
+
+    el('clear')?.addEventListener('click', () => {
+      if (drawing) return;
+      sampler.reset();
+      // 缓冲区清空后渲染层的游标还停在旧位置上,必须先对齐再重绘,
+      // 否则它会去读已经不存在的采样
+      renderer.clear();
+      clearReadouts();
+      overlay?.removeAttribute('hidden');
+      setText(el('hint'), mode === 'line' ? LINE_HINT : LOOP_HINT);
+      if (toggle) toggle.textContent = t.drawStart;
+    });
+
+    // ---- 静止漂移 ----
+
+    /**
+     * 开始静止漂移测试。
+     *
+     * 不直接开计时:先进入 `arming`,等页面真的收到一个采样,再让用户停手。
+     * 见 `DriftPhase` 的注释——这一步决定了"0 个采样"到底意味着什么。
+     */
+    function startDrift(): void {
+      if (drawing || driftPhase !== 'idle') return;
+
+      driftSampler.reset();
+      driftSampler.start();
+      driftPhase = 'arming';
+      driftGrewAt = performance.now();
+
+      if (driftStart) driftStart.disabled = true;
+      for (const id of ['drift-samples', 'drift-path', 'drift-span']) setStat(id, '—');
+      setStat('drift-verdict', t.runtime.driftPreparing);
+      setText(el('drift-hint'), t.runtime.driftHintArmed);
+    }
+
+    /** 收到信号了,开始等用户停手。 */
+    function settleDrift(): void {
+      driftPhase = 'settling';
+      driftLastN = driftSampler.buffer.n;
+      driftGrewAt = performance.now();
+      setText(el('drift-hint'), t.runtime.driftHintSettling);
+    }
+
+    /** 真正开测。把"晃动确认"和"停手过程"留下的采样全部丢掉。 */
+    function beginDriftWindow(): void {
+      driftPhase = 'measuring';
+      driftSampler.reset();
+      driftStartedAt = performance.now();
+      driftTimer = window.setTimeout(finishDrift, DRIFT_MS);
+      setStat('drift-verdict', t.runtime.driftMeasuring);
+    }
+
+    /** 收尾:停止采样,复位阶段和按钮。 */
+    function endDrift(): void {
+      driftPhase = 'idle';
+      driftSampler.stop();
+      window.clearTimeout(driftTimer);
+      driftTimer = 0;
+      if (driftStart) driftStart.disabled = false;
+    }
+
+    /**
+     * 一直等不到采样:如实说"收不到信号",**不能**判成"静止"。
+     *
+     * 指针在浏览器窗口外、或者鼠标根本没接上,都会走到这里。这与"鼠标很安静"
+     * 在数据上完全无法区分,所以只能把两种情况都摊开讲,让用户自己确认。
+     */
+    function abortDrift(): void {
+      endDrift();
+      for (const id of ['drift-samples', 'drift-path', 'drift-span']) setStat(id, '—');
+      setStat('drift-verdict', t.runtime.driftNoSignal);
+      setText(
+        el('drift-hint'),
+        fill(t.runtime.driftHintTimeout, { seconds: ARM_TIMEOUT_MS / 1000 }),
+      );
+    }
+
+    function finishDrift(): void {
+      endDrift();
+      setText(el('drift-hint'), t.driftHintIdle);
+
+      const buffer = driftSampler.buffer;
+      const n = buffer.n;
+
+      // 走到这里说明 arming 阶段确实收到过采样,装置是活的 —— 所以此刻的
+      // "0 个采样"是**真的静止**,不是"没在听"。这是整个 arming 流程换来的东西。
+      //
+      // 还必须单独处理,因为 `measureDrift` 对空区间返回 null(表示样本不足),
+      // 照搬会把"完全静止"显示成"测不出来",正好把结论说反。
+      if (n === 0) {
+        setStat('drift-samples', '0');
+        setStat('drift-path', '0');
+        setStat('drift-span', '0');
+        setStat('drift-verdict', t.runtime.driftCompletelyStill);
+        setText(el('drift-hint'), t.runtime.driftHintStill);
+        return;
+      }
+
+      const drift = measureDrift(buffer.x, buffer.y, { start: 0, end: n });
+      if (!drift) {
+        setStat('drift-samples', String(n));
+        setStat('drift-verdict', t.runtime.driftCannotMeasure);
+        setText(el('drift-hint'), t.runtime.driftHintError);
+        return;
+      }
+
+      setStat('drift-samples', String(drift.samples));
+      setStat('drift-path', drift.pathPx.toFixed(1));
+      setStat('drift-span', drift.spanPx.toFixed(1));
+
+      if (drift.pathPx <= 2) {
+        setStat('drift-verdict', t.runtime.driftMostlyStill);
+        setText(el('drift-hint'), t.runtime.driftHintMostlyStill);
+      } else {
+        setStat('drift-verdict', t.runtime.driftHasDrift);
+        setText(
+          el('drift-hint'),
+          fill(t.runtime.driftHintDrift, {
+            samples: drift.samples,
+            path: drift.pathPx.toFixed(1),
+          }),
+        );
+      }
+    }
+
+    driftStart?.addEventListener('click', startDrift);
+
+    /**
+     * 漂移测试的推进器。
+     *
+     * 三个阶段都靠它走:`arming` 等第一个采样(超时则如实报"没收到信号"),
+     * `settling` 等采样数不再增长(说明用户停手了),`measuring` 推倒计时读数
+     * ——静止时没有任何事件可监听,剩余秒数只能靠刷新循环推上去。
+     */
+    const stopTicker = createTicker(100, (now) => {
+      if (driftPhase === 'idle') return;
+
+      const n = driftSampler.buffer.n;
+
+      if (driftPhase === 'arming') {
+        if (n > 0) settleDrift();
+        else if (now - driftGrewAt > ARM_TIMEOUT_MS) abortDrift();
+        return;
+      }
+
+      if (driftPhase === 'settling') {
+        // 采样数还在涨说明用户没停手,把计时往后推
+        if (n > driftLastN) {
+          driftLastN = n;
+          driftGrewAt = now;
+        } else if (now - driftGrewAt > SETTLE_MS) {
+          beginDriftWindow();
+        }
+        return;
+      }
+
+      const left = Math.max(0, DRIFT_MS - (now - driftStartedAt));
+      setText(
+        el('drift-hint'),
+        fill(t.runtime.driftHintRunning, { seconds: (left / 1000).toFixed(1) }),
+      );
+    });
+
+    // ---- 生命周期 ----
+
+    /**
+     * 测试区尺寸变了就得让渲染层重算 DPR 缩放和坐标原点,否则轨迹会错位。
+     *
+     * 重算会**清掉已经画出来的轨迹**——历史点存的是 client 坐标,而基准变了,
+     * 重绘旧轨迹只会画出一条错误的线。这是渲染层刻意的取舍,不是 bug。
+     * 分析用的数据在缓冲区里,不受影响。
+     */
+    const unobserve = observeResize(area, () => {
+      renderer.resize();
+    });
+
+    // 窗口失焦时用户已经不在看这个页面了,继续画没有意义,收尾出结果
+    window.addEventListener('blur', () => {
+      if (drawing) stopDrawing();
+    });
+
+    window.addEventListener('pagehide', () => {
+      stopTicker();
+      unobserve();
+      window.clearTimeout(driftTimer);
+      if (drawing) stopDrawing();
+      sampler.destroy();
+      driftSampler.destroy();
+      renderer.destroy();
+      document.documentElement.classList.remove('is-testing');
+    });
+  </script>
+</BaseLayout>

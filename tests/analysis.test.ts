@@ -493,7 +493,9 @@ describe('assessQuality', () => {
     });
     expect(quality.level).toBe('poor');
     expect(quality.duplicateRatio).toBeCloseTo(0.75, 9);
-    expect(quality.issues[0].message).toContain('计时精度');
+    // **断言的是代码不是句子** —— 句子住在 i18n 的目录里,而且分了语言。
+    // 这条守的仍然是同一件事:重复比例过高时必须判到那条判据上
+    expect(quality.issues[0].code).toBe('duplicate-poor');
   });
 
   it('重复比例中等时只降到"一般",不夸大成不可信', () => {

@@ -15,11 +15,10 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import StatPanel from '../../components/StatPanel.astro';
 import { faqHtml, faqText } from '../../lib/faq';
-import { href } from '../../lib/url';
 import { cmPer360, GAMES } from '../../lib/sensitivity';
 import { TOOL_MOTIF } from '../../lib/tool-motifs';
 import { TOOL_HUE } from '../../lib/tool-hues';
-import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import { DEFAULT_LOCALE, fill, getCatalog, pageHref } from '../../lib/i18n';
 import type { Locale } from '../../lib/i18n';
 
 interface Props {
@@ -113,7 +112,7 @@ const jsonLd = {
   <p
     class="prose"
     set:html={fill(faqHtml(t.dpiLede), {
-      dpiTestLink: `<a href="${href('dpi-test/')}">${t.dpiTestLink}</a>`,
+      dpiTestLink: `<a href="${pageHref(locale, 'dpi-test')}">${t.dpiTestLink}</a>`,
     })}
   />
 
@@ -184,7 +183,8 @@ const jsonLd = {
         t.formulas.map((item) => (
           <li>
             <strong>{item.title}</strong>
-            {item.body}
+            {/* 同 `Cps.astro`:目录里的正文可能带 `**`,必须走 `faqHtml` 而不是转义输出 */}
+            <Fragment set:html={faqHtml(item.body)} />
           </li>
         ))
       }

@@ -20,10 +20,9 @@
  */
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { faqHtml, faqText } from '../../lib/faq';
-import { href } from '../../lib/url';
 import { TOOL_MOTIF } from '../../lib/tool-motifs';
 import { TOOL_HUE } from '../../lib/tool-hues';
-import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import { DEFAULT_LOCALE, fill, getCatalog, pageHref } from '../../lib/i18n';
 import type { Locale } from '../../lib/i18n';
 
 interface Props {
@@ -142,7 +141,7 @@ const jsonLd = {
       */}
       <li
         set:html={fill(faqHtml(t.steps[2]), {
-          link: `<a href="${href('button-test/')}">${buttonTestLabel}</a>`,
+          link: `<a href="${pageHref(locale, 'button-test')}">${buttonTestLabel}</a>`,
         })}
       />
     </ol>

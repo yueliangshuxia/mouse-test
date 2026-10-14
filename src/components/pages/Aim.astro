@@ -1,0 +1,664 @@
+---
+/*
+ * 瞄准测试页的**主体**。两个薄路由引它:中文的 `/aim-test/`
+ * 和英文的 `/en/aim-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各写三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## `**…**` / `` `…` `` 在这—页特别多,而且**必须走 `faqHtml()`**
+ *
+ * 模板里原来那些 `<strong>` / `<code>` 搬进目录时改成了 `**…**` / `` `…` ``,
+ * 所以凡是从目录取的**整段**都要 `set:html={faqHtml(...)}` —— 用 `{t.…}` 插值是
+ * **转义输出**,屏幕上会原样印出星号和反引号,而且**不报任何错**。这一页里:
+ * `lede` / `ledeCaveat` / `readoutsPoints[]` / `influencesPoints[]` / `lockNote` /
+ * `paramsLede` / `params[].value` / `faq[].a`(JSON-LD 那一份走 `faqText`)。
+ *
+ * **`readoutsPoints` 与 `influencesPoints` 开头的 `**…**` 不只是加粗** ——
+ * `.prose--cards li > strong:first-child` 会把每条开头那个 `<strong>` 排成卡片标题,
+ * 而 `lockNote` 不在那个 section 里,它开头那处 `**` 只是普通强调。
+ *
+ * ## `params` 那几个数是常量,由这里 `fill()` 填
+ *
+ * 目录里 `params[].value` 带 `{multi}` / `{single}` / `{easy}` / `{standard}` /
+ * `{hard}` 五个占位符,填的是 `analysis.ts` 的 `TARGET_COUNT` / `TARGET_DIAMETER_PX` ——
+ * **不把常量抄进目录**(理由同 `pages/scroll.ts` 的 `deltaModes`:抄两份就会静默漂)。
+ * `fill()` 在 `faqHtml()` **之前** —— 反过来的话刚插进去的标签会被转义掉。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { TARGET_COUNT, TARGET_DIAMETER_PX } from '../../lib/analysis';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.aim;
+
+/*
+ * 时长档直接把 `t.durations` 渲染出去 —— `ms` 同时是按钮上的 `data-value`,
+ * 脚本那边读按钮文本,所以这一份只有目录一个来源(没有第二处 `DURATIONS`)。
+ */
+
+/**
+ * 「参数」那张表。**取值里的数是模块常量**,由 `fill()` 填,见文件头。
+ */
+const PARAMS = t.params.map((row) => ({
+  key: row.key,
+  value: fill(row.value, {
+    multi: TARGET_COUNT.multi,
+    single: TARGET_COUNT.single,
+    easy: TARGET_DIAMETER_PX.easy,
+    standard: TARGET_DIAMETER_PX.standard,
+    hard: TARGET_DIAMETER_PX.hard,
+  }),
+}));
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="aim-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['aim-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['aim-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <p class="prose" set:html={faqHtml(t.ledeCaveat)} />
+
+  <div id="cap-notice"></div>
+
+  {/*
+    三组设置。**初始不写 `aria-pressed`** —— 状态的唯一来源是脚本里那三个变量,
+    载入时由 `renderChoices()` 一次性刷成正确的选中态(同 CPS 页的 `renderDurations`)。
+    两边各写一份默认值的话,改了脚本没改标记,高亮的按钮会和真正的档位对不上,
+    而那**不会报错**。
+  */}
+  <div class="controls" role="group" aria-label={t.groupAria.mode}>
+    <span class="test-hint">{t.groupLabel.mode}</span>
+    <button type="button" data-group="mode" data-value="multi">{t.modeOptions.multi}</button>
+    <button type="button" data-group="mode" data-value="single">{t.modeOptions.single}</button>
+  </div>
+
+  <div class="controls" role="group" aria-label={t.groupAria.difficulty}>
+    <span class="test-hint">{t.groupLabel.difficulty}</span>
+    <button type="button" data-group="difficulty" data-value="easy">{t.difficultyOptions.easy}</button>
+    <button type="button" data-group="difficulty" data-value="standard">
+      {t.difficultyOptions.standard}
+    </button>
+    <button type="button" data-group="difficulty" data-value="hard">{t.difficultyOptions.hard}</button>
+  </div>
+
+  <div class="controls" role="group" aria-label={t.groupAria.duration}>
+    <span class="test-hint">{t.groupLabel.duration}</span>
+    {
+      t.durations.map((option) => (
+        <button type="button" data-group="duration" data-value={option.ms}>
+          {option.label}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="controls">
+    <button type="button" id="toggle">{t.start}</button>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      {/*
+        **不用 canvas,靶子是 DOM 元素。** 这一条消掉了整整一类问题:
+        命中区与绘制区按构造就是同一个几何(两处都从同一组 left/top/宽高来),
+        没有画布尺寸、没有 DPR 缩放、没有中途换显示器导致的缩放变化,
+        也没有"事件回调里绝不绘制"那条纪律 —— 因为根本没有绘制。
+        顺带:画布上的文字对 DOM 不可见,而本仓库正是靠 `[data-stat]` 在 CDP 下
+        验的,画上去的读数等于主动对抗这套验证方法。
+
+        靶子一律 `pointer-events: none`,所以 `event.target` 永远是这里,
+        命中和点空走同一条代码路径,也不依赖 `border-radius` 参不参与命中判定。
+      */}
+      <div class="test-area well aim-pad" id="arena" data-running="false">
+        <div class="test-area__hint" id="hint">
+          <span class="aim-start">
+            <span class="aim-start__call" id="call">{t.callIdle}</span>
+            <span class="aim-start__meta" id="meta">{t.metaIdle}</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="stat-grid">
+        <StatPanel
+          id="per-sec"
+          label={t.stats['per-sec'].label}
+          primary
+          hint={t.stats['per-sec'].hint}
+        />
+        <StatPanel id="hits" label={t.stats.hits.label} hint={t.stats.hits.hint} />
+        <StatPanel
+          id="accuracy"
+          label={t.stats.accuracy.label}
+          unit={t.stats.accuracy.unit}
+          hint={t.stats.accuracy.hint}
+        />
+        <StatPanel
+          id="offset"
+          label={t.stats.offset.label}
+          unit={t.stats.offset.unit}
+          hint={t.stats.offset.hint}
+        />
+        <StatPanel id="left" label={t.stats.left.label} unit={t.stats.left.unit} />
+      </div>
+    </div>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.readoutsHeading}</h2>
+    <ul>
+      {t.readoutsPoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+
+    <h2>{t.paramsHeading}</h2>
+    <p set:html={faqHtml(t.paramsLede)} />
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>{t.paramsColumns.setting}</th>
+          <th>{t.paramsColumns.value}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          PARAMS.map((row) => (
+            <tr>
+              <td>{row.key}</td>
+              <td set:html={faqHtml(row.value)} />
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>{t.influencesHeading}</h2>
+    <ul>
+      {t.influencesPoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+    <p set:html={faqHtml(t.lockNote)} />
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * `.test-area__hint` 是 `display: flex`(横向),所以要上下排两行就得包一个
+     * `flex-direction: column` 的壳 —— 同 CPS 页的 `.cps-start`。
+     * **一个字的规则都不加在 `.test-area__hint` 上**:那个类被七个页面共用。
+     */
+    .aim-start {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .aim-start__call {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    .aim-start__meta {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    .aim-pad {
+      /*
+       * **系统准星**,不自己画。自绘的那个要等下一帧才跟上鼠标,而用户是拿它
+       * 来瞄的 —— 成绩会因为和瞄准无关的原因下降。理由写在正文和 FAQ 里。
+       */
+      cursor: crosshair;
+    }
+
+    /* 「正在测量」的记号,同 CPS / DPI / 拖拽 / 滚轮四页那一条 */
+    .aim-pad[data-running='true'] {
+      border-color: var(--accent);
+    }
+
+    /*
+     * 靶子。位置和大小全部由脚本写内联样式(左/上 + 固定的宽高),
+     * 这里只管长相和"不许挡住鼠标"。
+     *
+     * **必须写成 `:global(...)`,这不是风格问题。**
+     * Astro 的 `<style>` 默认作用域化:选择器上会被挂一个 `.aim-target[data-astro-cid-x]`,
+     * 而那个 `data-astro-cid-x` 是**构建时**加到模板元素上的。靶子是脚本
+     * `document.createElement('div')` 造出来的,**身上没有这个属性** ——
+     * 于是这条规则一条都不命中:实测靶子拿到的是 `position: static`、
+     * `border: 0 none`、`background: transparent`。三个透明的 40px 方块
+     * 被 `.test-area` 的 grid 排成一列贴在左上角,**一个都看不见**,
+     * 但命中判定照旧工作(它读的是 rect)—— 也就是"游戏能玩,只是没有靶子"。
+     * `ui.ts` 拼出来的 `.notice` 是同一个坑的另一个实例,所以它住在 `global.css`。
+     * 这里只有这一页用,用 `:global()` 留在本页比搬进全局文件更聚拢。
+     *
+     * 圆心那个点是**功能性的**:它把"该点哪儿"说清楚,否则一个空心圆环
+     * 在 28px 档上会让人对着边缘瞄。它用 `::after` 画,不新增元素 ——
+     * 靶子的子节点数量会被命中判定忽略(`pointer-events: none`),
+     * 但多一个真实节点就多一份要跟着挪的东西。
+     */
+    :global(.aim-target) {
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      background-color: var(--accent-dim);
+      pointer-events: none;
+    }
+
+    :global(.aim-target)::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 4px;
+      height: 4px;
+      margin: -2px 0 0 -2px;
+      border-radius: 50%;
+      background-color: var(--accent);
+    }
+  </style>
+
+  <script>
+    import {
+      TARGET_COUNT,
+      TARGET_DIAMETER_PX,
+      aimBestKey,
+      summarizeAim,
+    } from '../../lib/analysis';
+    import type { AimDifficulty, AimMode, AimShot, AimSummary } from '../../lib/analysis';
+    import {
+      createTicker,
+      el,
+      format,
+      loadBest,
+      mountCapabilityNotices,
+      saveBest,
+      setHint,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.aim;
+
+    mountCapabilityNotices(el('cap-notice'));
+    // 右键菜单会盖住靶子;中键自动滚动会让指针底下的测试区溜走
+    suppressWorkbenchDefaults();
+
+    const arena = el('arena');
+    const hint = el('hint');
+    const call = el('call');
+    const meta = el('meta');
+    const toggle = el('toggle');
+
+    // ---------- 设置 ----------
+
+    /*
+     * 三个维度的状态只有这一份。按钮上的 `aria-pressed` 是它的**投影**,
+     * 载入时和每次改动后由 `renderChoices()` 刷一遍 —— 同 CPS 页的做法。
+     *
+     * 标签文字**从按钮上读**(`textContent`),不在这里再写一份:frontmatter
+     * 里的那些字符串在 `<script>` 里不存在(脚本被单独打包成外链模块),
+     * 照着重写一遍就是多留一份会漂的副本。
+     */
+    let mode: AimMode = 'multi';
+    let difficulty: AimDifficulty = 'standard';
+    let durationMs = 30000;
+
+    const choiceButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-group]'));
+
+    function currentValue(group: string): string {
+      if (group === 'mode') return mode;
+      if (group === 'difficulty') return difficulty;
+      return String(durationMs);
+    }
+
+    function renderChoices(): void {
+      for (const button of choiceButtons) {
+        const active = button.dataset.value === currentValue(button.dataset.group ?? '');
+        button.setAttribute('aria-pressed', String(active));
+      }
+    }
+
+    for (const button of choiceButtons) {
+      button.addEventListener('click', () => {
+        // 跑动中三组都禁用(理由见 FAQ:改了就是换掉判据本身)
+        if (button.disabled) return;
+        const value = button.dataset.value ?? '';
+
+        switch (button.dataset.group) {
+          case 'mode':
+            mode = value === 'single' ? 'single' : 'multi';
+            break;
+          case 'difficulty':
+            difficulty = value === 'easy' ? 'easy' : value === 'hard' ? 'hard' : 'standard';
+            break;
+          case 'duration':
+            durationMs = Number(value) || 30000;
+            break;
+          default:
+            return;
+        }
+
+        renderChoices();
+        renderStats();
+      });
+    }
+
+    // ---------- 一轮 ----------
+
+    let phase: 'idle' | 'running' = 'idle';
+    let shots: AimShot[] = [];
+    /** 已结算的那一份读数。跑动中是 `null` —— 跟时间有关的读数要等窗口关上 */
+    let summary: AimSummary | null = null;
+    let startedAt = 0;
+    let deadline = 0;
+    let stopTicker: (() => void) | null = null;
+    /** 场上的靶子元素。只在 `running` 时非空 */
+    let targetEls: HTMLElement[] = [];
+
+    function say(title: string, detail: string): void {
+      setText(call, title);
+      setText(meta, detail);
+      if (hint) hint.hidden = false;
+    }
+
+    // ---------- 靶子 ----------
+
+    function diameter(): number {
+      return TARGET_DIAMETER_PX[difficulty];
+    }
+
+    /**
+     * 把靶子挪到一个新的随机位置。
+     *
+     * 圆心夹在 `[r, w - r] × [r, h - r]` 里 —— 也就是左/上落在
+     * `[0, w - d] × [0, h - d]`。**不夹的话一半靶子会被边缘切掉**,
+     * 变成"有一部分够不着",成绩的上限被页面自己压低了。
+     *
+     * `clientWidth` / `clientHeight` 正是绝对定位子元素的坐标空间(不含边框、
+     * 含内边距 —— 而 `.test-area` 没有内边距),所以这里不用去补边框那 1px。
+     */
+    function moveTarget(target: HTMLElement): void {
+      if (!arena) return;
+      const d = diameter();
+      target.style.width = `${d}px`;
+      target.style.height = `${d}px`;
+      target.style.left = `${Math.random() * Math.max(0, arena.clientWidth - d)}px`;
+      target.style.top = `${Math.random() * Math.max(0, arena.clientHeight - d)}px`;
+    }
+
+    function clearTargets(): void {
+      for (const target of targetEls) target.remove();
+      targetEls = [];
+    }
+
+    function spawnTargets(): void {
+      if (!arena) return;
+      clearTargets();
+      for (let i = 0; i < TARGET_COUNT[mode]; i += 1) {
+        const target = document.createElement('div');
+        target.className = 'aim-target';
+        arena.appendChild(target);
+        targetEls.push(target);
+        moveTarget(target);
+      }
+    }
+
+    /**
+     * 这一枪打在哪儿。
+     *
+     * 读的是**每个靶子自己的 rect**,不是"圆心数组 + 测试区 rect":
+     * 后者要自己补 1px 边框,而前者按构造就等于画出来的那个圆。
+     * 一枪读最多 3 个 rect,和采样层那条"回调里绝不绘制"的纪律差着量级。
+     *
+     * 重叠时取**最近的圆心**。让两个圆盘重叠还要判"打的到底是哪一个"是自找歧义,
+     * 而玩家瞄的就是最近的那个。
+     */
+    function hitTest(x: number, y: number): { target: HTMLElement; offset: number } | null {
+      let best: { target: HTMLElement; offset: number } | null = null;
+
+      for (const target of targetEls) {
+        const box = target.getBoundingClientRect();
+        if (box.width <= 0) continue;
+        const dx = x - (box.left + box.width / 2);
+        const dy = y - (box.top + box.height / 2);
+        const offset = Math.hypot(dx, dy);
+        if (offset > box.width / 2) continue;
+        if (best === null || offset < best.offset) best = { target, offset };
+      }
+
+      return best;
+    }
+
+    // ---------- 读数 ----------
+
+    function renderStats(): void {
+      /*
+       * 跑动中传 `0` 当时长 —— `summarizeAim` 对 `durationMs <= 0` 给 `null`,
+       * 于是"跟时间有关"的那个读数自动是破折号,不必在这里再判一次。
+       * 命中的计数、命中率、平均偏离都不吃时长,所以它们**跑着就能看**。
+       */
+      const live = summary ?? summarizeAim(shots, 0);
+
+      setStat('per-sec', format(live.hitsPerSecond, 1));
+      setStat('hits', String(live.hits));
+      setStat('accuracy', live.accuracy === null ? t.dash : format(live.accuracy * 100, 0));
+      setStat('offset', format(live.meanOffsetPx, 1));
+
+      /*
+       * 剩余:跑动中由 ticker 每 100ms 刷一次,这里只在**不在跑**的时候把它按回
+       * 破折号。"没在测"和"测出来是 0 秒"是两件事。
+       * 两处都从同一个 `deadline` 算,不会打架。
+       */
+      if (phase !== 'running') setStat('left', t.dash);
+
+      // 命中率必须连着目标直径一起印:它不受 DPI 影响,但受角尺寸影响,
+      // 不印直径这个百分比就不是自描述的
+      setHint('accuracy', fill(t.accuracyDiameterHint, { px: diameter() }));
+
+      const best = loadBest(aimBestKey(mode, difficulty, durationMs));
+      setHint('hits', best === null ? t.hitsNoBest : fill(t.hitsBest, { best: format(best) }));
+    }
+
+    // ---------- 开始 / 结束 ----------
+
+    function start(): void {
+      shots = [];
+      summary = null;
+      phase = 'running';
+      startedAt = performance.now();
+      deadline = startedAt + durationMs;
+
+      if (hint) hint.hidden = true;
+      arena?.setAttribute('data-running', 'true');
+      setText(toggle, t.stop);
+      for (const button of choiceButtons) button.disabled = true;
+
+      spawnTargets();
+      renderStats();
+      /*
+       * **窗口由计时器关**,不从点击的时间戳反推 —— 同 CPS 页那条规矩。
+       * 打完最后一下停手的话,那一段空闲在时间戳里根本不存在。
+       */
+      stopTicker = createTicker(100, (now) => {
+        if (now >= deadline) {
+          finish('completed');
+          return;
+        }
+        setStat('left', String(Math.max(0, Math.ceil((deadline - now) / 1000))));
+      });
+    }
+
+    function finish(reason: 'completed' | 'stopped'): void {
+      stopTicker?.();
+      stopTicker = null;
+
+      /*
+       * 分母:正常到点**就是那个时长本身**(你选了 30 秒,分母就是 30 秒);
+       * 提前停止才用墙钟 —— 那是用户自己关的窗口,"一段墙钟过了多久"正是
+       * `performance.now()` 该管的事。两种都是真的,不许混。
+       */
+      const elapsed =
+        reason === 'completed' ? durationMs : Math.min(durationMs, performance.now() - startedAt);
+
+      phase = 'idle';
+      arena?.setAttribute('data-running', 'false');
+      clearTargets();
+      setText(toggle, t.again);
+      for (const button of choiceButtons) button.disabled = false;
+
+      summary = summarizeAim(shots, elapsed);
+
+      // 一次没中就**不写纪录**:否则每个新档位第一次跑都会往存储里写一个 0,
+      // 而"0 次命中"和"还没有成绩"在存储里会长得一模一样
+      const isRecord = summary.hits > 0 && saveBest(aimBestKey(mode, difficulty, durationMs), summary.hits);
+
+      const head = summary.clicks === 0 ? t.metaNoClicks : fill(t.metaHits, { hits: summary.hits });
+      say(
+        reason === 'completed' ? t.callDone : t.callStopped,
+        isRecord ? fill(t.metaRecord, { head }) : head,
+      );
+
+      renderStats();
+    }
+
+    // ---------- 交互 ----------
+
+    arena?.addEventListener('pointerdown', (event) => {
+      // 右键不是一枪;中键和侧键同理
+      if (event.button !== 0) return;
+      if (phase !== 'running') return;
+      event.preventDefault();
+
+      /*
+       * **超过时长的枪丢掉不计数。** 到点那一刻计时器可能还没轮到跑,
+       * 这一下如果不丢,它会算进一个已经关上的窗口里 —— 分子多一、分母不变。
+       */
+      if (performance.now() >= deadline) return;
+
+      const hit = hitTest(event.clientX, event.clientY);
+
+      if (hit) {
+        shots.push({ hit: true, offsetPx: hit.offset });
+        // 只有被打中的那一个换位置,其余的不动 —— 否则"点中一个"会顺手
+        // 把另外两个也挪走,而玩家下一枪要去哪儿就完全不取决于他刚才那一枪
+        moveTarget(hit.target);
+      } else {
+        shots.push({ hit: false });
+      }
+
+      renderStats();
+    });
+
+    toggle?.addEventListener('click', () => {
+      if (phase === 'running') {
+        finish('stopped');
+        return;
+      }
+      start();
+    });
+
+    /*
+     * 页面被切走就把这一轮**整轮作废**。
+     *
+     * 不是"照常计时然后给个低分":计时器走的是 rAF,后台标签页里 rAF 会停,
+     * 于是回到前台时 `now` 一下子跳到 deadline 之后 —— 结算出来的是一个
+     * **完整时长的分母配上只有一部分时间的分子**,那个数比不给还糟。
+     * 靶子在后台也根本没画出来。所以直接丢掉,明说。
+     */
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden || phase !== 'running') return;
+
+      stopTicker?.();
+      stopTicker = null;
+      phase = 'idle';
+      arena?.setAttribute('data-running', 'false');
+      clearTargets();
+      setText(toggle, t.start);
+      for (const button of choiceButtons) button.disabled = false;
+
+      shots = [];
+      summary = null;
+      say(t.callCancelled, t.metaCancelled);
+      renderStats();
+    });
+
+    renderChoices();
+    renderStats();
+  </script>
+</BaseLayout>

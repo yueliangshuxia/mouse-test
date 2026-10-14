@@ -298,6 +298,35 @@
  * 仪器面",规律换一条,但视觉上仍然成立。
  */
 /*
+ * ---------- 英文页要一条 **Latin 优先**的字面栈 ----------
+ *
+ * `--font-sans` 那一串里**没有一款纯 Latin 字体排在 CJK 之前**,所以在
+ * Windows 上它一路落到 `Microsoft YaHei`。中文页正该如此;英文页却是拿一个
+ * CJK 字体去画拉丁文 —— 后果**量得出来**(1440,`CSS.getPlatformFontsForNode`
+ * 确认实际用的就是 `MicrosoftYaHei`):
+ *
+ *   `’`(U+2019)**16px** = 整整一个 em(全角),ASCII `'` 4.11px,字母 `a` 8.84px
+ *
+ * 也就是英文正文里**每个弯引号都宽了 4 倍**,`keyboard’s` 中间裂出一道缝 ——
+ * 截图里一眼看得见,而读 CSS 一行都看不出来(那三档宽度都是渲染之后才有的事实)。
+ *
+ * macOS 上 `-apple-system` 接得住 Latin,所以只有 Windows 有这个问题 ——
+ * 而 Windows 正是这批访客的大多数。
+ *
+ * 判据用 `lang` 而不是新加一个 prop:`<html lang>` 本来就是**构建期写死、
+ * 运行期又是 DOM 上的事实**,和 `currentLocale()` 读的是同一个东西。
+ * **中文页一个字都不动。**
+ *
+ * 修完的实测(同一个探针,同一个选择器):英文页 `’` **16 → 3.67px**、`“` 16 → 6.03、
+ * 字母 `a` 8.84 → 8.14,`keyboard’s` 那道缝消失;中文页三个数**逐字节不变**
+ * (仍是 16 / 4.11 / 8.84)—— 这条规则确实只命中英文页。
+ */
+:root[lang^='en'] {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+}
+
+/*
  * ---------- 展示字体那一档(2026-10-14 用户要"科幻赛博朋克感"试改的)----------
  *
  * **只在 `<html>` 写了 `data-font="cyber"` 的页面上生效**,目前只有首页

@@ -1,0 +1,274 @@
+---
+/*
+ * 工具箱清单页(`/toolbox/`)的主体。
+ *
+ * **这一页本身只剩三行** —— 中英两个路由文件各引它一次,理由和别的页一样:
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有
+ * "主体进组件、路由做薄"这一条路。别把主体抄回页面里。
+ *
+ * ## 清单从 `NAV.dropdown` 派生,不是手写八条 `<li>`
+ *
+ * 手写的话,新加一件趣味工具只改 `tools.ts` 就会从这里静默消失,而报头那个
+ * 下拉里却有,两边对不上还没人看得出来。(首页 `.more-list` 是同一条理由。)
+ *
+ * ## 每件的说明文字**不经过新加的表**
+ *
+ * 它是那一页自己的 `metaDescription`,用 `pageCopyBySlug()` 现取 —— 所以
+ * **英文清单里那八行是各页自己的英文 meta description**,逐条跟着那一页走。
+ * 取不到时落回 `tool.description`(中文):那在英文页上是一句中文,不好看,
+ * 但**比一句空白好** —— 空白会被读成"这一项没做好"。今天八件全都翻过,
+ * 这个兜底不会触发。
+ *
+ * ## 链接走 `pageHref`,不是 `href`
+ *
+ * 源页面用的是 `href()`(写的时候全站只有中文)。这一页现在有英文版了,
+ * 英文清单点进去必须落到**英文**那一页 —— 判据就是 `pageHref()` 那句话:
+ * "目标页翻过没有"。**这一处漏掉不会报错**,只会让英文访客一路点到中文页。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { NAV } from '../../lib/tools';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { faqHtml, faqText } from '../../lib/faq';
+import {
+  DEFAULT_LOCALE,
+  getCatalog,
+  pageCopyBySlug,
+  pageHref,
+  toolCopy,
+} from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.toolbox;
+const confidence = getCatalog(locale).confidence;
+
+/*
+ * 这一页**不是 `Tool`**,所以它的 `title` / `description` 不进注册表 —— 注册表是
+ * **工具**的地方,而这一页不测任何东西。文案住在目录里,这里只负责摆。
+ */
+
+const FAQ = t.faq;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'CollectionPage',
+      name: t.h1,
+      description: t.ldDescription,
+      url: new URL(Astro.url.pathname, Astro.site).href,
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: FAQ.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  locale={locale}
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current={NAV.toolbox.slug}
+  jsonLd={jsonLd}
+>
+  <h1>{t.h1}</h1>
+
+  {/*
+    导语里那两处强调在目录里写成 `**`,所以这里**必须**走 `faqHtml()` +
+    `set:html`。直接 `{t.lede}` 会在页面上原样印出一对星号 —— 静默的,
+    页面照常渲染。源页面当年是在模板里写 `<strong>` 绕开这件事的,
+    进了目录之后只有 `faqHtml` 这一条路。
+  */}
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <h2>{t.listTitle}</h2>
+
+  {/*
+    一格一件。**预览一律常驻可见,不做悬停才出** —— 悬停才出现的东西在触屏上
+    等于没有,而手机正是这些"随手玩一下"的工具最常被打开的地方。
+    这也是它没有做成卡片装置的原因:报告里那条"清单 + 每件一小块预览"是用户
+    定的,不是没来得及做成卡片。
+  */}
+  <ul class="box-list">
+    {
+      NAV.dropdown.map((tool) => {
+        const copy = toolCopy(tool.slug, locale);
+        const desc = pageCopyBySlug(locale, tool.slug)?.metaDescription ?? tool.description;
+        return (
+          <li class="box-item">
+            {/*
+              预览窗。`aria-hidden` 是必须的:那段 SVG 说的是"这件工具长什么样",
+              对读屏用户一个字的信息都没有,而它里面全是 `<path>`,
+              不藏起来只会让读屏念出一串没人听得懂的东西。
+            */}
+            <div class="box-item__preview" aria-hidden="true" style={`--hue: ${TOOL_HUE[tool.slug]}`}>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                set:html={TOOL_MOTIF[tool.slug]}
+              />
+            </div>
+
+            <div class="box-item__body">
+              <div class="box-item__head">
+                <a class="box-item__name" href={pageHref(locale, tool.slug)}>
+                  {copy.name}
+                </a>
+                {/*
+                  徽章照印。趣味工具的 `confidence` 一旦不显示,它对这个 group
+                  而言就是白填的死数据。
+                */}
+                <span class={`confidence confidence--${tool.confidence}`}>
+                  {confidence[tool.confidence]}
+                </span>
+              </div>
+              <p class="box-item__desc">{desc}</p>
+            </div>
+          </li>
+        );
+      })
+    }
+  </ul>
+
+  <h2>{t.faqTitle}</h2>
+
+  <dl class="faq">
+    {
+      FAQ.map((item) => (
+        <>
+          <dt>{item.q}</dt>
+          <dd set:html={faqHtml(item.a)} />
+        </>
+      ))
+    }
+  </dl>
+</BaseLayout>
+
+<style>
+  /*
+   * 清单。**一列、逐行**,不是网格 —— 每件都带一句话说明,两列会把行宽压到
+   * 读不顺的长度(中文尤其)。行与行之间靠 1px 细线分开,和全站"结构全靠
+   * 细线"同一套:没有卡片、没有阴影、没有底色。
+   *
+   * 窄屏不做任何改动:预览窗是固定 64px,正文再窄也有 290px 上下,
+   * 从头到尾并排都读得下。**所以这一节不写媒体查询** —— 全站只有 760px
+   * 那一个断点,不为了好看再添一个。
+   */
+  .box-list {
+    margin: 0 0 1.75rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .box-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .box-item:last-child {
+    border-bottom: 1px solid var(--border);
+  }
+
+  /*
+   * 悬停高亮。**这一份清单是"要逐条读"的** —— 每行一句说明,眼睛得一行一行
+   * 扫过去,高亮能帮你把当前这条钉住。
+   *
+   * `--bg-inset` 压在纸面上两套主题都看得出来(浅色 `#f1f3f4 → #dfe5e9`,
+   * 深色 `#0b0c0e → #07080a`)—— 深色下那一档**很轻**是已知的,和工具箱那格
+   * 预览的边框是同一个理由:近黑区间里两个平面靠填充本来就分不太开,
+   * 所以这里给的是"有一点点反应",不指望它一眼跳出来。
+   *
+   * **只铺底色,不碰内边距和外边距。**
+   * 试过"内边距 +8、外边距 −8"让高亮块比文字多探出一点(那样才像"整行亮起"),
+   * 但负外边距会把这一行连同它的上下两条 1px 线一起**往容器外推 8px** ——
+   * 线会和页面上其它线对不齐,还有撑出容器的风险。不值得。
+   * 现在高亮就是整行宽的一条底色,线一根都不动。
+   */
+  .box-item:hover {
+    background: var(--bg-inset);
+  }
+
+  /*
+   * 那块小窗。**它不住在 `.well` 里,这是有意的。**
+   *
+   * `.well` 是仪器窗 —— 它在全站只有一个含义:"这里正在出数",而且只在装置
+   * 真的跑起来时出现。这一格是**静态清单里的一张图**,没有任何东西在出数;
+   * 给它套上仪器窗,「扫一眼就知道哪里是活的」当场失效。
+   *
+   * **底色和边框都要,而且分工是量出来的。** 光有底色在深色下等于没画:
+   * 实测 `--bg-inset` 是 `rgb(7,8,10)`、纸面是 `rgb(11,12,14)`,对比度
+   * **1.02:1** —— 和 `.well` 那条已知的结论(近黑区间里两个平面靠填充分不开)
+   * 是同一件事。所以边框不是装饰,它是深色下唯一说出"这里有一格"的东西;
+   * 底色留着是因为它在浅色下确实有用(实测 1.14:1,也几乎看不见,
+   * 但两档叠起来就够读出一格了)。
+   *
+   * 一个令牌都没新增:底色 `--bg-inset`、线 `--border`、图形 `currentColor`,
+   * 两套主题自动都对。
+   */
+  .box-item__preview {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius-lg);
+    /*
+     * **从"灰格子"改成"淡色格子"**,和工具页标题那枚图标、首页卡头那枚
+     * 是同一套长相(色相表在 `src/lib/tool-hues.ts`)。
+     *
+     * 底色 `color-mix` 到 12% —— 不写死任何淡色值,也不给深浅两套主题各写一份。
+     * 边框用色相兑一半,比纯色相淡、比灰线明显。
+     */
+    border: 1px solid color-mix(in srgb, var(--hue, var(--border)) 35%, var(--border));
+    background: color-mix(in srgb, var(--hue, var(--bg-inset)) 12%, transparent);
+    color: var(--hue, var(--text-dim));
+  }
+
+  .box-item__preview svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .box-item__body {
+    min-width: 0;
+  }
+
+  .box-item__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .box-item__name {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .box-item__desc {
+    margin: 0;
+    /* 和 `.prose` 同一个行宽上限:一行读得顺,不要让说明横跨整页 */
+    max-width: 42em;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+</style>

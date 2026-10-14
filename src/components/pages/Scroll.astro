@@ -1,0 +1,417 @@
+---
+/*
+ * 滚轮测试页的**主体**。两个薄路由引它:中文的 `/scroll-test/`
+ * 和英文的 `/en/scroll-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各写三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 两处这一页特有的
+ *
+ * - **`stripLede` 里那个 `{redMark}` 是颜色,不是强调。** 它和下面方向带里
+ *   那些红格子(`.strip__mark--glitch`)是同一个记号,而 `faqHtml()` 只认 `**`、
+ *   给不出颜色,所以那个 span 在模板里填回去(形状同 `Polling.astro` 的
+ *   `chartLedeWarn`、`HoldDrag.astro` 的 `logLedeMark`)。**`fill()` 必须在
+ *   `faqHtml()` 之后** —— 反过来的话刚插进去的 `<span>` 会被当成句子的一部分转义掉。
+ * - **换算表的三行按 `mode` 查目录,不按下标对齐。** 页面的 `DELTA_MODES` 和
+ *   目录的 `deltaModes` 是**两份**,顺序哪天一动就会静默错位(见
+ *   `pages/scroll.ts` 的文件头)。那一列的换算除数留在页面里,它是 `analysis.ts`
+ *   的两个常量。
+ *
+ * **这一页一条站内链接都没有** —— 所以没有 `pageHref()` 的调用点,
+ * 也就没有那个 import(不留死引用)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { WHEEL_LINES_PER_NOTCH, WHEEL_PIXELS_PER_NOTCH } from '../../lib/analysis';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.scroll;
+
+/**
+ * 常见的一组换算,让用户对得上自己系统报出来的数。
+ *
+ * **含义那一列不在这里** —— 它按 `mode` 从目录查(见下)。留下 `name` 只为兜底:
+ * 它是事件的常量名,两种语言逐字相同,查不到时至少不会空着一格。
+ */
+const DELTA_MODES = [
+  { mode: 0, name: 'DOM_DELTA_PIXEL', divisor: WHEEL_PIXELS_PER_NOTCH },
+  { mode: 1, name: 'DOM_DELTA_LINE', divisor: WHEEL_LINES_PER_NOTCH },
+  { mode: 2, name: 'DOM_DELTA_PAGE', divisor: 1 },
+];
+
+/**
+ * 换算表的行。**按 `mode` 查,不按下标** —— 两张表的顺序不保证一致,
+ * 按下标对齐哪天一动就静默错位(见 `pages/scroll.ts` 的文件头)。
+ */
+const DELTA_ROWS = DELTA_MODES.map((row) => {
+  const copy = t.deltaModes.find((item) => item.mode === row.mode);
+  return {
+    mode: row.mode,
+    name: copy ? copy.name : row.name,
+    note: copy ? copy.note : '',
+    divisor: row.divisor,
+  };
+});
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(item.a) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="scroll-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['scroll-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['scroll-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <div id="cap-notice"></div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well scroll-pad" id="area">
+        <div class="test-area__hint" id="hint">{t.hint}</div>
+        <div class="scroll-dir" id="dir" hidden>{t.arrowDown}</div>
+      </div>
+
+      {/*
+        「最近 80 格的方向」原本长在工作台**下面**,于是测试区底边到下一个 h2 之间
+        空出 155px —— 这一页的读数栏(375px)比测试区(220px)高,空隙全落在左边。
+        (对照:cps / button 两页测试区本来就比读数栏高,没有这个毛病。)
+
+        现在整块搬进舞台,坐在测试区正下方。**h2、说明段、方向带、重置**一起走:
+        ① 方向带和上面那块读数栏说的是同一件事(方向),分开在两屏读不顺;
+        ② 「重置」跟着上来,不用再往下滚一屏才够得到 —— 和键盘页同一个理由。
+
+        **别塞进 `.test-area` 里**:它不只是盒子,它**就是采样面**(`wheel` 只派发给
+        指针所在元素),塞进去等于鼠标划过方向带也被算成在测试。所以它是兄弟,不是子节点。
+      */}
+      <h2>{t.stripHeading}</h2>
+      <p
+        class="prose tight"
+        set:html={fill(faqHtml(t.stripLede), {
+          redMark: `<span class="mark-danger">${t.stripRedMark}</span>`,
+        })}
+      />
+      <div class="strip" id="strip"></div>
+
+      <div class="controls">
+        <button type="button" id="reset">{t.reset}</button>
+        <span class="test-hint" id="delta-info">
+          {t.currentEvent}<span id="delta-raw">{t.dash}</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">{t.verdictLabel}</div>
+          <div>
+            <span class="verdict__value" id="net">0</span><span class="verdict__unit">{t.notchUnit}</span>
+          </div>
+          <div class="verdict__note" id="net-note">{t.netNoteIdle}</div>
+        </div>
+        <div class="verdict__aside">
+          <div><span class="badge badge--idle" id="dir-badge">{t.badgeWaiting}</span></div>
+          <div>
+            <span class="badge badge--idle" id="glitch-badge">{t.dash}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel id="down" label={t.stats.down.label} unit={t.notchUnit} />
+        <StatPanel id="up" label={t.stats.up.label} unit={t.notchUnit} />
+        <StatPanel id="glitches" label={t.stats.glitches.label} hint={t.stats.glitches.hint} />
+        <StatPanel id="typical" label={t.stats.typical.label} hint={t.stats.typical.hint} />
+      </div>
+    </div>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.resultsHeading}</h2>
+    <ul>
+      {t.resultsPoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+
+    <h2>{t.deltaHeading}</h2>
+    <p set:html={faqHtml(t.deltaLede)} />
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>{t.deltaColumns.mode}</th>
+          <th>{t.deltaColumns.name}</th>
+          <th>{t.deltaColumns.meaning}</th>
+          <th>{t.deltaColumns.perNotch}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          DELTA_ROWS.map((row) => (
+            <tr>
+              <td>{row.mode}</td>
+              <td>{row.name}</td>
+              <td>{row.note}</td>
+              <td>{row.divisor}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+    <p set:html={faqHtml(t.deltaTail)} />
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(item.a)} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    .scroll-pad {
+      height: 220px;
+      /* 触屏上没有滚轮,但双指滑动会派发 wheel 事件。禁掉手势,免得
+         用户以为自己在测滚轮,其实测的是触摸板的模拟滑动 */
+      touch-action: none;
+    }
+
+    /* .scroll-dir 的定位与配色在 global.css 里(和 CPS / DPI / 拖拽页的
+       实时读数共用一套规则),这里只留这个页面独有的东西 */
+
+    /*
+     * 搬进舞台的那个 h2(见模板里的注释)。全站 `h2` 带 3.5rem 上边距,那是给
+     * 3000px 长页排节奏用的;在测试区正下方它变成一道 56px 的空洞 —— 而这里要的
+     * 恰恰是**把空隙填掉**,不是换个地方再空出来。
+     *
+     * 只收上边距,**那条分节线一根不动**:线才是"这里开始是新的一节"的记号
+     * (见 global.css 里 `h2` 那段注释)。键盘页读数栏里那个 h2 是同一个处理。
+     */
+    .workbench__stage > h2 {
+      margin-top: 0;
+    }
+
+    #delta-raw {
+      font-family: var(--font-mono);
+    }
+  </style>
+
+  <script>
+    import {
+      normalizeWheelDelta,
+      summarizeScroll,
+      type ScrollNotch,
+    } from '../../lib/analysis';
+    import {
+      createTicker,
+      el,
+      mountCapabilityNotices,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.scroll;
+
+    // 结论只读 `deltaY` / `deltaMode`(方向与估算格数) —— **一个事件时间戳都不读**,所以四条与时间戳精度
+    // 有关的告警一条都不该发。判据和手稳度 / DPI 两页是同一条:
+    // 「这一页的结论吃不吃**两个事件之间**差多久」。
+    mountCapabilityNotices(el('cap-notice'), { timing: false });
+
+    /*
+     * 这一页原先漏了这一句(九个工作台页面里唯一漏的),后果不只是右键弹菜单:
+     * 中键自动滚动没被拦,按下去页面就自己跟着指针滚,而这一页量的正是滚动 ——
+     * 采样面从指针底下溜走,读到的全是错的。见 ui.ts 的 `suppressWorkbenchDefaults`。
+     */
+    suppressWorkbenchDefaults();
+
+    /** 条带上显示多少格 */
+    const STRIP_SIZE = 80;
+
+    /**
+     * 参与统计的事件上限。滚轮事件来得极快(无极滚轮一秒能发上百个),
+     * 不设上限的话数组会一直长,而 `summarizeScroll` 是每轮全量重算的。
+     * 超过就砍掉前半——统计的是"有没有毛刺",不需要整个会话的历史。
+     */
+    const MAX_EVENTS = 4000;
+
+    const area = el('area');
+    const hint = el('hint');
+    const dirNode = el('dir');
+    const stripHost = el('strip');
+
+    let events: ScrollNotch[] = [];
+
+    function render(): void {
+      const stats = summarizeScroll(events);
+
+      setText(el('net'), stats.netNotches.toFixed(0));
+      setText(
+        el('net-note'),
+        stats.events === 0
+          ? t.netNoteIdle
+          : fill(t.netNoteMeta, { down: stats.down, up: stats.up }),
+      );
+
+      setStat('down', String(stats.down));
+      setStat('up', String(stats.up));
+      setStat('glitches', String(stats.glitches));
+      setStat(
+        'typical',
+        stats.typicalDelta === null ? t.dash : stats.typicalDelta.toFixed(0),
+      );
+
+      setBadge(
+        el('glitch-badge'),
+        stats.glitches === 0 ? t.badgeNoGlitch : fill(t.badgeGlitch, { count: stats.glitches }),
+        stats.glitches === 0 ? (stats.events > 0 ? 'good' : 'idle') : 'poor',
+      );
+
+      // ---- 条带 ----
+      if (!stripHost) return;
+      if (events.length === 0) {
+        stripHost.replaceChildren();
+        return;
+      }
+
+      const shown = events.slice(Math.max(0, events.length - STRIP_SIZE));
+      const signs = shown.map((event) => (event.notches > 0 ? 1 : -1));
+
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < shown.length; i++) {
+        const mark = document.createElement('div');
+        // 毛刺的判据必须和 summarizeScroll 里一致:孤立的反向
+        const isGlitch =
+          i > 0 &&
+          i < shown.length - 1 &&
+          signs[i] !== signs[i - 1] &&
+          signs[i + 1] === signs[i - 1];
+
+        mark.className = isGlitch
+          ? 'strip__mark strip__mark--glitch'
+          : `strip__mark ${signs[i] > 0 ? 'strip__mark--down' : 'strip__mark--up'}`;
+        mark.title = fill(t.stripMarkTitle, {
+          dir: shown[i].notches > 0 ? t.dirDown : t.dirUp,
+          notches: Math.abs(shown[i].notches).toFixed(2),
+          raw: shown[i].raw,
+        });
+        fragment.appendChild(mark);
+      }
+      stripHost.replaceChildren(fragment);
+    }
+
+    // 滚轮事件可以来得很密,每来一个就重算一遍统计会拖慢滚动本身。
+    // 攒着,按固定节奏统一刷。
+    const stopTicker = createTicker(100, render);
+
+    // ---- 交互 ----
+
+    /**
+     * `passive: false` 是必需的:要 preventDefault 阻止页面跟着滚。
+     * 如果让页面滚起来,测试区会从指针底下溜走,越滚越测不到。
+     */
+    area?.addEventListener(
+      'wheel',
+      (event) => {
+        event.preventDefault();
+        hint?.setAttribute('hidden', '');
+        dirNode?.removeAttribute('hidden');
+
+        const notches = normalizeWheelDelta(event.deltaY, event.deltaMode);
+        if (notches === 0) return;
+
+        events.push({ notches, raw: event.deltaY, deltaMode: event.deltaMode });
+        if (events.length > MAX_EVENTS) {
+          events = events.slice(MAX_EVENTS / 2);
+        }
+
+        // 方向指示要跟手,不能等 100ms 的刷新节奏
+        setText(dirNode, notches > 0 ? t.arrowDown : t.arrowUp);
+        setText(
+          el('delta-raw'),
+          fill(t.deltaRawMeta, { deltaY: event.deltaY, deltaMode: event.deltaMode }),
+        );
+        setBadge(
+          el('dir-badge'),
+          notches > 0 ? t.badgeDown : t.badgeUp,
+          'good',
+        );
+      },
+      { passive: false },
+    );
+
+    el('reset')?.addEventListener('click', () => {
+      events = [];
+      hint?.removeAttribute('hidden');
+      dirNode?.setAttribute('hidden', '');
+      setBadge(el('dir-badge'), t.badgeWaiting, 'idle');
+      setText(el('delta-raw'), t.dash);
+      render();
+    });
+
+    window.addEventListener('pagehide', stopTicker);
+  </script>
+</BaseLayout>

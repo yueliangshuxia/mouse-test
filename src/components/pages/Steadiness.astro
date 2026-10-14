@@ -1,0 +1,628 @@
+---
+/*
+ * 手稳度定靶测试页的**主体**。两个薄路由引它:中文的 `/steadiness-test/`
+ * 和英文的 `/en/steadiness-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各写三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 三处这一页特有的
+ *
+ * - **`**…**` 这一页远不止 FAQ 答案里有。** 目录的 `pages/steadiness.ts` 文件头
+ *   点了名:原来那些 `<strong>` 现在散在 `lede1` / `lede2` / `readingRows[].note` /
+ *   `scoringP1` / `scoringP2` / `steadyPoints[]` 六处 —— **每一处**都要走
+ *   `faqHtml()`,漏一个就是页面上原样印出两个星号,而且是**静默**的(页面照常
+ *   渲染,只多两个星号)。`steadyPoints` 那三条还多一层:它们住在
+ *   `prose--cards` 里,靠 `.prose--cards li > strong:first-child` 把开头那个
+ *   `**` 显示成卡片标题 —— 所以那三处的 `**` 必须留在**开头**那一句上。
+ * - **`{seconds}` 这一页要填五处**(`lede1` / FAQ 第 4 条 / `runtime.noteMeasuring` /
+ *   `noteStill` / `noteResult`),值都是 `HOLD_MS / 1000`。前两处在**构建期**填
+ *   (下面那个 `placeholders`),后三处在**脚本**里填 —— 两边各写一份 `HOLD_MS`,
+ *   因为 frontmatter 变量在 `<script>` 里不存在(见 CLAUDE.md「页面约定」)。
+ * - **`#live-left` 里那个 `5.0` 是数值不是文案**(`(HOLD_MS / 1000).toFixed(1)`),
+ *   跟着它的那截 `秒 · 保持住,别出圈` 才是 `liveLabel`。
+ *
+ * ## 测量逻辑一个字都没动
+ *
+ * 三个相位(`arming` → `settling` → `measuring`)、`ARM_TIMEOUT_MS` 到点如实报
+ * "没等到"(而不是判成"开始测了")、采样面是**整个文档**、以及 `measureDrift`
+ * 那个 `n === 0` 等于**最好的一档**的分支,全部原样保留。搬进组件时只换了
+ * `import` 的层级和那些用户看得见的字符串。
+ *
+ * **这一页一条站内链接都没有** —— 所以没有 `pageHref()` 的调用点,
+ * 也就没有那个 import(不留死引用,同 `Scroll.astro`)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { faqHtml, faqText } from '../../lib/faq';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { DEFAULT_LOCALE, fill, getCatalog } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.steadiness;
+
+/** 保持多久。正文、FAQ 和脚本里各要填一遍,三处都是 `HOLD_MS / 1000` */
+const HOLD_MS = 5000;
+
+/**
+ * 构建期要填的占位符。**只算一遍** —— `lede1` 和 FAQ 第 4 条各有一处 `{seconds}`,
+ * 两处各写一次的话,以后加一条带占位符的句子迟早漏掉一处,而漏掉的样子是
+ * 屏幕上原样印着 `{seconds}`(同 `Reaction.astro` 的 `placeholders`)。
+ */
+const placeholders = { seconds: HOLD_MS / 1000 };
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebApplication',
+      name: t.h1,
+      description: t.metaDescription,
+      applicationCategory: 'GameApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+    },
+    {
+      '@type': 'FAQPage',
+      mainEntity: t.faq.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: faqText(fill(item.a, placeholders)) },
+      })),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="steadiness-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['steadiness-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['steadiness-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  {/* `**尽量别动**` / `**中途指针出圈就作废重来**` 都在这句里,见文件头 */}
+  <p class="prose" set:html={faqHtml(fill(t.lede1, placeholders))} />
+
+  <p class="prose" set:html={faqHtml(t.lede2)} />
+
+  <div id="cap-notice"></div>
+
+  <div class="controls">
+    <button type="button" id="start">{t.start}</button>
+    <button type="button" id="stop" disabled>{t.giveUp}</button>
+    <span class="test-hint" id="hint">{t.hintIdle}</span>
+  </div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area well steady-area" id="area" data-phase="idle">
+        <div class="steady-target" id="target" aria-hidden="true"></div>
+        <div class="test-area__hint" id="overlay">{t.overlay}</div>
+        <div class="steady-live" id="live" hidden>
+          <div class="steady-live__value" id="live-left">{(HOLD_MS / 1000).toFixed(1)}</div>
+          <div class="steady-live__label">{t.liveLabel}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="verdict">
+        <div>
+          <div class="verdict__label">{t.verdictLabel}</div>
+          <div>
+            <span class="verdict__value" id="path-main">{t.dash}</span
+            ><span class="verdict__unit">{t.verdictUnit}</span>
+          </div>
+          <div class="verdict__note" id="verdict-note">{t.verdictNoteIdle}</div>
+        </div>
+        <div class="verdict__aside">
+          <span class="badge badge--idle" id="state-badge">{t.badges.idle}</span>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <StatPanel
+          id="span"
+          label={t.stats.span.label}
+          unit={t.stats.span.unit}
+          hint={t.stats.span.hint}
+        />
+        <StatPanel id="samples" label={t.stats.samples.label} hint={t.stats.samples.hint} />
+        <StatPanel
+          id="best"
+          label={t.stats.best.label}
+          unit={t.stats.best.unit}
+          hint={t.stats.best.hint}
+        />
+        <StatPanel id="rounds" label={t.stats.rounds.label} hint={t.stats.rounds.hint} />
+      </div>
+    </div>
+  </div>
+
+  <section class="prose prose--cards">
+    <h2>{t.readingHeading}</h2>
+    <table class="ref-table">
+      <thead>
+        <tr>
+          <th>{t.readingColumns.metric}</th>
+          <th>{t.readingColumns.check}</th>
+          <th>{t.readingColumns.note}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          /*
+           * 三行按**目录里的顺序**走(`readingRows`),不按下标去对另一张表 ——
+           * 这一页的表格是手写的 `<td>`,没有第二张表要对齐(同 `HoldDrag.astro`
+           * 的 `BUTTON_ROWS` 那一类做法)。
+           *
+           * `note` 里那几处 `**…**` 是**句中**强调(「总」/「最远两点」/「最好的结果」),
+           * 所以也走 `faqHtml()` —— 不是卡片标题,别顺手挪到头上去。
+           */
+          t.readingRows.map((row) => (
+            <tr>
+              <td>{row.metric}</td>
+              <td>{row.check}</td>
+              <td set:html={faqHtml(row.note)} />
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <h2>{t.scoringHeading}</h2>
+    <p set:html={faqHtml(t.scoringP1)} />
+    <p set:html={faqHtml(t.scoringP2)} />
+
+    <h2>{t.steadyHeading}</h2>
+    {/*
+      三条。**每条开头那个 `**…**` 是卡片标题** —— `.prose--cards li > strong:first-child`
+      把它显示成块级标题,所以它必须留在开头那一句上(见 `pages/steadiness.ts` 的文件头)。
+    */}
+    <ul>
+      {t.steadyPoints.map((point) => <li set:html={faqHtml(point)} />)}
+    </ul>
+
+    <h2>{t.faqHeading}</h2>
+    <div class="faq">
+      {
+        t.faq.map((item) => (
+          <div class="faq__item">
+            <div class="faq__q">{item.q}</div>
+            <p class="faq__a" set:html={faqHtml(fill(item.a, placeholders))} />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <style>
+    /*
+     * 测试面。高度给得比别页足 —— 靶子要有地方待,而且要离边缘远一点,
+     * 免得用户为了进靶心把指针怼到窗口角上。
+     */
+    .steady-area {
+      height: 340px;
+      cursor: crosshair;
+    }
+
+    /*
+     * 靶心。**`pointer-events: none`** —— 它只是画出来的一个圈,
+     * 指针在不在里面由脚本按几何算,不靠事件。挂上去的话它会成为
+     * 事件目标,而这一页的判据(出圈作废)是纯几何的,不需要它参与。
+     *
+     * 两圈:外圈是边界(出圈作废),内圈是"理想位置"的提示。
+     *
+     * 两个颜色令牌都写**通用名**(`--border-strong` / `--text-faint`)而不是
+     * `--well-*`:靶心长在 `.well` 里,而 `.well` 把通用令牌整套重指过去了 ——
+     * 写 `--well-*` 等于绕过那层重映射,以后井的配色变了靶心不会跟着变。
+     */
+    .steady-target {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 110px;
+      height: 110px;
+      margin: -55px 0 0 -55px;
+      border: 1px solid var(--border-strong);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .steady-target::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 10px;
+      height: 10px;
+      margin: -5px 0 0 -5px;
+      border-radius: 50%;
+      background: var(--text-faint);
+    }
+
+    /* 测量中把边界说重一点:这时候它才真的是一条会被判的线 */
+    .steady-area[data-phase='measuring'] .steady-target {
+      border-color: var(--accent);
+    }
+
+    /* 出圈那一刻闪一下朱砂 —— 这是"这一轮没了"的即时反馈,不是读数 */
+    .steady-area[data-phase='missed'] .steady-target {
+      border-color: var(--danger);
+    }
+  </style>
+
+  <script>
+    import { measureDrift } from '../../lib/analysis';
+    import { createMoveSampler } from '../../lib/sampler';
+    import {
+      createTicker,
+      el,
+      format,
+      loadBest,
+      mountCapabilityNotices,
+      saveBest,
+      setBadge,
+      setStat,
+      setText,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     */
+    const t = getCatalog(currentLocale()).pages.steadiness;
+
+    /*
+     * 这一页只读**坐标**,一个时间戳都不用(主指标是路程,幅度是几何量,
+     * 采样数只是计数)。所以能力告警传 `{ timing: false }` —— 不传的话页面上会
+     * 印出一条"本页不报抖动和丢包率就是这个原因",而这一页压根不测那两样。
+     * 判据见 capabilities.ts 的 `CapabilityOptions`。
+     */
+    mountCapabilityNotices(el('cap-notice'), { timing: false });
+
+    // 用户全程要把指针停在测试面上,右键菜单和中键自动滚动都会盖住靶心。见 ui.ts
+    suppressWorkbenchDefaults();
+
+    /** frontmatter 变量在 <script> 里不存在,这两个数各写一份 */
+    const HOLD_MS = 5000;
+    const SETTLE_MS = 600;
+    /** 等指针进靶心的上限。超了就如实说"没等到",不能判成"开始测了" */
+    const ARM_TIMEOUT_MS = 20_000;
+    /** 换 DPI 之后成绩不可比,所以键名里写死"路程"这一件事 */
+    const BEST_KEY = 'mouse-test:steadiness-best-path';
+
+    const area = el('area');
+    const target = el('target');
+    const overlay = el('overlay');
+    const live = el('live');
+    const startButton = el('start') as HTMLButtonElement | null;
+    const stopButton = el('stop') as HTMLButtonElement | null;
+
+    if (!area || !target) throw new Error('测试区未就绪');
+
+    /**
+     * 采样面是**整个文档**,和轨迹页的静止漂移同一个理由的镜像:
+     * 判据是"指针有没有离开靶心",而离开靶心之后指针可能立刻停在测试面**外面**
+     * (用户把鼠标一甩就松手)。采样面只取测试面的话,那一段根本没被记录,
+     * 出的圈也就永远判不出来 —— 这一轮会当成"完美通过"结算。
+     *
+     * `capture: false`:捕获会把 `click` 一起重定向到采样元素上,页面上的
+     * 按钮就点不动了(见 sampler.ts / ui.ts 的说明)。这一页不需要捕获 ——
+     * 指针跑到窗口外本来就应该算作"出圈"。
+     */
+    const sampler = createMoveSampler(document.documentElement, {
+      capture: false,
+      capacity: 60_000,
+    });
+    sampler.stop();
+
+    /**
+     * 三个阶段,和轨迹页那套静止漂移同源:
+     *
+     * - `arming`:等指针进靶心 —— 它同时证明了"页面收得到信号"
+     * - `settling`:等指针停下来(采样数不再增长),把"移进去"那一段丢掉
+     * - `measuring`:真正的 5 秒窗口
+     *
+     * `arming` 这一步是必需的:没有它,"0 个采样"既可能是手真的稳,
+     * 也可能是指针根本不在窗口里、页面压根没在听。两者在数据上完全一样。
+     */
+    type Phase = 'idle' | 'arming' | 'settling' | 'measuring' | 'missed';
+    let phase: Phase = 'idle';
+    let phaseSince = 0;
+    let windowStartedAt = 0;
+    let timer = 0;
+    let lastN = 0;
+    let grewAt = 0;
+    /** 已经检查过出圈的缓冲区下标,每次 tick 只扫新到的那一段 */
+    let checkedUpTo = 0;
+    let rounds = 0;
+
+    /** 靶心的圆心与半径(视口坐标)。每次开始一轮时重取,中途不回读 */
+    let centerX = 0;
+    let centerY = 0;
+    let radius = 0;
+
+    /** 把靶心的几何读进来。用户中途滚动会让旧值失效,所以每一轮开始时都重读一次 */
+    function readTarget(): void {
+      const box = target!.getBoundingClientRect();
+      centerX = box.left + box.width / 2;
+      centerY = box.top + box.height / 2;
+      radius = box.width / 2;
+    }
+
+    function setPhase(next: Phase): void {
+      phase = next;
+      phaseSince = performance.now();
+      area?.setAttribute('data-phase', next);
+    }
+
+    function resetReadouts(): void {
+      setText(el('path-main'), t.dash);
+      for (const id of ['span', 'samples']) setStat(id, t.dash);
+    }
+
+    function showBest(): void {
+      setStat('best', format(loadBest(BEST_KEY), 1));
+    }
+
+    showBest();
+
+    function setRunning(running: boolean): void {
+      if (startButton) startButton.disabled = running;
+      if (stopButton) stopButton.disabled = !running;
+      overlay?.toggleAttribute('hidden', running);
+      live?.toggleAttribute('hidden', !running);
+    }
+
+    function start(): void {
+      if (phase !== 'idle' && phase !== 'missed') return;
+
+      readTarget();
+      sampler.reset();
+      sampler.start();
+      checkedUpTo = 0;
+      setPhase('arming');
+      setRunning(true);
+      resetReadouts();
+      setBadge(el('state-badge'), t.badges.arming, 'idle');
+      setText(el('verdict-note'), t.runtime.noteArming);
+      setText(el('live-left'), (HOLD_MS / 1000).toFixed(1));
+      setText(el('hint'), t.hintArming);
+    }
+
+    /** 指针进来了,开始等它停下 */
+    function settle(): void {
+      setPhase('settling');
+      lastN = sampler.buffer.n;
+      /**
+       * **`grewAt` 必须在这里重置。**它是"上一次采样数增长的时刻",而推进器
+       * 判"停手了没有"靠的是 `now - grewAt > SETTLE_MS`。进这个函数时它还是
+       * 上一轮(或页面加载时那个 0)留下的值 —— 拿 `0` 去减,`now - 0` 永远
+       * 大于 600,于是**下一拍立刻就开测**,用户的手还在往靶心里挪。
+       *
+       * 后果不是报错,是**读数被系统性抬高**:窗口的头一段量到的是"移进来"
+       * 那一次移动的尾巴,而那正是这一整段 `settling` 要丢掉的东西。
+       * 判据在代码上是确定的:进这里时 `grewAt` 若还是 `0`,
+       * 推进器下一拍就会 `beginWindow()`(页面早就跑过 600ms 了)。
+       */
+      grewAt = performance.now();
+      setBadge(el('state-badge'), t.badges.settling, 'idle');
+      setText(el('verdict-note'), t.runtime.noteSettling);
+      setText(el('hint'), t.hintSettling);
+    }
+
+    /** 真的开测。把"移进来"和"停手"那两段采样全部丢掉 */
+    function beginWindow(): void {
+      sampler.reset();
+      checkedUpTo = 0;
+      windowStartedAt = performance.now();
+      timer = window.setTimeout(finish, HOLD_MS);
+      setPhase('measuring');
+      setBadge(el('state-badge'), t.badges.measuring, 'idle');
+      setText(el('verdict-note'), fill(t.runtime.noteMeasuring, { seconds: HOLD_MS / 1000 }));
+      setText(el('hint'), t.hintMeasuring);
+    }
+
+    /** 收尾:停采样、复位按钮。结果由调用方各自写 */
+    function endRound(): void {
+      sampler.stop();
+      window.clearTimeout(timer);
+      timer = 0;
+      setRunning(false);
+      setText(el('hint'), t.hintIdle);
+    }
+
+    /** 指针出圈。这一轮作废,照实说 */
+    function miss(): void {
+      endRound();
+      setPhase('missed');
+      setBadge(el('state-badge'), t.badges.missed, 'poor');
+      setText(el('verdict-note'), t.runtime.noteMissed);
+      resetReadouts();
+    }
+
+    /** 一直没等到指针进靶心 */
+    function abort(): void {
+      endRound();
+      setPhase('idle');
+      setBadge(el('state-badge'), t.badges.timeout, 'idle');
+      setText(
+        el('verdict-note'),
+        fill(t.runtime.noteTimeout, { armSeconds: ARM_TIMEOUT_MS / 1000 }),
+      );
+    }
+
+    function finish(): void {
+      endRound();
+      setPhase('idle');
+
+      const buffer = sampler.buffer;
+      const n = buffer.n;
+
+      // 走到这里说明 arming 阶段确实收到过采样,装置是活的 ——
+      // 所以此刻的 0 是**真的纹丝未动**,不是"没在听"。
+      //
+      // 必须单独处理:`measureDrift` 对空区间返回 null(样本不足),
+      // 照搬会把"最好的一次"显示成"测不出来",正好把结论说反。
+      if (n === 0) {
+        rounds += 1;
+        setStat('samples', '0');
+        setStat('span', '0');
+        setStat('rounds', String(rounds));
+        setText(el('path-main'), '0');
+        saveBest(BEST_KEY, 0, { lowerIsBetter: true });
+        showBest();
+        setBadge(el('state-badge'), t.badges.still, 'good');
+        setText(
+          el('verdict-note'),
+          fill(t.runtime.noteStill, { seconds: HOLD_MS / 1000 }),
+        );
+        return;
+      }
+
+      const drift = measureDrift(buffer.x, buffer.y, { start: 0, end: n });
+      if (!drift) {
+        setStat('samples', String(n));
+        setBadge(el('state-badge'), t.badges.failed, 'idle');
+        setText(el('verdict-note'), t.runtime.noteFailed);
+        return;
+      }
+
+      rounds += 1;
+      setStat('samples', String(drift.samples));
+      setStat('span', drift.spanPx.toFixed(1));
+      setStat('rounds', String(rounds));
+      setText(el('path-main'), drift.pathPx.toFixed(1));
+
+      const isRecord = saveBest(BEST_KEY, drift.pathPx, { lowerIsBetter: true });
+      showBest();
+
+      setBadge(
+        el('state-badge'),
+        isRecord ? t.badges.record : t.badges.done,
+        isRecord ? 'good' : 'idle',
+      );
+      /*
+       * 数据句 + 结论句**两条各自完整的键**,二选一追加 —— 不拼接句子内部,
+       * 理由见 `pages/steadiness.ts` 的文件头。
+       */
+      setText(
+        el('verdict-note'),
+        fill(t.runtime.noteResult, {
+          seconds: HOLD_MS / 1000,
+          path: drift.pathPx.toFixed(1),
+          span: drift.spanPx.toFixed(1),
+        }) +
+          (isRecord ? t.runtime.noteResultRecord : t.runtime.noteResultCompare),
+      );
+    }
+
+    /**
+     * 推进器。三个阶段都靠它走:静止时没有任何事件可监听,
+     * "指针停下了没有""还剩几秒"只能靠刷新循环推上去。
+     */
+    createTicker(100, (now) => {
+      if (phase === 'idle' || phase === 'missed') return;
+
+      const buffer = sampler.buffer;
+      const n = buffer.n;
+
+      if (phase === 'arming') {
+        if (n === 0) {
+          if (now - phaseSince > ARM_TIMEOUT_MS) abort();
+          return;
+        }
+        // 看**最新**那个采样在不在圆里 —— 指针可能进来又出去了
+        const x = buffer.x[n - 1];
+        const y = buffer.y[n - 1];
+        if (Math.hypot(x - centerX, y - centerY) <= radius) settle();
+        else if (now - phaseSince > ARM_TIMEOUT_MS) abort();
+        return;
+      }
+
+      if (phase === 'settling') {
+        if (n > lastN) {
+          lastN = n;
+          grewAt = now;
+        } else if (now - grewAt > SETTLE_MS) {
+          beginWindow();
+        }
+        return;
+      }
+
+      // measuring:先看有没有出圈,再看倒计时。
+      // 顺序不能反 —— 出圈那一下要立刻判,晚一个 tick 就会多算 100ms 的漂移
+      for (let i = checkedUpTo; i < n; i++) {
+        if (Math.hypot(buffer.x[i] - centerX, buffer.y[i] - centerY) > radius) {
+          checkedUpTo = n;
+          miss();
+          return;
+        }
+      }
+      checkedUpTo = n;
+
+      const left = Math.max(0, HOLD_MS - (now - windowStartedAt));
+      setText(el('live-left'), (left / 1000).toFixed(1));
+    });
+
+    startButton?.addEventListener('click', start);
+    stopButton?.addEventListener('click', () => {
+      // 用户自己放弃:这不算成绩,也不算出圈,直接回到待机
+      if (phase === 'idle') return;
+      endRound();
+      setPhase('idle');
+      setBadge(el('state-badge'), t.badges.gaveUp, 'idle');
+      setText(el('verdict-note'), t.runtime.noteGaveUp);
+      resetReadouts();
+    });
+
+    /**
+     * 窗口失焦:用户已经不在看这一页了,继续测没有意义。
+     *
+     * **和瞄准页同一条理由**:计时器走的是 rAF,后台标签页里它会停,
+     * 回到前台时 `now` 一下跳到窗口之后 —— 结算出来会是一段被拉长的时间配上
+     * 只有一部分时间的采样,比不给还糟。这里直接作废。
+     */
+    window.addEventListener('blur', () => {
+      if (phase === 'idle' || phase === 'missed') return;
+      endRound();
+      setPhase('idle');
+      setBadge(el('state-badge'), t.badges.interrupted, 'idle');
+      setText(el('verdict-note'), t.runtime.noteInterrupted);
+      resetReadouts();
+    });
+
+    window.addEventListener('pagehide', () => sampler.destroy());
+  </script>
+</BaseLayout>

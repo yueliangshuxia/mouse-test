@@ -49,6 +49,43 @@ export function toolCopy(slug: string, locale: Locale): { name: string; navLabel
   return entry ?? { name: slug, navLabel: slug };
 }
 
+/**
+ * 按 **slug** 取那一页的目录条目(取不到返回 `null`)。
+ *
+ * 需要它的只有工具箱清单页:它列的是 `NAV.dropdown` 那八件,**每一件的说明文字
+ * 就是那一页自己的 `metaDescription`**。不把八条说明抄进 `toolbox.ts` 是因为
+ * **同一句话只能有一个来源** —— `tools.ts` 里那份中文 description 和每页目录里的
+ * `metaDescription` 已经被 `tests/i18n.test.ts` 钉成同一个字符串,再抄第三份
+ * 就是给日后漂移留缝。
+ *
+ * `pageCopyBySlug` 和 `toolCopy` 是**两件不同的事**:`toolCopy` 按 slug 取
+ * **名字与报头短名**(在 `tools` 命名空间里,20 个 slug 都有);这个按 slug 取
+ * **那一页的目录**(在 `pages` 命名空间里,**只有翻过的页才有**)。
+ */
+export function pageCopyBySlug(
+  locale: Locale,
+  slug: string,
+): { slug: string; metaTitle: string; metaDescription: string } | null {
+  for (const page of Object.values(getCatalog(locale).pages)) {
+    if (page.slug === slug) return page;
+  }
+  return null;
+}
+
+/**
+ * 一个鼠标按键的**名字**和**副标题**(`主键` / `滚轮按下` 那种)。
+ *
+ * 和 `toolCopy` 同一套写法:表里没有的编号给一个**看得出是哪一个**的兜底
+ * (`按键 9`),而不是空串 —— 一块空白的按键牌会被读成"这一项还没做好"。
+ */
+export function buttonCopy(code: number, locale: Locale): { name: string; note: string } {
+  const table: Record<string, { name: string; note: string }> = getCatalog(locale).buttons;
+  return (
+    table[String(code)] ??
+    { name: fill(getCatalog(locale).buttons.unknown.name, { code: String(code) }), note: '' }
+  );
+}
+
 /** 站内链接的**语言感知**版本:`href()` 拼 `base`,`localePath()` 加语言前缀 */
 export function localeHref(locale: Locale, path = ''): string {
   return href(localePath(locale, path));
@@ -99,6 +136,24 @@ export function fill(template: string, vars: Record<string, string | number>): s
   return template.replace(/\{(\w+)\}/g, (whole, key: string) =>
     key in vars ? String(vars[key]) : whole,
   );
+}
+
+/**
+ * 把 `analysis.ts` 给出来的**判据代码**格式化成一句话。
+ *
+ * 句子住在目录的 `quality` 命名空间里。那边只给代码和已经格式化好的数值
+ * (理由写在 `QualityIssue` 的注释里),拼接在这一步。
+ *
+ * 查不到就把**代码本身**显示出来:屏幕上冒出一个 `duplicate-poor` 一眼看得见,
+ * 而悄悄给空串那一行会无声无息地消失。
+ */
+export function formatIssue(
+  locale: Locale,
+  issue: { code: string; params: Record<string, string> },
+): string {
+  const table: Record<string, string> = getCatalog(locale).quality;
+  const template = table[issue.code];
+  return template ? fill(template, issue.params) : issue.code;
 }
 
 /**

@@ -17,11 +17,25 @@
  * 逐页翻译推进时这两份会自然合并成一份。
  */
 
+import { buttonZh } from './pages/button';
 import { cpsZh } from './pages/cps';
+import { dpiZh } from './pages/dpi';
+import { holdDragZh } from './pages/holdDrag';
+import { scrollZh } from './pages/scroll';
+import { doubleClickZh } from './pages/doubleClick';
+import { pollingZh } from './pages/polling';
 import { homeZh } from './pages/home';
 import { deadPixelZh } from './pages/deadPixel';
 import { doodleZh } from './pages/doodle';
 import { sensitivityZh } from './pages/sensitivity';
+import { accelerationZh } from './pages/acceleration';
+import { keyboardZh } from './pages/keyboard';
+import { reactionZh } from './pages/reaction';
+import { aimZh } from './pages/aim';
+import { steadinessZh } from './pages/steadiness';
+import { trailZh } from './pages/trail';
+import { refreshZh } from './pages/refresh';
+import { toolboxZh } from './pages/toolbox';
 
 export const zh = {
   /** 报头、开关、全站通用的那几个词 */
@@ -75,6 +89,28 @@ export const zh = {
     'mouse-repair': { name: '鼠标维修', navLabel: '鼠标维修' },
   },
 
+  /**
+   * 五个鼠标按键的名字与副标题。
+   *
+   * **它不在页面目录里,因为两个页面共用**:`/button-test/`(五块按键牌 + chip)
+   * 和 `/hold-drag-test/`(逐键明细表 + 日志)。放进其中一页的命名空间,另一页
+   * 就得再写一份,而"同一个键在两页上叫两个名字"是没人会发现的。
+   *
+   * 键是**按键编号**(`MouseEvent.button` 那套,0–4),和 `mouse-buttons.ts` 的
+   * `BUTTONS` 对齐 —— 那个模块仍然留着同样一份中文,由 `tests/i18n.test.ts`
+   * 的对账用例钉着(同 `tools.ts` 的 `name` / `navLabel`,理由一样:摘掉它要
+   * 一次性改两个页面的脚本)。
+   */
+  buttons: {
+    '0': { name: '左键', note: '主键' },
+    '1': { name: '中键', note: '滚轮按下' },
+    '2': { name: '右键', note: '副键' },
+    '3': { name: '侧键 4', note: '后退' },
+    '4': { name: '侧键 5', note: '前进' },
+    /** 表里没有的编号。**留着而不是给空串** —— 一个空白的按键牌会被读成"这键没做好" */
+    unknown: { name: '按键 {code}', note: '' },
+  },
+
   /** 页脚与底部悬浮条 */
   /**
    * 回报率页那几条"这次测得准不准"的提示。
@@ -115,9 +151,23 @@ export const zh = {
   pages: {
     cps: cpsZh,
     home: homeZh,
+    button: buttonZh,
+    dpi: dpiZh,
+    polling: pollingZh,
+    holdDrag: holdDragZh,
+    scroll: scrollZh,
+    doubleClick: doubleClickZh,
     doodle: doodleZh,
     deadPixel: deadPixelZh,
     sensitivity: sensitivityZh,
+    acceleration: accelerationZh,
+    keyboard: keyboardZh,
+    reaction: reactionZh,
+    aim: aimZh,
+    steadiness: steadinessZh,
+    trail: trailZh,
+    refresh: refreshZh,
+    toolbox: toolboxZh,
   },
 };
 

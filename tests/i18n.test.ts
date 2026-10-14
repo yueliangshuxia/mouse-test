@@ -11,6 +11,8 @@ import {
   localePath,
 } from '../src/lib/i18n/locale';
 import { REPAIR, TOOLBOX, TOOLS, findTool } from '../src/lib/tools';
+import { QUALITY_CODES } from '../src/lib/analysis';
+import { BUTTONS } from '../src/lib/mouse-buttons';
 
 /*
  * 这一组守两件事:**目录和注册表不能漂**,以及**路径换算别把英文页算到中文地址上**。
@@ -76,6 +78,19 @@ describe('目录与注册表对账', () => {
     { slug: 'doodle-test', copy: zh.pages.doodle, enCopy: en.pages.doodle },
     { slug: 'dead-pixel-test', copy: zh.pages.deadPixel, enCopy: en.pages.deadPixel },
     { slug: 'sensitivity-converter', copy: zh.pages.sensitivity, enCopy: en.pages.sensitivity },
+    { slug: 'button-test', copy: zh.pages.button, enCopy: en.pages.button },
+    { slug: 'dpi-test', copy: zh.pages.dpi, enCopy: en.pages.dpi },
+    { slug: 'polling-rate-test', copy: zh.pages.polling, enCopy: en.pages.polling },
+    { slug: 'hold-drag-test', copy: zh.pages.holdDrag, enCopy: en.pages.holdDrag },
+    { slug: 'scroll-test', copy: zh.pages.scroll, enCopy: en.pages.scroll },
+    { slug: 'double-click-test', copy: zh.pages.doubleClick, enCopy: en.pages.doubleClick },
+    { slug: 'acceleration-test', copy: zh.pages.acceleration, enCopy: en.pages.acceleration },
+    { slug: 'keyboard-test', copy: zh.pages.keyboard, enCopy: en.pages.keyboard },
+    { slug: 'reaction-test', copy: zh.pages.reaction, enCopy: en.pages.reaction },
+    { slug: 'aim-test', copy: zh.pages.aim, enCopy: en.pages.aim },
+    { slug: 'steadiness-test', copy: zh.pages.steadiness, enCopy: en.pages.steadiness },
+    { slug: 'trail-test', copy: zh.pages.trail, enCopy: en.pages.trail },
+    { slug: 'refresh-visual-test', copy: zh.pages.refresh, enCopy: en.pages.refresh },
   ];
 
   it('已翻译页面的 meta 和 tools.ts 里那份逐字相同', () => {
@@ -91,6 +106,42 @@ describe('目录与注册表对账', () => {
     for (const { slug, enCopy } of TRANSLATED) {
       expect(enCopy.metaTitle.trim(), `${slug} 的英文 <title> 是空的`).not.toBe('');
       expect(enCopy.metaDescription.trim(), `${slug} 的英文 description 是空的`).not.toBe('');
+    }
+  });
+
+  /*
+   * **`analysis.ts` 和目录之间那道锁。**
+   *
+   * 判据代码现在住在 `analysis.ts`(`QUALITY_CODES`),文案住在目录的 `quality`
+   * 命名空间里。两边分开是有理由的 —— `analysis.ts` 是全站唯一一个不 import
+   * 任何东西的纯层,把它接到呈现层上会把那条界线拆掉。
+   *
+   * 代价就是这条:**加了一条判据却忘了写文案**,类型上不会响。所以在这里补上,
+   * 而且**两边都查** —— 英文漏了同样是一句话说不出来。
+   * (反过来的方向不查:目录里多留一条没人判的文案无害,只是死数据。)
+   */
+  /*
+   * **五个按键名在 `mouse-buttons.ts` 和目录里各有一份**,同 `tools.ts` 的
+   * `name` / `navLabel` —— 那一份暂时摘不掉(它还被两个页面的脚本用着),
+   * 所以靠这条把两份绑住。漂了会红。
+   */
+  it('按键名两边逐字相同,而且编号一个不漏', () => {
+    for (const button of BUTTONS) {
+      const copy = zh.buttons[String(button.code) as keyof typeof zh.buttons];
+      expect(copy, `按键 ${button.code} 在 mouse-buttons.ts 里有,目录里没有`).toBeTruthy();
+      expect(copy?.name, `按键 ${button.code} 的名字两边对不上`).toBe(button.name);
+      expect(copy?.note, `按键 ${button.code} 的副标题两边对不上`).toBe(button.note);
+    }
+    for (const code of Object.keys(zh.buttons)) {
+      if (code === 'unknown') continue;
+      expect(BUTTONS.map((b) => String(b.code)), `目录里多了一个 mouse-buttons.ts 里没有的编号 ${code}`).toContain(code);
+    }
+  });
+
+  it('每一条判据代码都有中英文文案', () => {
+    for (const code of QUALITY_CODES) {
+      expect(zh.quality[code], `${code} 在 analysis.ts 里判了,中文目录里却没有`).toBeTruthy();
+      expect(en.quality[code], `${code} 缺英文文案`).toBeTruthy();
     }
   });
 });

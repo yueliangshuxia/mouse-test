@@ -1,0 +1,613 @@
+---
+/*
+ * 按键 / 滚轮 / 长按 / 双击测试页的**主体**。两个薄路由引它:中文的
+ * `/button-test/` 和英文的 `/en/button-test/`。
+ *
+ * ## 为什么页面要拆成"组件 + 两个薄路由"
+ *
+ * Astro 的页面文件不能被另一个页面 import,所以"同一页渲染两种语言"只有这一条路:
+ * 主体搬进组件、收一个 `locale`,路由文件各三行。**别把它再抄回页面里** ——
+ * 一份两处,迟早一处改了另一处没改。
+ *
+ * ## 这一页照 `Cps.astro` 那套做
+ *
+ * 文案住在 `src/lib/i18n/pages/button.ts`;模板里的静态文字换成 `t.…`;带
+ * `**强调**` 的整段走 `faqHtml()`;`<script>` 里那些拼出来的句子语言从
+ * `currentLocale()` 读回来(**从 `<html lang>` 读回来**,因为 frontmatter 在
+ * `<script>` 里不存在),句子本身整句住在目录里。
+ *
+ * 三处**这一页特有的**:
+ *
+ * - **它没有 `<style>` 块。** 原先就没有,搬进来也没加 —— 这一页的长相
+ *   (鼠标面板、五块按键牌、读数栏)全部住在 `global.css` 里。**所以这一页
+ *   一条本页规则都没有**,想改长相只能去 `global.css`。
+ * - **五个键帽的名字和副标题来自共用目录的 `buttons` 命名空间**
+ *   (`buttonCopy(code, locale)`),不是 `mouse-buttons.ts` 那一份 —— 那张表
+ *   按键页和拖拽页共用,名字的本地化是**中央的一件事**,不归这一页。
+ *   `BUTTONS` 这里只贡献编号和顺序。
+ * - **正文里那三个 `<code>` 变成了 `**`**,这是权衡不是等价,理由记在
+ *   `pages/button.ts` 的文件头(`faqHtml()` 只认 `**`,而且会把 `<`/`>` 转义掉,
+ *   留着 `<code>` 屏幕上会原样印出标签)。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import StatPanel from '../../components/StatPanel.astro';
+import { BUTTONS } from '../../lib/mouse-buttons';
+import { MOUSE_FIGURE_SVG } from '../../lib/mouse-figure';
+import { TOOL_MOTIF } from '../../lib/tool-motifs';
+import { TOOL_HUE } from '../../lib/tool-hues';
+import { CLICK_CHATTER_MS } from '../../lib/analysis';
+import { faqHtml } from '../../lib/faq';
+import { DEFAULT_LOCALE, buttonCopy, fill, getCatalog, pageHref } from '../../lib/i18n';
+import type { Locale } from '../../lib/i18n';
+
+interface Props {
+  locale?: Locale;
+}
+
+const { locale = DEFAULT_LOCALE } = Astro.props;
+const t = getCatalog(locale).pages.button;
+
+/*
+ * 五块按键牌。编号和顺序从 `BUTTONS` 来(那是结构),名字和副标题从目录的
+ * `buttons` 命名空间来 —— 同一个编号在别的页面上也叫这个名字,抄一份进来
+ * 只会多出一份要对齐的清单。
+ */
+const KEYCAPS = BUTTONS.map((button) => ({
+  code: button.code,
+  ...buttonCopy(button.code, locale),
+}));
+
+/*
+ * 「想看细的,去这三页」那三条链接的目标。**顺序与 `t.detailPoints` 一一对应**,
+ * 链接文字住在目录里(`ButtonDetailRow.link`),`href` 是结构、住在这里。
+ *
+ * 走 `pageHref()` 而不是直接拼 `href()`:那三个页面**目前都还没翻**,
+ * 所以中英两侧算出来的地址今天完全一样(英文访客落回中文版,这是对的),
+ * 而哪天它们翻了,这里**一个字都不用改**。
+ */
+const DETAIL_SLUGS = ['hold-drag-test', 'double-click-test', 'scroll-test'];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebApplication',
+  name: t.h1,
+  description: t.metaDescription,
+  applicationCategory: 'UtilitiesApplication',
+  operatingSystem: 'Web',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+};
+---
+
+<BaseLayout
+  title={t.metaTitle}
+  description={t.metaDescription}
+  current="button-test"
+  jsonLd={jsonLd}
+  hue={TOOL_HUE['button-test']}
+  locale={locale}
+>
+  <div class="tool-head">
+    <span class="tool-head__icon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={TOOL_MOTIF['button-test']}
+      />
+    </span>
+    <h1>{t.h1}</h1>
+  </div>
+
+  <p class="prose" set:html={faqHtml(t.lede)} />
+
+  <div id="cap-notice"></div>
+
+  <div class="workbench">
+    <div class="workbench__stage">
+      <div class="test-area test-area--figure well" id="area">
+        <Fragment set:html={MOUSE_FIGURE_SVG} />
+
+        <div class="mouse-keys">
+          {
+            KEYCAPS.map((keycap) => (
+              <div class="mouse-key" data-key={keycap.code} data-down="false">
+                <div class="mouse-key__name">{keycap.name}</div>
+                <div class="mouse-key__note">{keycap.note}</div>
+                <div class="mouse-key__n" data-count={keycap.code}>
+                  0
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+
+    <div class="workbench__readout">
+      <div class="stat-grid">
+        <StatPanel id="presses" label={t.stats.presses.label} primary hint={t.stats.presses.hint} />
+        <StatPanel id="holding" label={t.stats.holding.label} hint={t.stats.holding.hint} />
+        <StatPanel id="gap" label={t.stats.gap.label} unit={t.stats.gap.unit} hint={t.stats.gap.hint} />
+        <StatPanel id="held" label={t.stats.held.label} unit={t.stats.held.unit} hint={t.stats.held.hint} />
+        <StatPanel id="notches" label={t.stats.notches.label} hint={t.stats.notches.hint} />
+        <StatPanel id="fault" label={t.stats.fault.label} hint={t.stats.fault.hint} />
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="reset">{t.reset}</button>
+  </div>
+
+  {/*
+    `prose--cards` 只把这一节里的 `<ul>` 排成卡片网格,**`<p>` 一个字不动** ——
+    所以「组合按键」和「注意事项」那两节(整段整段的说明)不受影响,
+    变的只有「怎么看结果」和「想看细的,去这三页」这两处**本来就是一个点一条**
+    的清单。这也是它做成修饰类、而不是去改全局 `.prose ul` 的原因:
+    后者会把 FAQ 答案里、步骤里的每一处列表一起改掉,而那些地方该是列表。
+
+    每一条的首句(<strong> 那一段)住在目录的 `title` / `link` 里,正文住在
+    `body` / `tail` 里;**它们必须挨着写** —— 中间插一个换行或缩进,中文那侧
+    的「——」前面就会多出一个空格,而英文那侧的正文自己带一个前导空格
+    (理由见 `pages/button.ts` 的文件头),两边都会印成双空格。
+  */}
+  <section class="prose prose--cards">
+    <h2>{t.resultsHeading}</h2>
+    <ul>
+      {
+        t.results.map((row) => (
+          <li>
+            <strong>{row.title}</strong><Fragment set:html={faqHtml(row.body)} />
+            {row.subPoints ? (
+              <ul>
+                {row.subPoints.map((sub) => (
+                  <li><Fragment set:html={fill(faqHtml(sub), { ms: CLICK_CHATTER_MS })} /></li>
+                ))}
+              </ul>
+            ) : null}
+            {row.tail ? <Fragment set:html={faqHtml(row.tail)} /> : null}
+          </li>
+        ))
+      }
+    </ul>
+
+    <h2>{t.detailHeading}</h2>
+    <p>{t.detailLede}</p>
+    <ul>
+      {
+        t.detailPoints.map((row, index) => (
+          <li>
+            <a href={pageHref(locale, DETAIL_SLUGS[index])}>{row.link}</a><Fragment set:html={faqHtml(row.body)} />
+          </li>
+        ))
+      }
+    </ul>
+
+    <h2>{t.chordHeading}</h2>
+    <p set:html={faqHtml(t.chordBody)} />
+    <p set:html={faqHtml(t.chordImpl)} />
+
+    <h2>{t.notesHeading}</h2>
+    <p set:html={faqHtml(t.notesBody)} />
+    <p set:html={faqHtml(t.notesGesture)} />
+    <p set:html={faqHtml(t.notesSideButtons)} />
+  </section>
+
+  <script>
+    import {
+      classifyClickGap,
+      normalizeWheelDelta,
+      summarizeScroll,
+      type ScrollNotch,
+    } from '../../lib/analysis';
+    import { BUTTONS, BUTTON_COUNT, eachButtonEdge, maskFromButtons } from '../../lib/mouse-buttons';
+    import { suppressSideButtonNavigation } from '../../lib/side-buttons';
+    import {
+      createTicker,
+      el,
+      format,
+      mountCapabilityNotices,
+      setHint,
+      setStat,
+      setText,
+      statNode,
+      suppressWorkbenchDefaults,
+    } from '../../lib/ui';
+    import { buttonCopy, currentLocale, fill, getCatalog } from '../../lib/i18n';
+
+    /*
+     * 文案**在脚本里重新取一遍**,不是从 frontmatter 传进来的 ——
+     * frontmatter 变量在 `<script>` 里不存在(脚本被单独打包成外链模块,
+     * 见 CLAUDE.md「页面约定」)。语言从 `<html lang>` 读回来,那是构建期写死、
+     * 运行期又是 DOM 上的事实,是两个世界唯一都看得见的东西。
+     *
+     * `locale` 除了取文案,还要交给 `buttonCopy()` —— 键名和格数一样是
+     * "用户看得见的字",英文版漏了它就只在图上显示中文键名。
+     */
+    const locale = currentLocale();
+    const t = getCatalog(locale).pages.button;
+
+    const area = el('area');
+    const resetButton = el('reset');
+    const figure = area?.querySelector<SVGElement>('.mouse-figure') ?? null;
+
+    mountCapabilityNotices(el('cap-notice'));
+
+    // ---- 图与按键牌的节点表 ----
+
+    /** 图上那五个可亮的部分,按本站编号索引 */
+    const parts = new Map<number, Element>();
+    /** 五块按键牌、各自的计数,以及**那句小注的原文**,按本站编号索引 */
+    const keys = new Map<
+      number,
+      { card: HTMLElement; count: HTMLElement; note: HTMLElement; noteText: string }
+    >();
+
+    if (area) {
+      for (const node of area.querySelectorAll('[data-mb]')) {
+        parts.set(Number(node.getAttribute('data-mb')), node);
+      }
+      for (const card of area.querySelectorAll<HTMLElement>('.mouse-key')) {
+        const count = card.querySelector<HTMLElement>('.mouse-key__n');
+        const note = card.querySelector<HTMLElement>('.mouse-key__note');
+        // 小注的原文**从 DOM 上读回来**,不在脚本里另写一份 —— 和 `cps-test` 的按钮
+        // 标签、`aim-test` 的选项同一个办法:frontmatter 变量在 `<script>` 里不存在。
+        if (count && note) {
+          keys.set(Number(card.dataset.key), { card, count, note, noteText: note.textContent ?? '' });
+        }
+      }
+    }
+
+    // ---- 状态 ----
+
+    /** 每个键累计按过几次。chip 上那个数就是它 */
+    const counts = new Array<number>(BUTTON_COUNT).fill(0);
+    /** 每个键上一次按下的时刻。**按编号分开记** —— 左键点一下再用右键点一下,
+     *  这两个事件之间的差没有意义,混在一起会凭空造出一个"间隔"。 */
+    const lastByButton = new Map<number, number>();
+    let total = 0;
+
+    let downMask = 0;
+    /** 正在跟踪的指针。只有从测试面上按下的那一次才开始记账。 */
+    let armedPointerId: number | null = null;
+
+    let holding = false;
+    let heldSince = 0;
+
+    // ---- 故障 ----
+
+    /**
+     * 判出故障的键(按本站编号)。**这是一个累计的集合**,不是"这一次是不是故障" ——
+     * 连击是**偶发**的:微动刚开始老化时十次里抖一次,只标"当下那一次"的话,
+     * 用户松手回头一看,什么都看不到。所以一旦判出来就留着,直到按重置。
+     */
+    const faulted = new Set<number>();
+    /** 滚轮判出过疑似跳格。**单独一个标志**,因为滚轮和中键在图上同一块,不是一回事 */
+    let wheelFault = false;
+    /** 这一轮到底有没有收到过可判的东西。"没测"和"测了没事"是两句话 */
+    let sawPress = false;
+    let sawScroll = false;
+
+    // ---- 渲染 ----
+
+    /**
+     * 把按键状态画到图和按键牌上。
+     *
+     * 写 `'true'` / `'false'` 而不是增删属性:属性一增一删会多一次样式重算,
+     * 而这条路径挂在 `pointermove` 上,1000Hz 的鼠标每秒要调上千次。
+     */
+    function syncVisuals(): void {
+      const down: string[] = [];
+      for (const button of BUTTONS) {
+        const pressed = (downMask & (1 << button.code)) !== 0;
+        const bad = faulted.has(button.code);
+        parts.get(button.code)?.setAttribute('data-down', pressed ? 'true' : 'false');
+        // `data-fault` 是**常驻**写上去的:亮不亮只由 `data-down` 说了算,
+        // 而这一个决定"亮起来是绿还是红"。两件事分开,图上的规则才不会互相打架。
+        parts.get(button.code)?.setAttribute('data-fault', bad ? 'true' : 'false');
+        keys.get(button.code)?.card.setAttribute('data-down', pressed ? 'true' : 'false');
+        keys.get(button.code)?.card.setAttribute('data-fault', bad ? 'true' : 'false');
+        if (pressed) down.push(buttonCopy(button.code, locale).name);
+      }
+      // 空的时候给破折号而不是 0:这不是"算不出来",是"此刻没有"
+      setStat('holding', down.length > 0 ? down.join(t.runtime.holdingJoiner) : t.runtime.dash);
+    }
+
+    function renderCount(code: number): void {
+      const entry = keys.get(code);
+      if (entry) entry.count.textContent = String(counts[code]);
+    }
+
+    /**
+     * 把「故障」那一格、以及判出故障的按键牌,重画一遍。
+     *
+     * **只在故障状态真的变了的时候调**(判出一处、或者重置),不挂在 `syncVisuals()`
+     * 上 —— 那一条要走 `pointermove`,而这里动的是文本节点。
+     *
+     * 三档分界和全站一致:**没测过给破折号**(不是"未发现",那时候还没资格说这句话)、
+     * 测过没毛病给"未发现"、判出来给"`N` 处"并把细节写在小注里。
+     */
+    function renderFault(): void {
+      const names: string[] = [];
+      for (const button of BUTTONS) {
+        if (faulted.has(button.code)) names.push(fill(t.runtime.faultButton, { name: buttonCopy(button.code, locale).name }));
+      }
+      if (wheelFault) names.push(t.runtime.faultWheel);
+
+      const tested = sawPress || sawScroll;
+      const count = names.length;
+
+      if (count > 0) {
+        setStat('fault', fill(t.runtime.faultCount, { count }));
+        setHint('fault', names.join(t.runtime.faultJoiner));
+      } else if (tested) {
+        setStat('fault', t.runtime.faultNone);
+        setHint('fault', t.runtime.faultNoneHint);
+      } else {
+        setStat('fault', t.runtime.dash);
+        setHint('fault', t.stats.fault.hint);
+      }
+
+      // 那一格变红是"这一页判出了故障"唯一的汇总信号,所以和 `--primary` 一样是
+      // 挂在外层 `.stat` 上的一个档,而不是给数字加个颜色了事
+      statNode('fault')?.closest('.stat')?.classList.toggle('stat--fault', count > 0);
+
+      // 牌上那句小注**替换**成故障名,不是另起一行 —— 加一行会把这一行卡片顶高,
+      // 而卡片高度是量过的(1440 下 114.5px)。信息量也确实该在这儿:「左键」就在上面,
+      // 这一行本来就是解释这块牌的那句话。
+      for (const button of BUTTONS) {
+        const entry = keys.get(button.code);
+        if (!entry) continue;
+        const bad = faulted.has(button.code);
+        setText(entry.note, bad ? t.runtime.faultNote : entry.noteText);
+        entry.note.classList.toggle('mouse-key__note--fault', bad);
+      }
+    }
+
+    /** 判出一处故障。去重:同一个键抖第二次不再重复报 */
+    function markFault(code: number): void {
+      if (faulted.has(code)) return;
+      faulted.add(code);
+      renderFault();
+    }
+
+    /**
+     * 一次按下。`stamp` 必须是 `event.timeStamp`。
+     *
+     * 间隔量的是**两个事件之间**:浏览器会把攒在一起的事件放进同一个任务里派发,
+     * 那一刻两个处理函数里的 `performance.now()` 会塌到 0,一次完全正常的人手双击
+     * 会被算成 0 毫秒、直接报成连击。`event.timeStamp` 是事件自己带的时刻,不吃这份
+     * 派发延迟。(下面按住秒数反过来,量的是墙钟,所以用 `performance.now()`。)
+     */
+    function press(code: number, stamp: number): void {
+      counts[code]++;
+      total++;
+      sawPress = true;
+      renderCount(code);
+
+      const previous = lastByButton.get(code);
+      lastByButton.set(code, stamp);
+      if (previous === undefined) {
+        // 第一个按下的键也是"测过了",这一句不能漏 —— 否则按一次再停手,
+        // 「故障」那一格会一直停在破折号上,而它其实已经有资格说"未发现"了
+        renderFault();
+        return;
+      }
+
+      const gap = stamp - previous;
+      setStat('gap', format(gap, 0));
+      // 触点抖动标在**那个键的计数**上(参考图里也是计数在变色),不是另起一行字
+      const chatter = classifyClickGap(gap) === 'chatter';
+      keys.get(code)?.count.classList.toggle('mouse-key__n--chatter', chatter);
+
+      // 同一个判据,第二处出口:图上那一瓣、那块牌,以及「故障」那一格
+      if (chatter) markFault(code);
+      else renderFault();
+    }
+
+    // ---- 按住计时 ----
+
+    const stopTicker = createTicker(80, () => {
+      if (!holding) return;
+      setStat('held', format((performance.now() - heldSince) / 1000, 1));
+    });
+
+    function beginHold(): void {
+      if (holding) return;
+      holding = true;
+      heldSince = performance.now();
+    }
+
+    function endHold(): void {
+      if (!holding) return;
+      holding = false;
+      setStat('held', format((performance.now() - heldSince) / 1000, 1));
+    }
+
+    // ---- 按键状态 ----
+
+    /**
+     * 对齐一次真实状态,把中间发生的按下/松开都补记上。
+     *
+     * 按键状态**只能**从 `buttons` 位掩码推,不能用 `event.button`:
+     * `pointerdown` 只在指针**从"没有任何键按下"进入"有键按下"**时派发一次,
+     * `pointerup` 只在**最后一个键**松开时派发一次,中间的每一次按下和松开都走
+     * `pointermove`。早先读 `event.button` 的写法漏掉了组合键的第二次按下和
+     * 第一次松开 —— 左右键一起按,一个都点不亮。翻译表在 `mouse-buttons.ts`。
+     *
+     * `eachButtonEdge` 自己也会在掩码没变时早退,但**外面这一层早退是必需的**:
+     * 它挂在 `pointermove` 上,而下面还有三次 DOM 写入。
+     */
+    function syncButtons(buttons: number, stamp: number): void {
+      const next = maskFromButtons(buttons);
+      if (next === downMask) return;
+      eachButtonEdge(downMask, next, (code, isDown) => {
+        if (isDown) press(code, stamp);
+      });
+      downMask = next;
+
+      if (downMask !== 0) beginHold();
+      else endHold();
+
+      syncVisuals();
+      setStat('presses', String(total));
+    }
+
+    function onAreaPointerDown(event: PointerEvent): void {
+      armedPointerId = event.pointerId;
+      syncButtons(event.buttons, event.timeStamp);
+    }
+
+    function onWindowPointerMove(event: PointerEvent): void {
+      if (event.pointerId !== armedPointerId) return;
+      // 组合键的按下和松开都藏在这里,见上面 syncButtons 的注释
+      syncButtons(event.buttons, event.timeStamp);
+    }
+
+    function onWindowPointerUp(event: PointerEvent): void {
+      if (event.pointerId !== armedPointerId) return;
+      syncButtons(event.buttons, event.timeStamp);
+      // 最后一个键也松开了,这一轮结束
+      if (event.buttons === 0) armedPointerId = null;
+    }
+
+    /**
+     * 窗口失焦:按键状态已不可信(用户在别处松开鼠标,这里收不到 `pointerup`,
+     * 图会一直亮着),清掉,但不记时长。
+     */
+    function clearButtons(): void {
+      if (downMask === 0) return;
+      downMask = 0;
+      armedPointerId = null;
+      holding = false;
+      syncVisuals();
+    }
+
+    // ---- 滚轮 ----
+
+    /** 滚轮朝哪边。`''` 是"还没滚过" —— 图上什么都不亮 */
+    let wheelDir: '' | 'up' | 'down' = '';
+
+    /**
+     * 收到的滚动事件。**必须逐次留下**,不能只记一个净值:
+     * 格数是若干次滚动累加出来的(`summarizeScroll` 会在内部跳过零位移的那些)。
+     *
+     * `MAX_EVENTS` 这条上限是**从「滚轮」那一页搬过来的**:首页那台装置只活几秒,
+     * 而这一页会开一整天,不设上限的话这个数组会一直长下去。
+     */
+    const MAX_EVENTS = 4000;
+    let notches: ScrollNotch[] = [];
+
+    function onWheel(event: WheelEvent): void {
+      // 不拦的话页面会跟着滚,面板从指针底下溜走 —— 和「滚轮」那一页同一条理由。
+      // 所以要 `passive: false`
+      event.preventDefault();
+
+      const step = normalizeWheelDelta(event.deltaY, event.deltaMode);
+      notches.push({ notches: step, raw: event.deltaY, deltaMode: event.deltaMode });
+      if (notches.length > MAX_EVENTS) notches = notches.slice(MAX_EVENTS / 2);
+
+      // 零位移的那一次没有方向,不翻状态(`summarizeScroll` 也跳过它,两个口径一致)
+      if (step !== 0) {
+        wheelDir = step > 0 ? 'down' : 'up';
+        if (figure) figure.dataset.wheel = wheelDir;
+        sawScroll = true;
+      }
+
+      // 格数取**净值**的绝对值,和「滚轮」那一页那个大数字同一个口径。
+      // 故障也读**同一个结果**——`glitches` 就是 `markScrollGlitches()` 那一份判据,
+      // 这里不再自己数一遍(和 `summarizeScroll` 逐字同源,见 analysis.ts)。
+      const scroll = summarizeScroll(notches);
+      setStat('notches', format(Math.abs(scroll.netNotches), 0));
+
+      if (scroll.glitches > 0) wheelFault = true;
+      // 滚轮故障挂在图自己身上,不占用那一瓣的 `data-fault`(滚轮 = 中键,会互相抹掉)
+      if (wheelFault && figure) figure.dataset.wheelFault = 'true';
+
+      // 每次滚动都重画:里面每一处写入都先比较再赋值(`setText`),状态没变就是一个
+      // 整数比较。**不要为了省这一次调用去手工追踪"什么时候该重画"** —— 那正是
+      // 三档分界(破折号 / 未发现 / N 处)最容易漏掉一条岔路的地方。
+      renderFault();
+    }
+
+    // ---- 接线 ----
+
+    // 侧键的后退/前进是浏览器级的默认行为,拦不住就会把用户弹回上一页,计数全部清零。
+    // 必须整页拦,和指针停在哪个元素上无关。
+    //
+    // **刻意不接它返回的还原函数。** 曾经在 `pagehide` 里摘过一次:页面进 bfcache 时
+    // `pagehide` 照样触发,用户按返回键回来之后就再也没人拦侧键了 —— 和
+    // `suppressWorkbenchDefaults()` 是同一条规矩,见 CLAUDE.md。
+    suppressSideButtonNavigation();
+
+    // 右键菜单、中键自动滚动、中键 auxclick。判据是"落点是不是控件",实现和理由都在 ui.ts。
+    suppressWorkbenchDefaults();
+
+    if (area) {
+      // 按下必须落在测试面上才开始记账,否则在页面上随便点一下也会计数。
+      // 松开则要在窗口上收——指针很可能已经拖出去了。
+      area.addEventListener('pointerdown', onAreaPointerDown);
+      // `pointermove` 不是可选项——组合键的按下和松开都在它里面。
+      // 好在 syncButtons 开头就是一次整数比较,普通移动会被立刻挡掉。
+      window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
+      window.addEventListener('pointerup', onWindowPointerUp);
+      window.addEventListener('pointercancel', onWindowPointerUp);
+      area.addEventListener('wheel', onWheel, { passive: false });
+    }
+
+    window.addEventListener('blur', clearButtons);
+
+    // ---- 重置 ----
+
+    resetButton?.addEventListener('click', () => {
+      counts.fill(0);
+      lastByButton.clear();
+      total = 0;
+      downMask = 0;
+      armedPointerId = null;
+      holding = false;
+      notches = [];
+      wheelDir = '';
+      // 故障也是这一轮的结果,重置要一起清 —— 判据一直是同一句:「重置回到没测过的样子」
+      faulted.clear();
+      wheelFault = false;
+      sawPress = false;
+      sawScroll = false;
+
+      for (let code = 0; code < BUTTON_COUNT; code++) {
+        const entry = keys.get(code);
+        renderCount(code);
+        entry?.card.setAttribute('data-down', 'false');
+        entry?.count.classList.remove('mouse-key__n--chatter');
+      }
+      if (figure) {
+        delete figure.dataset.wheel;
+        delete figure.dataset.wheelFault;
+      }
+
+      // 先清干净再 `syncVisuals()`:后者只按 `faulted` 写 `data-fault`,
+      // 它是"此刻的事实",不会替我们把上一轮的残留摘掉
+      syncVisuals();
+      renderFault();
+      setStat('presses', '0');
+      setStat('gap', t.runtime.dash);
+      setStat('held', t.runtime.dash);
+      setStat('notches', t.runtime.dash);
+    });
+
+    // 开局:计数是真数出来的 0,其余四项是"此刻还没有",给破折号
+    setStat('presses', '0');
+    setStat('gap', t.runtime.dash);
+    setStat('held', t.runtime.dash);
+    setStat('notches', t.runtime.dash);
+    syncVisuals();
+    // 「故障」开局是破折号,不是「未发现」—— 还没测过就没资格说这句话
+    renderFault();
+
+    // 页面离开前停止动画循环。侧键拦截**不在这里还原**,理由见上面。
+    window.addEventListener('pagehide', stopTicker);
+  </script>
+</BaseLayout>

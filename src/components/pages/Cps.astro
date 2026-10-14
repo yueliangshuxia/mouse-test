@@ -189,7 +189,10 @@ const jsonLd = {
         t.fewerPoints.map((point) => (
           <li>
             <strong>{point.title}</strong>
-            {point.body}
+            {/* **`body` 必须走 `faqHtml`** —— 它里面有 `**`,而 `{x}` 是转义输出,
+                直接插值会把星号原样印出来。这一条 `faq.ts` 的文件头就写着,
+                而它在页面上是**静默的**:只多两个星号,不报任何错。 */}
+            <Fragment set:html={faqHtml(point.body)} />
           </li>
         ))
       }

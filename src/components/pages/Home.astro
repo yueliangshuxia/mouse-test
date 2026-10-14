@@ -27,7 +27,6 @@ import { defaultMiniMode, findMiniCard, MINI_CARDS } from '../../lib/mini-cards'
 import { DEFAULT_LOCALE, fill, getCatalog, pageHref, toolCopy } from '../../lib/i18n';
 import type { Locale } from '../../lib/i18n';
 import { faqHtml } from '../../lib/faq';
-import { href } from '../../lib/url';
 
 interface Props {
   locale?: Locale;
@@ -92,7 +91,7 @@ const cards = DIAGNOSTIC_TOOLS.filter((tool) => !covered.has(tool.slug)).map((to
 
 /** 工具箱那条链接是**行内**的,所以整句留在目录里、用一个占位符把链接填进去 */
 const toolboxLede = fill(t.toolboxLede, {
-  toolboxLink: `<a href="${href('toolbox/')}">${t.toolboxLinkText}</a>`,
+  toolboxLink: `<a href="${pageHref(locale, 'toolbox')}">${t.toolboxLinkText}</a>`,
 });
 ---
 

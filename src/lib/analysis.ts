@@ -670,9 +670,39 @@ export interface QualityInput {
   anomalies: TimestampAnomalies;
 }
 
+/**
+ * 判据的代码。**它是一个本地的字符串联合,不是从 i18n 目录推出来的。**
+ *
+ * 推出来当然更紧(漏写文案直接 typecheck 红),但代价是 `analysis.ts` 要 import
+ * 呈现层 —— 而**它是全站唯一一个不 import 任何东西的纯层**,那条界线值得留着。
+ * 所以保证换了个地方:文案住在 `i18n` 的 `quality` 命名空间里,
+ * `tests/i18n.test.ts` 有一条用例遍历 `QUALITY_CODES` 逐条去对,
+ * **加了代码忘了文案会红**,只是红在测试而不是在类型上。
+ */
+export const QUALITY_CODES = [
+  'duplicate-poor',
+  'duplicate-fair',
+  'out-of-order-poor',
+  'out-of-order-fair',
+  'duration-poor',
+  'duration-fair',
+] as const;
+
+export type QualityCode = (typeof QUALITY_CODES)[number];
+
+/**
+ * 判据给出来的**代码 + 数值**,不是一句成品句子。
+ *
+ * 这一层原来吐的是中文句子,2026-10-14 改掉了:让纯统计层产出排版好的文案,
+ * 本身就是把呈现混进了判据 —— 而且那样没法双语。
+ *
+ * `params` 里的值**在那边就格式化好了**(比例留 0 位、倒序比例留 1 位):
+ * 小数位数是**统计上的决定**,不是文案风格,所以它该跟着数字走。
+ */
 export interface QualityIssue {
+  code: QualityCode;
   level: Exclude<QualityLevel, 'good'>;
-  message: string;
+  params: Record<string, string>;
 }
 
 export interface DataQuality {
@@ -725,38 +755,31 @@ export function assessQuality(input: QualityInput): DataQuality {
   const outOfOrderRatio = outOfOrder / reported;
 
   const issues: QualityIssue[] = [];
-  const raise = (level: Exclude<QualityLevel, 'good'>, message: string): void => {
-    issues.push({ level, message });
+  const raise = (
+    level: Exclude<QualityLevel, 'good'>,
+    code: QualityCode,
+    params: Record<string, string> = {},
+  ): void => {
+    issues.push({ code, level, params });
   };
 
   // 计时器分辨不出设备周期——浏览器环境下头号误差源
   if (duplicateRatio > DUPLICATE_RATIO_POOR) {
-    raise(
-      'poor',
-      `超过一半的报文落进同一个时间戳(${(duplicateRatio * 100).toFixed(0)}%),` +
-        `说明当前计时精度分辨不出这只鼠标的周期,读数只能当作下限。`,
-    );
+    raise('poor', 'duplicate-poor', { ratio: (duplicateRatio * 100).toFixed(0) });
   } else if (duplicateRatio > DUPLICATE_RATIO_FAIR) {
-    raise(
-      'fair',
-      `${(duplicateRatio * 100).toFixed(0)}% 的报文与相邻报文共用时间戳,` +
-        `计时精度已经接近极限。`,
-    );
+    raise('fair', 'duplicate-fair', { ratio: (duplicateRatio * 100).toFixed(0) });
   }
 
   if (outOfOrderRatio > OUT_OF_ORDER_RATIO_FAIR) {
-    raise('poor', `${(outOfOrderRatio * 100).toFixed(1)}% 的采样时间戳是倒着走的,数据不可信。`);
+    raise('poor', 'out-of-order-poor', { ratio: (outOfOrderRatio * 100).toFixed(1) });
   } else if (outOfOrder > 0) {
-    raise('fair', `有 ${outOfOrder} 条采样的时间戳倒序,通常来自驱动或系统调度。`);
+    raise('fair', 'out-of-order-fair', { count: String(outOfOrder) });
   }
 
   if (input.durationMs < MIN_FAIR_DURATION_MS) {
-    raise('poor', `有效时长只有 ${input.durationMs.toFixed(0)}ms,太短,统计量不可靠。`);
+    raise('poor', 'duration-poor', { ms: input.durationMs.toFixed(0) });
   } else if (input.durationMs < MIN_GOOD_DURATION_MS) {
-    raise(
-      'fair',
-      `有效时长 ${(input.durationMs / 1000).toFixed(1)} 秒,建议连续画圈 3 秒以上再读数。`,
-    );
+    raise('fair', 'duration-fair', { seconds: (input.durationMs / 1000).toFixed(1) });
   }
 
   let level: QualityLevel = 'good';
