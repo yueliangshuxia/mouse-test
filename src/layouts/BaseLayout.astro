@@ -2,6 +2,7 @@
 import '../styles/global.css';
 import Backdrop from '../components/Backdrop.astro';
 import ToolNav from '../components/ToolNav.astro';
+import ViewPing from '../components/ViewPing.astro';
 import { THEME_COLORS, THEME_KEY } from '../lib/theme';
 import { REPAIR } from '../lib/tools';
 import { href } from '../lib/url';
@@ -344,6 +345,29 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
         <p>
           <a href={pageHref(locale, REPAIR.slug)}>{t.tools['mouse-repair'].navLabel}</a> {t.chrome.footerRepair}
         </p>
+        <!--
+          后台入口。**它挂在壳里,所以 40 个预渲染页面每一页都有这一行。**
+
+          ## 为什么这里写的是 `pageHref(locale, 'login')`,而不是 `auth.ts` 里的
+          ## `loginUrl()`
+
+          这一条是硬的。`loginUrl()` 住在 `src/server/auth.ts`,而那个模块 import 了
+          `db.ts` / `mysql2` —— **一旦被这个布局文件引用,构建期就会去连数据库**
+          (预渲染页在构建时执行 frontmatter)。那会让 `npm run build` 在没有数据库
+          的机器上直接崩,而 CI 里正好没有数据库。
+
+          `pageHref` 是纯函数(拼 base + 语言前缀),不碰任何服务端模块,所以安全。
+          `/login` 没有英文版,于是 `pageHref('en', 'login')` 会**落回中文地址** ——
+          这正是判据的正当行为,和维修页那条链接同一种处境。
+
+          ## 位置
+
+          页脚,不通报头:报头是三段按量出来的宽度排的,加第四段会让折叠边界整个漂。
+          页脚是常设位置,和"测出了什么"无关 —— 这一点和维修链接是同一条理由。
+        -->
+        <p>
+          <a href={pageHref(locale, 'login')}>{t.chrome.footerLogin}</a>
+        </p>
       </div>
     </footer>
 
@@ -446,6 +470,17 @@ const ogImage = new URL(href('og.png'), Astro.site).href;
         />
       </a>
     </div>
+
+    <!--
+      浏览计数。**一行覆盖全部 17 个工具页** —— 它自己会判断"这一页算不算数"
+      (判据是 `lib/page-views.ts` 那份从注册表推出来的白名单),所以后台、登录页、
+      首页、工具箱页天然不计数,这里不需要写任何 `if`。
+
+      放在壳里的理由和 `<Backdrop />` 是同一条:挂在 17 个页面里各写一遍的话,
+      加一件工具就会忘了加一行,而漏掉的表现是**那一页从此不计数** —— 看板上少
+      一根柱子,没有任何东西会提醒。
+    -->
+    <ViewPing slug={currentSlug} />
 
     <script>
       import { el, mountThemeToggle } from '../lib/ui';

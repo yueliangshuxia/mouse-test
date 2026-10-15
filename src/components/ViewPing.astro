@@ -1,0 +1,72 @@
+---
+/*
+ * 报一次页面浏览。**它挂在 `BaseLayout` 上,所以一件事就覆盖了全部 17 个工具页。**
+ *
+ * ## 为什么不在每个工具页各写一遍
+ *
+ * 那样加一件工具就会忘了加一行,而漏掉的表现是**那一页从此不计数** —— 看板上
+ * 少一根柱子,没有任何东西会提醒。挂在壳里之后,"哪些页被统计"这件事**不需要
+ * 维护**:它是从注册表推出来的。
+ *
+ * ## 它自己是自守的
+ *
+ * `slug` 不在账册里就**什么都不渲染**(连那个 `<span>` 都不渲染,脚本也不进
+ * 页面)。所以后台、登录页、首页、工具箱页天然不会计数 —— 不需要在壳里写
+ * `if (是工具页)` 那种判断,也就不会出现"那个判断哪天写错了"。
+ *
+ * ## 那个路径由服务端给,脚本不自己算
+ *
+ * `<span data-view-path="/cps-test/">` 里的值是**服务端从注册表取的**。脚本只
+ * 把它原样递回去。
+ *
+ * 让脚本去读 `location.pathname` 是另一条路,而它有三个坑:要自己剥 base
+ * (而 base 上线时会变)、要对上尾斜杠、还要处理 `/en/` 前缀 —— 三件事都容易
+ * 写错,而且写错之后**表里会多出一些看起来像页面的行**。由服务端给值,这三件事
+ * 一件都不存在。
+ *
+ * ## 200 和 204 都一样
+ *
+ * 接口三种情况(记上了 / 路径不在白名单 / 请求体坏了)全返回 204,而这里
+ * **连状态码都不看** —— 这是个观测行为,它不该有任何一条路径能让页面出错。
+ * 失败就失败,页面上看不出来,也不该看得出来。
+ */
+import { isCountablePath, toolViewPath } from '../lib/page-views';
+
+interface Props {
+  /** 当前页的 slug,由 `BaseLayout` 从 pathname 算好传进来。 */
+  slug: string;
+}
+
+const { slug } = Astro.props;
+const path = toolViewPath(slug);
+---
+
+{
+  isCountablePath(path) && (
+    <>
+      {/* 那个值从这儿来。`hidden` 是必须的 —— 它是给脚本读的,不该出现页面上 */}
+      <span data-view-path={path} hidden />
+      <script>
+        import { href } from '../lib/url';
+
+        const node = document.querySelector('[data-view-path]');
+        const path = node?.getAttribute('data-view-path');
+        if (path) {
+          /*
+           * `keepalive: true` 让这一条请求**在页面被关掉/跳走之后仍然发得出去**。
+           * 没有它,"点进来立刻点走"这一类访问会大量丢掉 —— 而那正是这个站上
+           * 最常见的用法(从搜索结果点进来,看一眼,走)。
+           *
+           * 不 await、不 catch 之后做任何事:它不该阻塞任何东西,也不该在页面上
+           * 留下任何痕迹。
+           */
+          void fetch(href('api/view'), {
+            method: 'POST',
+            body: new URLSearchParams({ path }),
+            keepalive: true,
+          }).catch(() => {});
+        }
+      </script>
+    </>
+  )
+}

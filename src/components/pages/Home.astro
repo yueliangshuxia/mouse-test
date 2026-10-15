@@ -21,6 +21,7 @@
  */
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import MiniCard from '../../components/MiniCard.astro';
+import AdSlot from '../../components/AdSlot.astro';
 import { DIAGNOSTIC_TOOLS, FUN_TOOLS, PLANNED_TOOLS } from '../../lib/tools';
 import type { Confidence } from '../../lib/tools';
 import { defaultMiniMode, findMiniCard, MINI_CARDS } from '../../lib/mini-cards';
@@ -148,6 +149,15 @@ const toolboxLede = fill(t.toolboxLede, {
     一模一样的药丸,而它指的不是一件工具,是一扇门。
   */}
   <p class="prose" set:html={toolboxLede} />
+
+  {/*
+    广告位。**位置是挑过的**:它在「更多工具」与「关于这些测试」之间,离
+    上面那片卡片网格和下面那几段正文都有一段距离,读起来是独立的一格。
+
+    首页是**不出故障判定**的页面 —— 这一点是它被选中的原因,见 AdSlot.astro
+    的文件头与 CLAUDE.md「故障判定区永远不出现服务信息」那一条。
+  */}
+  <AdSlot placement="home" />
 
   <h2>{t.aboutHeading}</h2>
 

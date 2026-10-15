@@ -8,11 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 全站现有 **17 个工具页**:10 个诊断(按键 / 长按拖拽 / 双击 / 滚轮 / CPS / 轨迹 / 回报率 / DPI / 加速度 / 键盘)+ 7 个趣味(反应速度 / 瞄准 / 手稳度 / 涂鸦板 / 灵敏度换算器 / 屏幕坏点 / 刷新率目视),外加**三个不是工具的页面**——`/toolbox/` 工具箱清单、`/mouse-repair/` 鼠标维修、`/404/`(它们不是 `Tool`,理由见 `tools.ts` 的 `TOOLBOX` / `REPAIR` 注释;404 见下面那一节)。`src/lib/tools.ts` 里的 `ready` 字段仍然保留:**`ready: false` 的项只出现在首页,不生成链接**——以后加新页面时先占位、写好再翻成 `true`,免得上线一个空链接。**前两个是例外**:不走注册表,所以拿不到 `ready` 那道保护,由 `tests/nav.test.ts` 的 `existsSync` 补回来(**404 不在那张表里,也没有链接指向它** —— 它是被访问出来的,不是被点出来的)。
 
+**2026-10-15 又多了六个页面,而且它们是另一类**:`/login` 与 `/admin/{,users,ads,analysis,audit}`。它们**只有中文、全部 `prerender = false`、全部 `noindex`**,而且都走 `src/middleware.ts` 那道管理员守卫。它们不进 `tools.ts` 也不进 i18n 目录 —— 理由见「后端与管理端」。
+
 **首页只给诊断工具放卡片,趣味工具单列一节「更多工具」**——这是用户定的,不是没来得及做。`Tool.group` 是**必填**字段(`'diagnostic' | 'fun'`),漏写就是 typecheck 红,而不是首页静默少一张卡。详见「首页与报头」。
 
 ## 技术栈
 
 Astro(静态输出)+ 原生 TypeScript。**热点路径不引入任何框架**——鼠标事件采样、统计计算、Canvas 绘制全部是原生 TS。
+
+2026-10-15 起多了**一层服务端**:`@astrojs/node` 让少数几条路由(登录、后台、广告接口)在请求时才算,其余页面照旧预渲染。数据库是 **MySQL + `mysql2`,裸 SQL,不上 ORM**。**四个运行期依赖,没有第五个** —— 仓库至今没引 lint、没引 format、没引 chart 库,那是有意的(见「后端与管理端」)。
 
 `tsconfig.json` 继承 `astro/tsconfigs/strict`,而那条继承链经由 `astro/tsconfigs/base.json` 打开了 **`verbatimModuleSyntax`**:只作类型用的导入**必须**写 `import type { X } from './x'`,写成 `import { X }` 直接是 TS 错误,`npm run typecheck` 会红。现有代码一律是这个写法,照着抄就行。同一条链上还开着 `allowImportingTsExtensions`。
 
@@ -34,6 +38,16 @@ npm run typecheck  # astro check,应保持 0 error / 0 warning / 0 hint
 npm test           # Vitest 单次运行
 npm run test:watch # Vitest 监视模式
 ```
+
+**本地要跑后台的话,得先有数据库**(2026-10-15 起):
+
+```bash
+cp .env.example .env     # `.env` 在 .gitignore 里;那一份的例子文件入库
+```
+
+`.env.example` 顶上就写着建库那两条 SQL。表和第一个管理员**不用手工建** —— 第一次有请求进来时会自动跑迁移与播种(`src/server/db.ts` 的懒启动)。**`.env` 里没给 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 就不播种,只在服务端日志里说一句** —— 绝不会有一个默认口令。
+
+**不做后台的日常开发完全不碰这一套**:40 个预渲染页不需要数据库,`typecheck` / `test` / `build` 也不需要(实测过,把 DB 指到黑洞构建照样退出码 0)。
 
 跑单个用例:
 
@@ -100,6 +114,16 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 | `src/lib/nav-overflow.ts` | 报头菜单的**溢出折叠**:量轨道宽度,把放不下的项搬进下拉面板。项是从 **`[data-nav-group]` 里取、也搬回它里面**(限定在组内 —— 工具箱面板里的链接也是 `.site-nav__item`,不限定就会被一起卷走),所以**模板和这个文件必须同一次改完**;`syncGroup()` 在每次搬运后、`fits()` 之前把空了的那一组连同轨道一起 `hidden`。见「首页与报头」 | 真机手测 |
 | `src/lib/mini-cards.ts` | 首页卡片的**说明书**(纯数据):每张卡放哪种装置、给哪几个读数、有哪几个模式、卡底那句限制写什么 | `tests/mini-cards.test.ts` |
 | `src/lib/mini-devices.ts` | 首页卡片的**装置运行时**:惰性挂载 + `idle→running→done` 状态机 + 四个工厂 + 模式换挡与结算冷却 | 真机手测 |
+| `src/lib/password.ts` | scrypt 哈希与校验。**`src/lib/` 下唯一 import `node:crypto` 的模块,浏览器侧不许 import 它** | `tests/password.test.ts` |
+| `src/lib/login-throttle.ts` | 登录失败计数与锁定,时钟注入。**从 `server/auth.ts` 搬出来的**,因为它在那儿一行都测不到,而它偏偏出过一次静默的 bug | `tests/login-throttle.test.ts` |
+| `src/lib/admin-form.ts` | 后台表单的解析与校验(用户名/口令/槽位/链接/权重)。链接**存规范化之后的 `href`**,`javascript:` 一律拒 | `tests/admin-form.test.ts` |
+| `src/lib/ads.ts` | `AD_SLOTS` 槽位清单(三个消费者共用)+ `pickAd`(按权重挑,`rng` 注入) | `tests/ads.test.ts` |
+| `src/lib/site-audit.ts` | 站点体检的**纯计算** —— 色相/母题/英文覆盖/FAQ,判据与 `tests/` 里那几条是同一份 | `tests/site-audit.test.ts` |
+| `src/lib/admin-nav.ts` | 后台导航清单(纯数据)。`path` 既是链接目标也是页面文件位置,所以它能被 `existsSync` 拿着当判据 | `tests/admin-nav.test.ts` |
+| `src/server/{env,db,migrations,auth,queries}.ts` | 连 MySQL、会话与角色守卫、后台查询。**只在 `prerender = false` 的路由里 import** —— 预渲染页一旦 import,构建期就会去连数据库 | 真机手测 |
+| `src/middleware.ts` | **后台的权限守卫**。为什么不在布局里(嵌套组件的 redirect 实测不生效),见「后端与管理端」 | `tests/admin-nav.test.ts` + 真机手测 |
+| `src/components/AdSlot.astro` | 广告位。**prop 叫 `placement` 不叫 `slot`** —— 后者是 Astro 的保留属性名,会静默吞掉整个组件的输出 | 真机手测 |
+| `src/layouts/AdminLayout.astro` | 后台的壳:侧栏 + 两栏排布。**它不判权限**(那是中间件的活),只读 `Astro.locals.user` | — |
 | `public/coi-serviceworker.js` | 给 `dist/` 补 COOP/COEP,拿跨域隔离换 5µs 时间戳。**只碰同源**,不缓存。见「部署 → 跨域隔离」 | 真机手测 |
 | `src/styles/global.css` | **全站样式与两寄存器设计系统**。改界面之前必须先读懂它的机制,见下面「样式」两节 | 真机手测 |
 
@@ -784,16 +808,27 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 
 **但页脚那行维修链接不是零影响,而它给每一页都加了一行。** 首页 1440 从 **2147 → 2177**。归因验过(把那一行 `display: none` 再量):**差正好 30px**,1440 和 420 都是 30,而那行本身高 24。
 
-### 首页总高的**现行基准**(旧的 2147 / 3338 作废)
+### 首页总高的**现行基准**(旧的 2124 / 3550 作废)
 
-那一串历史数字(`2118 / 2052 / 2071 / 2090 / 2147 / 2157 / 2397` …)**全部作废** —— 它们是沿着一串已经改掉的结构量的。**现在的基准是实测的这两个数:**
+那一串历史数字(`2118 / 2052 / 2071 / 2090 / 2147 / 2157 / 2397 / 2124 / 3550` …)**全部作废** —— 它们是沿着一串已经改掉的结构量的。**现在的基准是实测的这两个数:**
 
 | | 1440 | 420 |
 | --- | --- | --- |
-| **首页总高** | **2124** | **3550** |
+| **首页总高** | **2268** | **3694** |
 | 报头 | 53 | 53 |
-| `main` | 1827 | 3230 |
-| 页脚 | 244 | 267 |
+| `main` | 1941 | 3343 |
+| 页脚 | 274 | 297 |
+
+**这一版涨的两笔都归因过**(逐块 `display: none` 再量),而且两档一模一样:
+
+| 改了什么 | 1440 | 420 |
+| --- | --- | --- |
+| 页脚多一行「管理员登录」 | **+31** | **+31** |
+| 首页多一个广告位 | **+114** | **+114** |
+
+**广告那 +114 不等于"广告块自己的高 + 上下外边距"**:块本身实测 **89px**(两档同高,文字在 365 宽下也放得下两行),上下各 24px 外边距 —— 但那些外边距会**和相邻的 `<p>` / `<h2>` 折叠**,所以净增 114 而不是 89+48=137。**别按"块多高加边距"去推**,这一条和「更多工具」那一节记的是同一件事。
+
+藏掉页脚那一行回到 **2237 / 3663**,藏掉广告位回到 **2154 / 3580** —— 而 `2154 / 3580` 正是"只多了页脚那一行"的那一版(`2124 + 30` / `3550 + 30`),两次数得对得上。
 
 **1440 那一列从 2211 掉到 2127(−84),归因是清楚的:顶层那几段说明文字改成通栏之后少折了几行。**
 改的是 `main > .prose { max-width: none; text-align: center }`(用户要的"把介绍也填满过去、怎么这么空"),
@@ -942,6 +977,157 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
   另外 `.workbench__stage` / `__readout` 上的 `min-width: 0` **不能删**:flex item 默认不会收缩到内容宽度以下,`.ref-table` 一类长表格会把整栏撑破。
   **刻意没有 sticky。** 量过:1440 下最高的读数栏 486px,而 900px 视口减去表头还剩 778px;420 下 537px 对 719px。**两者都装得下,钉住永远不会触发**——不为"看起来像设计"留一条不生效的 CSS。真要加,先在浏览器里量出确实够高再带实测阈值加。
 
+## 后端与管理端(阶段 0 + 登录 + 阶段 3)
+
+2026-10-15 加的。这一节记的是**为什么长成这样**,以及踩过的四个坑 —— 四个都属于「不报错、只是不起作用」那一类。
+
+### 形状:一个 adapter,按路由分派
+
+`astro.config.mjs` 只加了一行 `adapter: node({ mode: 'standalone' })`,**`output` 保持默认的 `'static'`**。Astro 7 里 `'static'` 就是原来的 hybrid:页面默认仍然预渲染,只有写了 `export const prerender = false` 的那几条转服务端。
+
+**⚠️ 但它改了产物的形状,这是第一个坑,而且它是阻断级的。**
+
+node adapter 在 `getAdapter()` 里声明 `adapterFeatures.buildOutput = 'server'`,而 `astro/dist/integrations/hooks.js` 的 `setAdapter()` 只要看到它不是 `'static'` 就**无条件**把 `settings.buildOutput` 改成 `'server'` —— **与你写了几条 SSR 路由、`output` 配成什么完全无关**。于是静态产物从 `dist/` 顶层搬到 **`dist/client/`**,服务端入口在 `dist/server/entry.mjs`。
+
+`deploy.yml` 上传的是 `path: dist`。**不改的话构建成功、CI 全绿、线上 40 页集体 404。** 已改成 `dist/client`。
+
+> **怎么发现的**:不是靠构建报错(它不报),是一个专门的验证 agent 去读 `@astrojs/node` 的 tarball 与 astro 源码挖出来的。**"加个 adapter 而已"这种判断在这个仓库里不值得信。**
+
+**构建期绝不碰数据库**,这一条实测过:把 `.env` 移走 + `DB_HOST=203.0.113.1 DB_PORT=1` 再 `npm run build`,退出码 0、40 页照建。所以 CI 里没有 MySQL 也不影响发布。判据是 `src/server/db.ts` 的模块级**一行 I/O 都没有**(连接池是懒建的),真正取数只发生在 `requireAdmin()` 里,而那只在 `admin` / `api/admin` 上被调到 —— 那两类路径构建期根本不渲染。
+
+### 分层:纯逻辑进 `src/lib/`,碰数据库的进 `src/server/`
+
+这一条是**为了单测**:`tests/` 是纯 node、没有 jsdom 也没有数据库。
+
+| 模块 | 是什么 | 验证 |
+| --- | --- | --- |
+| `src/lib/password.ts` | scrypt 哈希/校验(`node:crypto`) | `tests/password.test.ts` |
+| `src/lib/ads.ts` | `AD_SLOTS` + `pickAd`(权重挑选,`rng` 注入) | `tests/ads.test.ts` |
+| `src/lib/site-audit.ts` | 站点体检的纯计算 | `tests/site-audit.test.ts` |
+| `src/lib/admin-form.ts` | 表单解析与校验 | `tests/admin-form.test.ts` |
+| `src/lib/login-throttle.ts` | 登录失败计数与锁定(时钟注入) | `tests/login-throttle.test.ts` |
+| `src/lib/admin-nav.ts` | 后台导航清单(纯数据,同 `tools.ts` 的角色) | `tests/admin-nav.test.ts` |
+| `src/server/{env,db,migrations,auth,queries}.ts` | 连 MySQL、读写 cookie | 真机手测 |
+
+**`src/server/*` 只在 `prerender = false` 的路由里 import。** 预渲染页一旦 import 它,构建期就会去连数据库。
+
+`password.ts` 是 `src/lib/` 下**唯一 import `node:crypto` 的模块**,所以浏览器侧的代码不许 import 它 —— 打包进客户端会当场炸,而 `npm run typecheck` 看不出这件事。
+
+### 坑一:`slot` 是 Astro 的保留属性名
+
+`<AdSlot slot="home" />` —— **`slot` 不是传给组件的 prop,是"把这个组件塞进父级名为 home 的插槽"**。父级没有那个插槽,于是**整个组件的输出被丢掉**,而组件里 `slot` 读出来是 `undefined`。
+
+表现是这次踩坑最值钱的地方:**完全静默**。不报错、类型检查全绿(组件自己的 `Props` 确实声明了 `slot`)、编译期收集的 `<style>` 照旧进页面 —— 只有标记一个字都没有。截图里一眼看得出来(那一格空了),读代码读不出来。**prop 现在叫 `placement`。**
+
+### 坑二:嵌套组件里 `return Astro.redirect(...)` **不生效**
+
+第一版的守卫写在 `AdminLayout.astro` 的 frontmatter 里:
+
+```astro
+const user = await requireAdmin(Astro.cookies);
+if (!user) return Astro.redirect(loginUrl());   // ← 看起来完全正确,实测不生效
+```
+
+未登录访问 `/admin` 拿回来的是 **`200` + 一张 51 字节的空页**(正文里只剩 vite 的客户端脚本)。Astro 把嵌套组件返回的 Response 当成**那个组件的返回值**,不当成页面的响应 —— 页面照常渲染,只是什么都没渲染出来。
+
+**内容确实没泄露,但状态码是 200、页面是空白、而且没有任何报错。** 修法是搬到 `src/middleware.ts`:那是框架给这件事的正规机制,顺带解掉另一个洞 —— **新加一个 `src/pages/admin/xxx.astro` 忘了加守卫,从此不可能发生**,中间件在路由之前跑,与页面写了什么无关。布局和页面里的重复守卫**全部撤掉了**,免得同一个判断有两处实现。
+
+> 判据:`return Astro.redirect(...)` 在**页面**的 frontmatter 里是有效的(见 `login.astro`),在**嵌套组件**里无效。两处不要写混。
+
+### 坑三:`/login` 用 `requireUser` 造成无限重定向
+
+`/login` 原来是「已经登录的人别再看到这张表单」→ `requireUser` → 送去 `/admin/`,而后台的中间件又把他送回 `/login`……**无限重定向**,浏览器直接报 `ERR_TOO_MANY_REDIRECTS`。
+
+成因是判据错了一层:**普通用户也是"登录过的人"**,所以 `requireUser` 会通过,而 `/admin` 要的是 `requireAdmin`。单看那一行读起来完全正确,只有把 `/login → /admin → /login` 这条链走完才看得见。**判据要和后台的守卫用同一个**:谁能进 `/admin`,谁才该从这儿被送走。
+
+### 坑四:防爆破的计数被自己删掉了(静默)
+
+```ts
+function checkLock(username) {
+  if (entry.lockedUntil > Date.now()) return entry.lockedUntil - Date.now();
+  failures.delete(username);   // ← 这一句把"从没锁过"的计数也删了
+  return 0;
+}
+```
+
+`lockedUntil` 在**从没锁过**时是 `0`,而 `0 > now` 永远为假 —— 于是每次都走进"锁过期了,该清零"那一支,**把还在累计的计数一起删了**。计数永远停在 1,`count >= max` 永远不成立,锁永远不会触发。不报错、不打日志。
+
+修法不只是把判据改成三档(`lockedUntil === 0` 单独写在最前面),而是**把这段逻辑从 `server/auth.ts` 搬到 `lib/login-throttle.ts`** —— 在 `auth.ts` 里它 import 了 `mysql2`,纯 node 的测试环境一行都测不到它,而它偏偏就是那个出 bug 的地方。现在时钟是注入的,`tests/login-throttle.test.ts` 用"连打 5 次必须锁上"钉着它。
+
+### 几条环境的实测事实
+
+- **Astro 自带 `security.checkOrigin`,默认就是开着的**(`defaults.js:44`)。跨站 `Origin` 的表单 POST 直接 **403**。它是第一道防线,后台那些会话 CSRF 令牌是第二道 —— 两者挡的不是同一种攻击,都留着。**代价:用 curl 测 POST 必须带 `-H "Origin: http://localhost:4321"`**,不然量到的是 Astro 的 403 而不是自己的逻辑。
+- **Astro 不规范化尾斜杠**:`/mouse-test/admin/` 剥完 base 是 `admin/`。所以 `parsePath(...).rest` **必须 `.replace(/\/$/, '')`** —— 不剥的话侧栏一项都不高亮(`BaseLayout.astro:110` 那句 `currentSlug` 干的是同一件事,两处口径要一致)。中间件那侧同样剥,否则 `/admin` 和不带斜杠的写法是两条不同的路径。
+- **mysql2 的连接字符集要显式写 `utf8mb4`**。默认是 `UTF8_GENERAL_CI`(utf8mb3),汉字没事、**四个字节的字符(emoji)会坏**。实测过一次往返:`鼠标🖱️维修` 存进去再读出来码点是 `9f20 6807 1f5b1 fe0f 7ef4 4fee`,一个不少。中文是好的,所以这个坑不会在普通演示里露出来。
+- **`process.loadEnvFile()` 读的是进程工作目录下的 `.env`**。在仓库根跑 `npm run dev` 没问题;standalone 产物搬到服务器之后,必须在**产物根目录**起进程,否则它会在别处找一个不存在的 `.env`,而那种失败是静默的(所有配置退回默认值,报错只说"连不上")。
+- **配置读 `process.env` 不读 `import.meta.env`**:后者是构建期常量替换,数据库口令会被烤进产物,改配置要重新构建。
+
+### 广告:口径与落点
+
+- **曝光记在"接口把一条广告发给了某个页面"那一刻**,不另开上报接口。这一版量的**不是**"广告真的被人看到了" —— 后者在网页侧测不准(要判进没进视口、停留够不够久,而"够久"是多少全是编出来的数)。写一个看起来更精确的上报接口,只会把编出来的阈值伪装成测量结果。**这一句也印在后台看板上。**
+- **落点只有首页与工具箱页**,两处都**不出故障判定**。诊断工具页上一个服务信息都不放 —— CLAUDE.md 那条「故障判定区永远不出现服务信息」一个字没改。**这是用户选的方案**(另一个选项是挂在诊断页结论区下面,那会直接破掉那条规矩)。
+- 没有可投的广告时 `/api/ads` 返回 **204**,页面上那一格**整块不渲染**(全站「没数据不画空槽」落到一次网络请求上)。
+- **`/api/ad-click` 的重定向目标只从库里按 `id` 取,永远不从查询串取** —— 那是全站唯一一处把用户重定向到站外的地方,也是唯一可能变成开放重定向的地方。用 302 不用 301:301 会被浏览器永久缓存,改了目标地址在一部分访客那里永不生效。
+- **这是全站第一处运行期向服务器发的请求**(在那之前零外部请求,字体都在本地)。它上传的不是测试数据,页脚那句承诺仍然成立 —— 但这是一处**事实**,不是可以装作没有的变化。
+
+### 浏览计数:一个公开的写接口,和它唯一的那道门
+
+用户 2026-10-15 要的:「游客点进来能不能顺带记一下」。做的是**最保守的那一档**:只记「哪一页、哪一天、被打开了几次」。
+
+- **表就是隐私红线的形状**(`page_views`):`(day, path, count)`,没有访客标识、没有 IP、没有设备信息、**时间只到天**(`day` 是 `DATE`)。所以它**答不上来"今天来了几个人"** —— 那不是没做,是它根本没有那个能力。要答那个问题就必须在访客身上留记号,而那正是这个站一直在拒绝的东西。
+- **口径是「下限」,而且这句话印在看板上**:「**至少被打开过这么多次**,不是精确值」。页面自己上报的数字天然可以被刷(刷新十次就是十次,脚本打接口也能加上去),要精确就得去重,而去重就得认人。**不装作它精确。**
+- **`/api/view` 是公开接口,所以白名单是它唯一的一道门。** 收的字段只有一个 `path`,而且必须命中 `lib/page-views.ts` 那份**从注册表推出来的**集合(`READY_TOOLS` → `/slug/`)。手写一份白名单会在加工具时漏一行,而漏掉的表现是**那一页从此不计数**(看板少一根柱子,没人看得出来)。
+  - 判据是**集合成员,不是前缀匹配**。前缀匹配会放过 `/cps-test/extra` 和 `/cps-test`,于是表里长出一些"看起来像页面"的行。
+  - 三种情况(记上了 / 路径不在白名单 / 请求体读不出来)**一律返回 204**,连状态码都不给客户端区分 —— 它是个观测行为,不该有任何一条路径能让页面出错。
+- **存的是去掉 base 的路径**(`/cps-test/`,不是 `/mouse-test/cps-test/`)。因为**那个 base 会变**:上线换成备案域名之后落在域名根,存了 base 的话历史数据里会有两种写法指向同一页。客户端也不去猜 —— 值由服务端渲染在 `data-view-path` 上(来自注册表),脚本原样递回来。
+- **挂在 `BaseLayout` 上,一行覆盖全部 17 个工具页。** 放在 17 个页面里各写一遍的话,加一件工具就会忘了加一行。它**自己是自守的**:slug 不在账册里就什么都不渲染(连那个 `<span>` 都不渲染),所以后台、登录页、首页、工具箱页天然不计数,不需要在壳里写 `if`。
+- 请求用 `fetch(..., { keepalive: true })` —— **没有它,"点进来立刻点走"这一类访问会大量丢掉**,而那正是这个站上最常见的用法。
+
+**这一改动了文案,三处一起改的**(那是"同一个站上不能说两套话"的硬要求):
+
+| 改哪儿 | 原来 | 现在 |
+| --- | --- | --- |
+| `chrome.footerPrivacy` | 「**数据**不会上传到服务器」 | 「**测试数据**不会上传到服务器」 |
+| 工具箱导语 | 「不联网、不上传」 | 「成绩只存在本机。页面会报一个不认人的浏览计数」 |
+| 工具箱 FAQ | 「**没有任何一步**会把数据发出去」 | 「没有任何一步会把**成绩**发出去」+ 新增一条问答专门解释那个计数 |
+
+> 原句在宽松读法下仍然成立,但**它现在可以被合理地读错**,而那是全站最要紧的一句话。加一个字之后它是精确的。
+
+**看板上那两个量条的上色是量出来的。** 第一版用 `--accent-dim`,而它在纸面上和底色几乎同色 —— 实测对比度 **浅色 1.12:1 / 深色 1.23:1**,条形明明是满宽(实测 241/241)却像"这一行没有数据"。换成 `--text-faint` 之后 **3.19:1 / 4.25:1**,两个主题都过 WCAG 1.4.11 对**图形标记**那条 3:1。这和「深色下井与纸面只有 1.03:1」是同一类问题,只是这次发生在**浅色**下。
+
+### 隐私承诺与后台的关系
+
+**四处「数据不会上传」一字未改,而且仍然是真的。** 判据是这一轮**没有面向访客的注册** —— 账号一律由管理员在后台建,普通访客走的还是原来那条"数据不出本机"的路。所以 `/admin/users` 那一页当下是建演示账号用的,不是真实用户表。
+
+要让它有真用户,得先做**阶段 2**(访客主动登录 + 把结果数字存到云端),而那一步**必须同一次改掉那四处文案**,改成分层说法:匿名仍然是"不出本机",登录之后是你**主动**选择把**结果数字**(不是原始轨迹、不是时间戳序列 —— 那两样是准指纹)存到云端。后台看板上「测量数据」那一块**现在是空的,而且它明说自己空着**。
+
+### 后台的几处刻意选择
+
+- **只有中文**,和 `/mouse-repair/` 同一个先例:不建 `src/pages/en/` 路由、不进 `i18n/pages/`。于是它们不进 `TRANSLATED_SLUGS`,英文页上指向它们的 `pageHref()` 会落回中文地址 —— 那是判据的正当行为。**整页写在路由文件里**,不拆 `components/pages/`(不双语就不需要"组件 + 两个薄路由"那条路)。
+- **入口只在页脚**,不通报头 —— 报头那笔宽度账容不下第四段。
+- **全部 `noindex`**,且 `robots.txt` 加了 `Disallow`,而且 sitemap 那个 `filter` 把它们剔掉。**三处口径要一致**(`@astrojs/sitemap` 会把 `prerender = false` 的静态路径路由也并进 sitemap —— 它只看 `route.pathname` 有没有值,不看 `prerender`)。
+- **表单一律 `method="post"` + PRG**,不用 `astro:actions`:结构显式、能在论文附录里逐行讲清楚,也不押注框架 API 的版本行为。删除用 `<details>` 做成两步确认,**一行 JS 都不用**。
+- **「不能把最后一个启用中的管理员弄没」**是后台唯一一个能把你自己锁在门外的操作,所以有一道专门的哨兵(`guardLastAdmin`):不能操作自己、也不能动最后一个。它一旦发生就没有任何界面能挽回,只能去数据库里手改 `role`。
+
+### 验收清单(实测过的)
+
+| 项 | 结果 |
+| --- | --- |
+| 加 adapter 前后 40 页 | **逐字节相同**(只有目录层级变了) |
+| 构建期是否碰数据库 | **不碰**(把 DB 指到黑洞,构建退出码 0) |
+| 未登录访问 `/admin/*` | 302 → `/login/`;`/api/admin/*` → **403 JSON** |
+| **普通用户**账号访问 `/admin/*` | 302 → `/login/`(角色守卫不是"登录即可") |
+| 不带 CSRF 的 POST | 拒绝 |
+| 停用账号 | 那个人**当前那一轮会话立刻失效**(库里那行也删了) |
+| 重置密码 | 该用户所有会话一起失效 |
+| 连续 5 次错密码 | 锁 60 秒,**锁定期内用正确密码也进不去** |
+| 停投一条广告 | `/api/ads` 返回 204,页面上那一格整块消失 |
+| 浏览计数:17 个工具页 | 每页都有 `data-view-path`,而且 `/en/` 下的也是同一个值(剥了 base 与语言前缀) |
+| 浏览计数:非工具页 | 工具箱 / 首页 / 维修页 / 登录页 / 后台 **0 处** `data-view-path` |
+| 浏览计数:白名单 | 真路径落库;`/admin/`、`/toolbox/`、`/cps-test`(少尾斜杠)、`/cps-test/extra`、`/CPS-TEST/`、`/etc/passwd` **一个都没进** |
+| 全站 46 个页面扫字面 `**` / 未填占位符 / 单星号 | **0 个问题**(构建后跑一次) |
+| 16 张截图(桌面 1440 / 窄屏 420 × 浅 / 深) | **无一处横向溢出** |
+
 ## 部署
 
 **当前部署在 GitHub Pages 的「项目站」上**:https://yueliangshuxia.github.io/mouse-test/
@@ -950,6 +1136,7 @@ npm 已配置国内镜像(`.npmrc` → `registry.npmmirror.com`)。Node 版本�
 站点因此**落在子路径上**,不是域名根。这就是 `astro.config.mjs` 里 `base: '/mouse-test'` 的由来,也是 `src/lib/url.ts` 存在的理由——站内链接**必须**走 `href()`,写根路径(`/cps-test/`)会 404 且**构建不报错**。以后换备案域名(落在域名根)时,**页面代码一行都不用动,但有三处要一起改**:`base`(去掉)、`astro.config.mjs` 的 `site`,以及 `public/robots.txt` 里那行 `Sitemap:` —— 它**硬写着 `github.io` 的子路径**。漏掉第三处不会报任何错,只会让搜索引擎一直去抓旧地址。
 
 - **push 到 `main` 即自动构建并发布**(也可在 Actions 页面手动触发),走 `.github/workflows/deploy.yml`,**不经过 Jekyll**。不能改用「从分支发布」:`dist/_astro/` 以**下划线开头**,Jekyll 默认忽略这类目录,结果是 CSS/JS 全部 404、页面裸奔。(`public/.nojekyll` 是兜底。)
+- **⚠️ `upload-pages-artifact` 上传的路径是 `dist/client`,不是 `dist`。** 2026-10-15 挂上 `@astrojs/node` 之后,Astro 会把 `settings.buildOutput` 无条件改成 `'server'`(判据是 adapter 自己声明的 `adapterFeatures.buildOutput`,与本站写了几条 SSR 路由、`output` 配成什么**都无关**),于是静态产物落到 `dist/client/`、服务端入口落到 `dist/server/entry.mjs`。上传 `dist` 的话**构建照样成功、CI 照样全绿**,只是 Pages 根目录下多一个空的 `client/` 和一个 `server/`,**40 个页面集体 404**。详见「后端与管理端」那一节。
 - `dist/` 不入库,由 CI 现构建。CI 里**顺带跑了 typecheck 和单测**。
 - `astro.config.mjs` 的 `server.headers` **只作用于 `astro dev` / `astro preview`,对 `dist/` 完全无效**。它的存在只是为了让本地开发就能拿到跨域隔离,好验证高精度那条路径。`dist/` 那一侧的隔离由 service worker 负责,见下。
 

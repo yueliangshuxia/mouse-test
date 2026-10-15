@@ -15,8 +15,10 @@
     "typecheck": "astro check"
   },
   "dependencies": {
+    "@astrojs/node": "^11.1.7",
     "@astrojs/sitemap": "^3.7.4",
-    "astro": "^7.3.3"
+    "astro": "^7.3.3",
+    "mysql2": "^3.24.6"
   },
   "allowScripts": {
     "esbuild": true

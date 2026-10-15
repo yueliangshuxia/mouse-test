@@ -52,9 +52,21 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # ⚠️ 上传的是 `dist/client`,**不是 `dist`** —— 这一条是踩出来的。
+      #
+      # 挂上 `@astrojs/node` 之后,Astro 会把 `settings.buildOutput` 无条件改成
+      # `'server'`(判据是 adapter 自己声明的 `adapterFeatures.buildOutput`,与本站
+      # 写了几条 SSR 路由、`output` 配成什么**都无关**),于是静态产物不再落在
+      # `dist/` 顶层,而是落到 `build.client` —— 实测就是 `dist/client/`,服务端入口
+      # 在 `dist/server/entry.mjs`。
+      #
+      # 上传 `dist` 的话构建**照样成功、CI 照样全绿**,只是 Pages 根目录下多出一个
+      # 空的 `client/` 和一个 `server/`,40 个页面集体 404 —— 又是一次「构建通过
+      # 不说明没事」。判据是这条路径必须和 `astro.config.mjs` 里 adapter 那一节的
+      # 注释对得上,改一处就要改另一处。
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: dist/client
 
   deploy:
     needs: build

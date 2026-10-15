@@ -1,0 +1,276 @@
+---
+/*
+ * 用户管理。**这一版只有管理员自己和自己建的账号** —— 面向普通访客的注册是
+ * 阶段 2 的事(见 CLAUDE.md)。所以这一页当下的实际用途是:建演示用的普通用户
+ * 账号、验证"普通用户进不了后台"这条守卫、以及演示角色与启停。
+ *
+ * 权限守卫在中间件里,不在这一页 —— 见 `src/middleware.ts` 的文件头。
+ */
+export const prerender = false;
+
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { localAdmin } from '../../server/auth';
+import { listUsers } from '../../server/queries';
+import { href } from '../../lib/url';
+
+const me = localAdmin(Astro.locals);
+const users = await listUsers();
+
+// 提示语走 PRG 的 query(见 api/admin/users.ts)。**这里用 `{}` 插值,是转义输出**
+const ok = Astro.url.searchParams.get('ok');
+const err = Astro.url.searchParams.get('err');
+
+const endpoint = href('api/admin/users');
+---
+
+<AdminLayout title="用户 · 后台" description="鼠标测试管理后台:用户。">
+  <h1>用户</h1>
+
+  {ok && <div class="notice notice--info"><p>{ok}</p></div>}
+  {err && <div class="notice"><p>{err}</p></div>}
+
+  <p class="admin-lede">
+    这一版<strong>没有面向访客的注册</strong> —— 账号一律由管理员在这里建。
+    所以匿名访客的隐私承诺原样成立:测试数据仍然一个字都不上传。
+  </p>
+
+  <section>
+    <h2>新建账号</h2>
+    <form method="post" action={endpoint} class="user-create">
+      <input type="hidden" name="csrf" value={me.csrfToken} />
+      <input type="hidden" name="action" value="create" />
+
+      <label class="field">
+        <span class="field__label">用户名</span>
+        <input type="text" name="username" autocomplete="off" required />
+      </label>
+
+      <label class="field">
+        <span class="field__label">初始密码</span>
+        <input type="password" name="password" autocomplete="new-password" required />
+      </label>
+
+      <label class="field">
+        <span class="field__label">角色</span>
+        <select name="role">
+          <option value="user">普通用户</option>
+          <option value="admin">管理员</option>
+        </select>
+      </label>
+
+      <button type="submit">创建</button>
+    </form>
+    <p class="field-hint">
+      用户名 3–32 个字符,只能用字母、数字、下划线和连字符;密码至少 8 位。
+      <strong>没有"找回密码"</strong> —— 忘了就在这里重置。
+    </p>
+  </section>
+
+  <section>
+    <h2>全部账号({users.length})</h2>
+
+    <table class="ref-table user-table">
+      <thead>
+        <tr>
+          <th>用户名</th>
+          <th>角色</th>
+          <th>状态</th>
+          <th>建立时间</th>
+          <th>最近登录</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          users.map((row) => (
+            <tr>
+              <td data-label="用户名">
+                {row.username}
+                {row.id === me.id && <span class="user-table__me">这是你</span>}
+              </td>
+              <td data-label="角色">{row.role === 'admin' ? '管理员' : '普通用户'}</td>
+              <td data-label="状态">{row.status === 'active' ? '启用' : '已停用'}</td>
+              <td data-label="建立时间">{row.createdAt}</td>
+              <td data-label="最近登录">{row.lastLoginAt ?? '—'}</td>
+              <td class="user-table__actions" data-label="操作">
+                {/* 改角色:只渲染"会改变现状"的那一个按钮 —— 两个都渲染出来
+                    再禁用其中一个,读起来像"有一个坏了" */}
+                <form method="post" action={endpoint}>
+                  <input type="hidden" name="csrf" value={me.csrfToken} />
+                  <input type="hidden" name="action" value="role" />
+                  <input type="hidden" name="id" value={row.id} />
+                  <input type="hidden" name="role" value={row.role === 'admin' ? 'user' : 'admin'} />
+                  <button type="submit" class="admin-mini">
+                    {row.role === 'admin' ? '降为普通' : '设为管理员'}
+                  </button>
+                </form>
+
+                {/* 启停 */}
+                <form method="post" action={endpoint}>
+                  <input type="hidden" name="csrf" value={me.csrfToken} />
+                  <input type="hidden" name="action" value="status" />
+                  <input type="hidden" name="id" value={row.id} />
+                  <input
+                    type="hidden"
+                    name="status"
+                    value={row.status === 'active' ? 'disabled' : 'active'}
+                  />
+                  <button type="submit" class="admin-mini">
+                    {row.status === 'active' ? '停用' : '启用'}
+                  </button>
+                </form>
+
+                {/* 重置密码:输入框直接长在表格里。**它不是美化问题** ——
+                    弹一个对话框要多写一段脚本,而这一段脚本一多,这一页就变成
+                    "页面管结构、脚本管值"那套分工的反例(后台没有那个约束,
+                    但多一份脚本就多一处能坏的地方)。 */}
+                <form method="post" action={endpoint} class="user-table__pw">
+                  <input type="hidden" name="csrf" value={me.csrfToken} />
+                  <input type="hidden" name="action" value="password" />
+                  <input type="hidden" name="id" value={row.id} />
+                  <input
+                    type="password"
+                    name="password"
+                    placeholder="新密码"
+                    autocomplete="new-password"
+                    aria-label={`给 ${row.username} 设置新密码`}
+                    required
+                  />
+                  <button type="submit" class="admin-mini">重置</button>
+                </form>
+              </td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <p class="field-hint">
+      停用会<strong>立刻踢掉那个人当前的登录</strong>(库里那张会话表跟着删),
+      不是"下次登录才生效"。重置密码同理。
+    </p>
+  </section>
+</AdminLayout>
+
+<style>
+  .admin-lede,
+  .field-hint {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+
+  .admin-lede {
+    margin: 0 0 26px;
+  }
+
+  .field-hint {
+    margin: 10px 0 0;
+  }
+
+  .user-create {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin: 14px 0 0;
+  }
+
+  /*
+   * 宽屏:一张普通的表。窄屏的排法在下面那个媒体查询里 —— 见那一段的注释。
+   */
+  .user-table td {
+    vertical-align: middle;
+  }
+
+  .user-table__me {
+    margin-left: 8px;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--text-faint);
+    font-size: 0.72rem;
+  }
+
+  .user-table__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .user-table__pw {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .user-table__pw input {
+    /* 表格里那几格不该跟登录表单一样宽 —— 一行里塞得下就行 */
+    width: 11ch;
+    font-size: 0.82rem;
+    padding: 5px 8px;
+  }
+
+  /* 表格里的按钮要比正文里那枚小一号,否则一行会被撑得很高 */
+  .admin-mini {
+    padding: 5px 12px;
+    font-size: 0.82rem;
+  }
+
+  /*
+   * 窄屏:**把表拆成一块一块**,而不是让它横向滚动。
+   *
+   * 第一版是 `overflow-x: auto`(表格横着滑)。截图里一眼就看出来不行:420 下
+   * 「操作」那一列整列落在视野外,而那一列正是这一页唯一的用途 —— 一个要横着
+   * 滑才够得着的按钮,在手机上等于不存在。
+   *
+   * 做法是最老实的那个:表头藏起来,每一行变成一块,每个格子前面用 `::before`
+   * 把列名印出来(`data-label`)。**列名不能省** —— 没有它,一列「管理员」孤零零
+   * 摆在那里,读不出那是角色还是状态。
+   *
+   * 用全站那一个 `760px` 断点,不新增。
+   */
+  @media (max-width: 760px) {
+    .user-table thead {
+      display: none;
+    }
+
+    .user-table,
+    .user-table tbody,
+    .user-table tr,
+    .user-table td {
+      display: block;
+      width: auto;
+    }
+
+    .user-table tr {
+      padding: 14px 0;
+      /* 行之间的分隔线改由 `tr` 自己画 —— 格子的下边框在堆叠之后会连成一片 */
+      border-bottom: 1px solid var(--border);
+    }
+
+    .user-table td {
+      padding: 3px 0;
+      border-bottom: none;
+      white-space: normal;
+    }
+
+    .user-table td::before {
+      content: attr(data-label);
+      display: inline-block;
+      min-width: 5.5em;
+      color: var(--text-faint);
+      font-size: 0.78rem;
+    }
+
+    /* 操作那几枚按钮不该被列名挤在右边 —— 它们自成一行 */
+    .user-table__actions {
+      margin-top: 8px;
+    }
+
+    .user-table__actions::before {
+      display: block;
+      margin-bottom: 6px;
+    }
+  }
+</style>

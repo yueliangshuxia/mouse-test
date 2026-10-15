@@ -26,6 +26,7 @@
  * "目标页翻过没有"。**这一处漏掉不会报错**,只会让英文访客一路点到中文页。
  */
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import AdSlot from '../../components/AdSlot.astro';
 import { NAV } from '../../lib/tools';
 import { TOOL_MOTIF } from '../../lib/tool-motifs';
 import { TOOL_HUE } from '../../lib/tool-hues';
@@ -144,6 +145,10 @@ const jsonLd = {
       })
     }
   </ul>
+
+  {/* 广告位。位置与理由见 AdSlot.astro 的文件头 —— 首页与工具箱页是**不出故障
+      判定**的两张页面,所以挂得住。 */}
+  <AdSlot placement="toolbox" />
 
   <h2>{t.faqTitle}</h2>
 

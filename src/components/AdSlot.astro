@@ -1,0 +1,175 @@
+---
+/*
+ * 广告位。挂在**首页**与**工具箱页**上,那两处都"不出故障判定"。
+ *
+ * ## 它为什么不能挂在诊断工具页
+ *
+ * CLAUDE.md 里有一条硬规矩:**故障判定区永远不出现服务信息**。用户看到"检测到
+ * 故障"旁边就是维修入口,第一反应是"它是不是想卖我东西" —— 而全站的信誉正建立
+ * 在这类判断不被怀疑上。所以这个组件挂的是两张**不告诉任何人他鼠标坏了**的页面。
+ *
+ * ## ⚠️ 那个 prop 叫 `placement`,**不叫 `slot`** —— 这一条是踩出来的
+ *
+ * 第一版写的是 `<AdSlot slot="home" />`,而 **`slot` 是 Astro 的保留属性名**
+ * (命名插槽用的)。于是它不是"传给组件的 prop",而是"把这个组件塞进父级名为
+ * home 的那个插槽" —— 父级没有那个插槽,**整个组件的输出被丢掉**,而组件里
+ * `slot` 读出来是 `undefined`。
+ *
+ * 它的表现是这次踩坑最值钱的地方:**完全静默**。不报错、类型检查全绿(因为
+ * 组件自己的 `Props` 确实声明了 `slot`)、编译期收集的 `<style>` 照旧进了页面 ——
+ * 只有标记一个字都没有。页面上就是"这里少了一块",读代码读不出来。
+ *
+ * ## 结构由模板给,脚本只改值和 `hidden`
+ *
+ * 骨架(标签、链接、标题位、说明位)全部**服务端渲染**,脚本只做三件事:填文字、
+ * 设 `href`、把 `hidden` 去掉。
+ *
+ * 这么分不是洁癖 —— 是那个 cid 坑:**脚本 `createElement` 造出来的节点身上没有
+ * `data-astro-cid-*`**,于是这个组件的 `<style>` 一条都命中不了它们(仓库里踩过
+ * 两次)。骨架静态渲染之后,这里所有样式都能安安稳稳住在组件里。
+ *
+ * ## 文字一律走 `textContent`
+ *
+ * 广告的标题与说明是**管理员手输的**,存进库、再进页面。用 `innerHTML` 的话,
+ * 一个 `<script>` 就进了每一张首页 —— 而那是全站访问量最大的页面。`textContent`
+ * 让这一段从根上没有这个问题(不需要记住要转义)。
+ *
+ * ## 客户端这次真的联网了
+ *
+ * 这是全站**第一处运行期向服务器发的请求**(在那之前整站零外部请求,字体都在
+ * 本地)。所以它必须满足两件事:失败时**整块不显示**(不留空框),以及**不阻塞
+ * 任何东西** —— 一次 fetch,不 await 在渲染路径上。
+ */
+import { AD_SLOTS } from '../lib/ads';
+
+interface Props {
+  /**
+   * 投在哪一格。取值来自 `AD_SLOTS`。
+   *
+   * **它不能叫 `slot`** —— 那是 Astro 的保留属性名,见文件头那段。
+   */
+  placement: keyof typeof AD_SLOTS;
+}
+
+const { placement } = Astro.props;
+---
+
+<aside class="ad-slot" data-ad-slot={placement} hidden aria-label="推广">
+  <span class="ad-slot__label">推荐</span>
+  <a class="ad-slot__link" data-ad-link rel="nofollow">
+    <span class="ad-slot__title" data-ad-title></span>
+    <span class="ad-slot__body" data-ad-body></span>
+  </a>
+</aside>
+
+<script>
+  import { href } from '../lib/url';
+
+  /*
+   * 一份脚本伺候页面上所有的广告位。**不能把槽位写死在脚本里** —— Astro 会把
+   * 组件的 `<script>` 打成一份模块、每个页面只出现一次,所以同一个页面上挂两个
+   * 不同的槽位时,写死的那一版只会填其中一格。
+   */
+  for (const host of document.querySelectorAll<HTMLElement>('[data-ad-slot]')) {
+    void load(host);
+  }
+
+  async function load(host: HTMLElement): Promise<void> {
+    const slot = host.dataset.adSlot;
+    if (!slot) return;
+
+    try {
+      const response = await fetch(`${href('api/ads')}?slot=${encodeURIComponent(slot)}`, {
+        headers: { Accept: 'application/json' },
+      });
+
+      /*
+       * **非 200 一律当作"没有广告"**,包括 204(库里没有可投的)和 503
+       * (数据库暂时不通)。三种情况在页面上是同一个动作:整块保持 `hidden`。
+       *
+       * 这正是"没数据不画空槽"落到一次网络请求上 —— 区分它们只能做出三种
+       * 不同的空白,而读者一种都不需要知道。
+       */
+      if (!response.ok) return;
+
+      const ad: { title?: string; body?: string; clickUrl?: string } = await response.json();
+      const link = host.querySelector<HTMLAnchorElement>('[data-ad-link]');
+      const title = host.querySelector<HTMLElement>('[data-ad-title]');
+      const body = host.querySelector<HTMLElement>('[data-ad-body]');
+      if (!link || !title || !body || !ad.clickUrl) return;
+
+      link.href = ad.clickUrl;
+      // textContent,不是 innerHTML —— 见文件头
+      title.textContent = ad.title ?? '';
+      body.textContent = ad.body ?? '';
+      if (!title.textContent) return;
+
+      host.hidden = false;
+    } catch {
+      // 断网、被拦截、接口挂了 —— 都是"这一格不存在"。不留痕、不报错。
+    }
+  }
+</script>
+
+<style>
+  .ad-slot {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin: 24px 0;
+    padding: 16px 18px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+  }
+
+  /*
+   * **这一条不能省。** 浏览器默认的 `[hidden] { display: none }` 来自 UA 样式表,
+   * 特异度最低;上面那条 `.ad-slot { display: flex }` 会把它压掉 —— 于是"没广告
+   * 时整块不出现"**静默失效**,页面上留一个空的虚线框。
+   *
+   * CLAUDE.md 里记过同一件事(`.test-area__hint[hidden]`),这里再踩一次是因为
+   * 它的形状每次都一样:**只要给某个元素写了 `display`,就得把 `[hidden]` 一起写回来。**
+   */
+  .ad-slot[hidden] {
+    display: none;
+  }
+
+  .ad-slot__label {
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--text-faint);
+    font-size: 0.72rem;
+  }
+
+  /*
+   * 链接本身不带下划线,靠**标题**那条下划线表达"这是链接" —— 整块都可点,
+   * 但一行字里同时挂着两条下划线会读成一团。悬停时标题那条线加深。
+   */
+  .ad-slot__link {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .ad-slot__title {
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 3px;
+  }
+
+  .ad-slot__link:hover .ad-slot__title {
+    text-decoration-color: var(--text);
+  }
+
+  .ad-slot__body {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+</style>

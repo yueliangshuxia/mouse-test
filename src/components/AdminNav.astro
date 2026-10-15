@@ -1,0 +1,130 @@
+---
+/*
+ * 后台的侧栏。**它自己不做权限判断** —— 守卫住在 `AdminLayout.astro` 里,
+ * 而这一页的每一个调用点都经过那个布局。分工:布局回答"你能不能进",
+ * 这里只回答"你能去哪儿"。
+ *
+ * 清单来自 `lib/admin-nav.ts`,不在这里手写五个 `<a>` —— 手写的话加一个模块
+ * 而忘了加一项,是**静默**的(那一页只能靠敲地址进)。
+ */
+import { ADMIN_NAV } from '../lib/admin-nav';
+import { href } from '../lib/url';
+
+interface Props {
+  /** 当前页的站点相对路径,不带前后斜杠。由布局从 pathname 剥出来传进来。 */
+  current: string;
+  username: string;
+}
+
+const { current, username } = Astro.props;
+---
+
+<nav class="admin-nav" aria-label="后台导航">
+  <p class="admin-nav__who">
+    <span class="admin-nav__who-label">当前账号</span>
+    <strong>{username}</strong>
+  </p>
+
+  <ul class="admin-nav__list">
+    {
+      ADMIN_NAV.map((item) => (
+        <li>
+          <a href={href(item.path)} aria-current={item.path === current ? 'page' : undefined}>
+            {item.label}
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+
+  <!--
+    注销必须走 POST:GET 注销能被一张 `<img src="...">` 触发,任何能在这站上贴图的
+    地方都能把你踢下线。这一条的理由写在 `api/auth/logout.ts` 的文件头。
+  -->
+  <form method="post" action={href('api/auth/logout')}>
+    <button type="submit" class="admin-nav__logout">注销</button>
+  </form>
+</nav>
+
+<style>
+  /*
+   * 这些规则住在组件里是安全的:选中的元素全部由**这个组件**渲染,所以构建期
+   * 加上去的 `data-astro-cid-*` 对得上。
+   *
+   * (那个 cid 坑只发生在"脚本 `createElement` 造出来的节点"上 —— 那种节点身上
+   * 没有 cid,组件的 `<style>` 和页面的 `<style>` 都够不着它,只有 `global.css`
+   * 能命中。这一页没有任何脚本造节点,所以不需要往那边放。)
+   */
+  .admin-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    /* 窄屏时它是第一块,缩到内容高就够了;宽屏那一边由布局给固定列宽 */
+    align-self: start;
+  }
+
+  .admin-nav__who {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    /* 一行装不下时别把长用户名挤出去 */
+    min-width: 0;
+  }
+
+  .admin-nav__who-label {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+  }
+
+  .admin-nav__who strong {
+    color: var(--text);
+    /* 用户名是用户输入的,长名字要能断行而不是撑破侧栏 */
+    overflow-wrap: anywhere;
+  }
+
+  .admin-nav__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+  }
+
+  .admin-nav__list li {
+    border-bottom: 1px solid var(--border);
+  }
+
+  /*
+   * 选中态用**左边一条实线 + 墨字**,不用底色块。
+   *
+   * 理由是纸面上只有墨色这一个强调色(见「样式:两个寄存器」),而"选中"这件事
+   * 在侧栏里最合适的表达是**位置**——你在这一条上。实心底块在这里会重得像按钮,
+   * 而它不点任何东西,它只是一句话。
+   */
+  .admin-nav a {
+    display: block;
+    padding: 9px 12px;
+    color: var(--text-dim);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+  }
+
+  .admin-nav a:hover {
+    color: var(--text);
+    background: var(--bg-inset);
+  }
+
+  .admin-nav a[aria-current='page'] {
+    color: var(--text);
+    border-left-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .admin-nav__logout {
+    /* 药丸按钮那一套是给"操作"用的,注销也是一个操作,所以直接用它 */
+    font-size: 0.85rem;
+    padding: 7px 16px;
+  }
+</style>

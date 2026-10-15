@@ -1996,14 +1996,20 @@ button[aria-pressed='true'] {
 }
 
 /*
- * 表单控件。`input[type='number']` 和 `select` **共用一条规则**,因为它们同处
- * 一行、要长得一样 —— 分两份写的话,改了一处另一处在旁边就是另一副长相。
+ * 表单控件。这几个**共用一条规则**,因为它们要长得一样 —— 分几份写的话,
+ * 改了一处另一处在旁边就是另一副长相。
  *
- * 只列 `number`:全站没有别的 `<input type>`,列一个用不上的类型等于留一条
- * 没人验证过的规则。真要加,加到这个选择器里,别在页面里另写一份。
+ * `text` / `password` 是 2026-10-15 加进来的:在那之前全站确实没有别的
+ * `<input type>`,而这条注释当时就写着「真要加,加到这个选择器里,别在页面里
+ * 另写一份」—— 登录表单是第一个真用到它们的页面,所以照办。
+ *
+ * 宽度一律不在这里定:`number` 要等宽(见下面那条),登录那两格要占满一行,
+ * 那是**页面自己的事**,写在页面的 `<style>` 里。
  */
 select,
-input[type='number'] {
+input[type='number'],
+input[type='text'],
+input[type='password'] {
   font-family: inherit;
   font-size: 0.9rem;
   padding: 7px 10px;

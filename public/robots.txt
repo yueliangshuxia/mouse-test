@@ -1,5 +1,17 @@
 User-agent: *
 Allow: /
 
+# 后台与登录页不该被收录。它们本来就都带 `noindex`(见 BaseLayout 的 noindex prop),
+# 这里是第二道 —— 搜索引擎爬到之后**连请求都不发**。
+#
+# 三处口径必须一致,改一处要改三处:
+#   1. 这里
+#   2. `astro.config.mjs` 里 sitemap 那个 filter(它把 admin/login/api 从
+#      sitemap 里剔掉,理由是 @astrojs/sitemap 会把 SSR 路由也并进来)
+#   3. 那些页面自己的 `noindex`
+Disallow: /admin/
+Disallow: /login
+Disallow: /api/
+
 # 换备案域名时这里要跟着 astro.config.mjs 的 site + base 一起改
 Sitemap: https://yueliangshuxia.github.io/mouse-test/sitemap-index.xml

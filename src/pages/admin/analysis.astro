@@ -1,0 +1,300 @@
+---
+/*
+ * 数据分析。**四个维度,其中一个是空的,而且它明说自己空着。**
+ *
+ * 这一页最重要的性质不是"画了几张图",而是**每一块都说得清它的数据是从哪来的**:
+ * 广告那两个数是真的(自己访问页面就产生)、用户构成是真的(建了几个账号就有几个)、
+ * 站点体检是真的(从注册表算出来的)—— 而**测量数据那一块现在是空的**,因为它
+ * 还没有数据来源(面向访客的云端同步是阶段 2)。
+ *
+ * 把一块空着的地方画成一张"看起来像有数据"的图,是这一页最容易犯的错,也是全站
+ * 那句「测不准就明说」最直接的一个落点。
+ */
+export const prerender = false;
+
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import LineChart from '../../components/charts/LineChart.astro';
+import { adDailyStats, pageViewSummary, pageViewsByTool, userBreakdown } from '../../server/queries';
+import { href } from '../../lib/url';
+import { READY_TOOLS } from '../../lib/tools';
+import { toolViewPath } from '../../lib/page-views';
+
+const DAYS = 14;
+
+/*
+ * 合计数从**曲线自己**加起来,而不是另外问一次 `overview()`。
+ * 两个来源算同一个量,迟早会不一致 —— 而同一页上并排印着两个对不上的数,
+ * 读者只会认为整页都是错的。
+ */
+const [daily, breakdown, viewSummary, viewRows] = await Promise.all([
+  adDailyStats(DAYS),
+  userBreakdown(),
+  pageViewSummary(DAYS),
+  pageViewsByTool(DAYS),
+]);
+
+/*
+ * 路径 → 工具名。**从注册表反查,不手写一张对照表** —— 那张表加一件工具就会漏
+ * 一行,而漏掉的表现是看板上出现一个 slug 而不是中文名。
+ *
+ * 查不到时**回退到路径本身**(而不是空串):一个 `/foo/` 摆在表格里至少看得出
+ * 是哪一页,而空着只会让人以为渲染坏了。真出现这种情况说明库里有白名单之外的
+ * 行 —— 那要么是老数据,要么是白名单被改过。
+ */
+const nameByPath = new Map(READY_TOOLS.map((tool) => [toolViewPath(tool.slug), tool.name]));
+function labelOf(path: string): string {
+  return nameByPath.get(path) ?? path;
+}
+
+const viewMax = Math.max(1, ...viewRows.map((row) => row.total));
+
+const impressions = daily.reduce((sum, point) => sum + point.impressions, 0);
+const clicks = daily.reduce((sum, point) => sum + point.clicks, 0);
+
+/*
+ * CTR 只在**有曝光**时才算。没有曝光时点击一定是 0,而"0 / 0"给不出比率 ——
+ * 那种情况下给一个 0% 是在说"发出去的广告没人点",但事实是**根本没发出去过**。
+ * 两件事不一样,所以显示破折号(全站 `format()` 那条口径)。
+ */
+const ctr = impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) + '%' : '—';
+
+/** `2026-10-15` → `10-15`。横轴只要够认出来是哪天。 */
+function shortDay(day: string): string {
+  return day.slice(5);
+}
+
+const impressionPoints = daily.map((point) => ({ label: shortDay(point.day), value: point.impressions }));
+const clickPoints = daily.map((point) => ({ label: shortDay(point.day), value: point.clicks }));
+
+const breakdownMax = Math.max(1, ...breakdown.map((row) => row.count));
+---
+
+<AdminLayout title="数据分析 · 后台" description="鼠标测试管理后台:数据分析。">
+  <h1>数据分析</h1>
+
+  <p class="admin-lede">
+    这一页的每一块都写清了数据从哪来。<strong>测量数据那一块现在还是空的</strong> ——
+    它要等面向访客的云端同步(阶段 2)做出来才有来源。
+  </p>
+
+  <section>
+    <h2>工具页浏览 · 最近 {DAYS} 天</h2>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat__label">今日浏览</div>
+        <div class="stat__value">{viewSummary.today}</div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">{DAYS} 天合计</div>
+        <div class="stat__value">{viewSummary.total}</div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">有记录的工具页</div>
+        <div class="stat__value">
+          {viewRows.length}<span class="stat__unit">/ {READY_TOOLS.length}</span>
+        </div>
+      </div>
+    </div>
+
+    {
+      viewRows.length === 0 ? (
+        <p class="admin-hint">
+          还没有任何浏览记录。它要在有人**真的打开过工具页**之后才会有 ——
+          自己刷新几下就能看到。
+        </p>
+      ) : (
+        <table class="ref-table views">
+          <thead>
+            <tr>
+              <th>工具页</th>
+              <th>今日</th>
+              <th>{DAYS} 天</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {viewRows.map((row) => (
+              <tr>
+                <td>{labelOf(row.path)}</td>
+                <td>{row.today}</td>
+                <td>{row.total}</td>
+                <td class="views__bar-cell">
+                  <span class="views__bar" style={`--w: ${(row.total / viewMax) * 100}%`} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    }
+
+    <div class="notice notice--info">
+      <p>
+        <strong>这一列的口径是「至少被打开过这么多次」,不是精确值。</strong>
+        页面自己上报的数字天然可以被刷 —— 刷新十次就是十次,写个脚本打那个接口也能
+        加上去。要精确就得在访客身上留记号(去重),而那正是这个站拒绝的东西。
+      </p>
+      <p>
+        它记的只有两样:<strong>哪一页</strong>和<strong>哪一天</strong>。没有访客标识、
+        没有 IP、没有设备信息、时间只到天 —— 所以它<strong>答不上来「今天来了几个人」</strong>,
+        那不是没做,是它根本没有那个能力。这一条和页脚那句承诺是一致的。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>广告 · 最近 {DAYS} 天</h2>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat__label">曝光合计</div>
+        <div class="stat__value">{impressions}</div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">点击合计</div>
+        <div class="stat__value">{clicks}</div>
+      </div>
+      <div class="stat stat--primary">
+        <div class="stat__label">点击率</div>
+        <div class="stat__value">{ctr}</div>
+      </div>
+    </div>
+
+    <div class="charts">
+      <LineChart title="曝光" points={impressionPoints} />
+      <LineChart title="点击" points={clickPoints} />
+    </div>
+
+    <p class="admin-hint">
+      这里量的<strong>曝光</strong>是"接口把一条广告发给了某个页面",不是"这条广告
+      真的被人看到了"。后者在网页侧测不准(要判元素进没进视口、停留够不够久,
+      而"够久"是多少全是编出来的数),所以不做那个声称。
+    </p>
+  </section>
+
+  <section>
+    <h2>用户构成</h2>
+
+    {
+      breakdown.length === 0 ? (
+        <p class="admin-hint">还没有任何账号。</p>
+      ) : (
+        <table class="ref-table breakdown">
+          <thead>
+            <tr>
+              <th>角色</th>
+              <th>状态</th>
+              <th>数量</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {breakdown.map((row) => (
+              <tr>
+                <td>{row.role === 'admin' ? '管理员' : '普通用户'}</td>
+                <td>{row.status === 'active' ? '启用' : '已停用'}</td>
+                <td>{row.count}</td>
+                <td class="breakdown__bar-cell">
+                  {/* 条宽按**最大值**归一,而不是按总数 —— 按总数算的话四个条都短得看不出来 */}
+                  <span class="breakdown__bar" style={`--w: ${(row.count / breakdownMax) * 100}%`} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    }
+
+    <p class="admin-hint">
+      账号一律由管理员在<a href={href('admin/users')}>用户</a>那一页建 ——
+      面向访客的注册还没有。所以这里的"普通用户"是演示与测试用的账号,
+      不是真实访客。
+    </p>
+  </section>
+
+  <section>
+    <h2>测量数据</h2>
+
+    <div class="notice notice--info">
+      <p>
+        <strong>这一块现在是空的,因为它还没有数据来源。</strong>
+        本站的测量全部在访客自己的浏览器里完成,结果不会上传 —— 这条承诺写在页脚、
+        首页和工具箱页的 FAQ 里,现在仍然一字未改。
+      </p>
+      <p>
+        要让它有数据,得先做阶段 2:让访客<strong>主动</strong>登录,并把<strong>结果数字</strong>(不是原始
+        轨迹、不是时间戳序列 —— 那两样是准指纹)存到云端。在那之前,这里没有任何
+        东西可画,而画一张空图假装有数据是这一页最不该做的事。
+      </p>
+    </div>
+
+    <p class="admin-hint">
+      本站不做排行榜,也<strong>不做"全网平均"</strong> —— 跨机器比大小没有意义,这一条写在
+      手稳度与瞄准页的正文里,对第三方数据同样成立。
+    </p>
+  </section>
+</AdminLayout>
+
+<style>
+  .admin-lede,
+  .admin-hint {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+
+  .admin-lede {
+    margin: 0 0 26px;
+  }
+
+  .admin-hint {
+    margin: 16px 0 0;
+    max-width: 68ch;
+  }
+
+  .charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px 28px;
+    margin-top: 22px;
+  }
+
+  .breakdown__bar-cell {
+    width: 40%;
+  }
+
+  /*
+   * 条形的填充色**不是 `--accent-dim`**,这一条是量出来的。
+   *
+   * 第一版用的就是 `--accent-dim`,而它在纸面上和底色几乎同色 —— 实测对比度
+   * **浅色 1.12:1 / 深色 1.23:1**,等于没画:条形明明是满宽的(实测 241/241),
+   * 看起来却像"这一行没有数据"。
+   *
+   * 这和仓库里记过的另外两处是同一类问题(深色下井与纸面只有 1.03:1、
+   * `--border` 掉了整个版面就没有骨架),只是这次发生在**浅色**下。
+   *
+   * 换成 `--text-faint` 之后实测 **浅色 3.19:1 / 深色 4.22:1**,两个主题都过
+   * WCAG 1.4.11 对**图形标记**那条 3:1(不是正文那条 4.5:1 —— 它是个色块,
+   * 不是一个字)。
+   */
+  .breakdown__bar,
+  .views__bar {
+    display: block;
+    height: 8px;
+    width: var(--w);
+    border-radius: var(--radius-pill);
+    background: var(--text-faint);
+    /* 数量为 0 时宽度是 0,这里给一条 2px 的底线,免得那一行看着像"没渲染" */
+    min-width: 2px;
+  }
+
+  .views {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .views__bar-cell {
+    width: 40%;
+  }
+</style>

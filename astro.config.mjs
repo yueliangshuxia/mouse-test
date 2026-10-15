@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
+import node from '@astrojs/node';
 
 // https://astro.build/config
 export default defineConfig({
@@ -19,8 +20,45 @@ export default defineConfig({
   site: 'https://yueliangshuxia.github.io',
   base: '/mouse-test',
 
-  integrations: [sitemap()],
+  /*
+   * 只加了一个 adapter,**`output` 保持默认的 `'static'`** —— Astro 7 里
+   * `'static'` 就是原来的 hybrid:页面默认仍然预渲染,只有写了
+   * `export const prerender = false` 的那几条转服务端。
+   *
+   * ## 但它会改产物的形状,这一条是踩出来的
+   *
+   * node adapter 在 `getAdapter()` 里声明 `adapterFeatures.buildOutput = 'server'`,
+   * 而 `astro/dist/integrations/hooks.js` 的 `setAdapter()` 只要看到
+   * `buildOutput !== 'static'` 就**无条件**把 `settings.buildOutput` 改成 `'server'`
+   * —— **跟你写了几条 SSR 路由无关**。于是静态产物不再落在 `dist/` 顶层,而是
+   * 落到 `build.client`(实测:`dist/client/`),服务端入口在 `dist/server/entry.mjs`。
+   *
+   * 也就是说 `output: 'static'` 这一行现在**对产物形状几乎不起作用**,真正决定
+   * 形状的是"有没有挂 adapter"。`deploy.yml` 上传的路径必须跟着改成 `dist/client`
+   * —— 不改的话构建不报错,线上 40 页集体 404。
+   */
+  adapter: node({ mode: 'standalone' }),
 
+  /*
+   * 关掉 Astro 自带那套 session。adapter 默认会替我们打开 filesystem session
+   * (落在 `node_modules/.astro/sessions`),而本站的登录态**自己有一张 `sessions`
+   * 表**(见 `src/server/auth.ts`)—— 两套并存只会让人分不清哪个在起作用。
+   */
+  session: false,
+
+  integrations: [
+    /*
+     * `filter` 这一条不是可有可无的:`@astrojs/sitemap` 除了实际生成的静态页之外,
+     * 还会把**路由表里所有 type 为 page 的路由**再并进来一遍(它只看
+     * `route.pathname` 有没有值,**不看 `prerender`**),所以 `/login` 与
+     * `/admin/*` 这些 SSR 页面会被写进 sitemap。它们全都 `noindex`,不该出现。
+     *
+     * 注意 `filter` 收到的是**完整绝对 URL**(已经拼好 base),不是 pathname。
+     */
+    sitemap({
+      filter: (page) => !/\/(admin|login|api)(\/|$)/.test(new URL(page).pathname),
+    }),
+  ],
   // 关掉 Astro 自带的开发工具栏。它只在 `astro dev` 时注入到视口底部正中央,
   // 对 `dist/` 没有任何影响 —— 关它是因为它和站点自己的底部悬浮条
   // (`.site-dock`,见 BaseLayout.astro)会叠在同一个位置上,开发时看不出哪个是哪个。

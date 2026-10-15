@@ -100,9 +100,12 @@ export const en: Catalog = {
   },
 
   chrome: {
-    footerPrivacy: 'Every test runs locally in your browser — nothing is uploaded.',
+    /* 「测试数据」而不是「数据」—— 页面会报一个不认人的浏览计数,见 zh.ts 那条注释 */
+    footerPrivacy: 'Every test runs locally in your browser — no test data is uploaded.',
     footerRecommend: 'Desktop Chrome or Edge gives the most accurate readings.',
     footerRepair: '— the test tools and this repair service come from the same person.',
+    /* 后台只有中文版,所以这条链接通向中文登录页 */
+    footerLogin: 'Admin sign-in',
     dockTitle: 'Mouse repair',
     dockWechat: 'WeChat',
     dockTaobao: 'Taobao',

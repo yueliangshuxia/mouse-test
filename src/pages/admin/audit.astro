@@ -1,0 +1,276 @@
+---
+/*
+ * 站点体检。**这一页一行数据库都不读** —— 全部从注册表与目录算出来。
+ *
+ * 它体检的是那些"漏了不报错"的东西:少一个色相不会报错(只是图标没颜色)、
+ * 少一个母题不会报错(工具箱那一格空着)、没翻英文不会报错(英文访客落到中文页)、
+ * 少一条 FAQ 不会报错(页面照常,只是 JSON-LD 里少了 FAQPage)。
+ *
+ * **判据和 `tests/` 里那些用例是同一份** —— 所以"CI 里绿的、后台里红的"这种事
+ * 不会发生。反过来说:这一页红了,CI 里早就有另一条红的了。
+ */
+export const prerender = false;
+
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { auditSite } from '../../lib/site-audit';
+import { href } from '../../lib/url';
+
+const audit = auditSite();
+const { rows, counts, extraPages, invariants } = audit;
+
+const failures = invariants.filter((item) => !item.ok);
+---
+
+<AdminLayout title="站点体检 · 后台" description="鼠标测试管理后台:站点体检。">
+  <h1>站点体检</h1>
+
+  <p class="admin-lede">
+    这一页<strong>不读数据库</strong> —— 它算的是注册表与文案目录之间对不对得上。
+    判据和 CI 里那几条单测是同一份。
+  </p>
+
+  <section>
+    <h2>
+      不变量({invariants.length - failures.length}/{invariants.length} 通过)
+    </h2>
+
+    {
+      failures.length > 0 && (
+        <div class="notice">
+          <p>有 {failures.length} 条不成立。它们在 CI 里对应的用例也应该是红的。</p>
+        </div>
+      )
+    }
+
+    <ul class="checks">
+      {
+        invariants.map((item) => (
+          <li class={`checks__item${item.ok ? '' : ' checks__item--bad'}`}>
+            <span class="checks__mark" aria-hidden="true">
+              {item.ok ? '✓' : '✗'}
+            </span>
+            <span class="checks__name">{item.name}</span>
+            <span class="checks__detail">{item.detail}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <section>
+    <h2>覆盖情况</h2>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat__label">工具</div>
+        <div class="stat__value">
+          {counts.diagnostic}<span class="stat__unit">诊断</span>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">　</div>
+        <div class="stat__value">
+          {counts.fun}<span class="stat__unit">趣味</span>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">英文覆盖</div>
+        <div class="stat__value">
+          {counts.translatedPages}<span class="stat__unit">/ {counts.totalPages}</span>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">FAQ / JSON-LD</div>
+        <div class="stat__value">
+          {counts.withFaq}<span class="stat__unit">/ {counts.tools}</span>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">色相 / 母题</div>
+        <div class="stat__value">
+          {counts.withHue}<span class="stat__unit">/ {counts.tools}</span>
+        </div>
+      </div>
+    </div>
+
+    {
+      /*
+       * 这一句是这个页面上**唯一一处"真的缺了点什么"**的地方,所以它不藏在表格里,
+       * 而是直接说出来。`tests/site-audit.test.ts` 也钉着同一个事实 —— 哪天补上了,
+       * 那条用例会红,提醒改这里。
+       */
+      counts.withFaq < counts.tools && (
+        <p class="admin-hint">
+          有 {counts.tools - counts.withFaq} 件工具的目录里没有 <code>faq</code> 数组。
+          JSON-LD 里那个 <code>FAQPage</code> 节点正是从它造出来的,所以这些页面
+          <strong>同时缺"页面上的问答"和"结构化数据里的 FAQPage"</strong>。
+          下面那张表里 FAQ 那一列写着「无」的就是它们。
+        </p>
+      )
+    }
+  </section>
+
+  <section>
+    <h2>工具 × 属性</h2>
+
+    <table class="ref-table audit-table">
+      <thead>
+        <tr>
+          <th>slug</th>
+          <th>名字</th>
+          <th>分支</th>
+          <th>可信度</th>
+          <th>报头</th>
+          <th>色相</th>
+          <th>母题</th>
+          <th>英文</th>
+          <th>FAQ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          rows.map((row) => (
+            <tr>
+              <td>{row.slug}</td>
+              <td>{row.name}</td>
+              <td>{row.group === 'diagnostic' ? '诊断' : '趣味'}</td>
+              <td>{row.confidenceLabel}</td>
+              <td>{row.nav === 'group' ? '框里' : row.nav === 'dropdown' ? '面板' : '—'}</td>
+              <td class={row.hue ? '' : 'audit-table__no'}>{row.hue ? '有' : '无'}</td>
+              <td class={row.motif ? '' : 'audit-table__no'}>{row.motif ? '有' : '无'}</td>
+              <td class={row.translated ? '' : 'audit-table__no'}>{row.translated ? '有' : '无'}</td>
+              <td class={row.hasFaq ? '' : 'audit-table__no'}>{row.hasFaq ? '有' : '无'}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+
+    <p class="admin-hint">
+      另外两个不是工具的页面:
+      {
+        extraPages.map((page) => `${page.label}(${page.translated ? '已翻' : '未翻'})`).join('、')
+      }
+      —— 维修页不翻是产品决定,不是漏做:整篇是面向国内的商业内容,英文访客拿了没用。
+    </p>
+  </section>
+
+  <section>
+    <h2>这张表怎么读</h2>
+
+    <dl class="audit-key">
+      <dt>可信度</dt>
+      <dd>
+        这一页测出来的东西有多可信。五档:直接测得 / 估算 / 只能看形状 / 只能看方向 /
+        不测量。它在<a href={href('toolbox')}>工具箱</a>与首页卡片上都印着。
+      </dd>
+      <dt>报头</dt>
+      <dd>这一件在报头的哪一段:框里(鼠标测试那一组)、面板(「工具箱」下拉),或者都不在。</dd>
+      <dt>色相 / 母题</dt>
+      <dd>
+        色相是工具页标题旁那枚图标的颜色;母题是工具箱清单里那一小块预览图形。
+        缺母题比缺色相严重 —— 色相没了只是没颜色,母题没了是<strong>一格空白</strong>。
+      </dd>
+      <dt>英文</dt>
+      <dd>这一页有没有英文版。<strong>没有的话英文站上的入口会落回中文页</strong>,那是判据的正当行为,不是断链。</dd>
+      <dt>FAQ</dt>
+      <dd>页面上的问答,同时也是 JSON-LD 里那个 <code>FAQPage</code> 节点的来源。</dd>
+    </dl>
+  </section>
+</AdminLayout>
+
+<style>
+  .admin-lede,
+  .admin-hint {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+
+  .admin-lede {
+    margin: 0 0 26px;
+  }
+
+  .admin-hint {
+    margin: 16px 0 0;
+    max-width: 68ch;
+  }
+
+  .checks {
+    list-style: none;
+    padding: 0;
+    margin: 14px 0 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .checks__item {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .checks__mark {
+    flex: none;
+    width: 1.1em;
+    color: var(--text-dim);
+  }
+
+  /*
+   * 失败用朱砂 —— 那是全站的**故障语义位**,不是装饰色。这一页用的是它本来的
+   * 意思:这里有一件事不对。
+   */
+  .checks__item--bad .checks__mark,
+  .checks__item--bad .checks__name {
+    color: var(--danger);
+  }
+
+  .checks__name {
+    font-weight: 600;
+  }
+
+  .checks__detail {
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+
+  .audit-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* 缺什么就标什么 —— 和失败那一条用同一个语义色 */
+  .audit-table__no {
+    color: var(--danger);
+  }
+
+  .audit-key {
+    margin: 14px 0 0;
+    display: grid;
+    grid-template-columns: 8em 1fr;
+    gap: 8px 16px;
+  }
+
+  .audit-key dt {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+
+  .audit-key dd {
+    margin: 0;
+    max-width: 68ch;
+  }
+
+  @media (max-width: 760px) {
+    .audit-key {
+      grid-template-columns: 1fr;
+      gap: 2px 0;
+    }
+
+    .audit-key dd {
+      margin-bottom: 10px;
+    }
+  }
+</style>

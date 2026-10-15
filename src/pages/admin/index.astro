@@ -1,0 +1,125 @@
+---
+/*
+ * 后台概览。**它不重复四个模块能干的事**,只回答"现在是什么状况、接下来去哪"。
+ *
+ * 布局里已经做过 `requireAdmin`,所以这一页的 frontmatter 可以直接取数 —— 但
+ * 那是**因为用了 `AdminLayout`**,不是因为守卫可以省。这一条由
+ * `tests/admin-nav.test.ts` 的源码扫描守着。
+ */
+export const prerender = false;
+
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { ADMIN_NAV } from '../../lib/admin-nav';
+import { overview } from '../../server/queries';
+import { href } from '../../lib/url';
+
+const stats = await overview();
+
+// 「概览」自己不在那一列里 —— 你已经在它上面了
+const modules = ADMIN_NAV.filter((item) => item.path !== 'admin');
+---
+
+<AdminLayout title="概览 · 后台" description="鼠标测试管理后台。">
+  <h1>概览</h1>
+
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="stat__label">用户总数</div>
+      <div class="stat__value">{stats.users}</div>
+    </div>
+    <div class="stat">
+      <div class="stat__label">启用中的管理员</div>
+      <div class="stat__value">{stats.activeAdmins}</div>
+    </div>
+    <div class="stat">
+      <div class="stat__label">已停用账号</div>
+      <div class="stat__value">{stats.disabledUsers}</div>
+    </div>
+    <div class="stat">
+      <div class="stat__label">广告</div>
+      <div class="stat__value">
+        {stats.activeAds}<span class="stat__unit">/ {stats.ads}</span>
+      </div>
+    </div>
+    <div class="stat">
+      <div class="stat__label">今日曝光</div>
+      <div class="stat__value">{stats.todayImpressions}</div>
+    </div>
+    <div class="stat">
+      <div class="stat__label">今日点击</div>
+      <div class="stat__value">{stats.todayClicks}</div>
+    </div>
+  </div>
+
+  <p class="admin-note">
+    「今日」按<strong>数据库服务器的日期</strong>切,不是访客的本地日期 —— 广告统计那一张表的
+    粒度就是"天",而按访客本地日期分段必须额外存时区,那和「时间只到天」这条隐私
+    口径是相悖的。
+  </p>
+
+  <h2>接下来去哪</h2>
+
+  <ul class="admin-cards">
+    {
+      modules.map((item) => (
+        <li>
+          <a class="admin-card" href={href(item.path)}>
+            <span class="admin-card__name">{item.label}</span>
+            <span class="admin-card__blurb">{item.blurb}</span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</AdminLayout>
+
+<style>
+  .admin-note {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    margin: 18px 0 26px;
+  }
+
+  .admin-cards {
+    list-style: none;
+    padding: 0;
+    margin: 14px 0 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+  }
+
+  /*
+   * 这几张卡复用的是首页 `.mini-card` / 正文 `.card` 那一套长相(填充底 + 1px 边 +
+   * 大圆角),但**没直接套 `.card`** —— 它是给"非链接的说明块"写的,套到一个 `<a>`
+   * 上还得再写三条覆盖(去下划线、字色、悬停),反而是两份长相。
+   *
+   * 悬停只动边框色,**不动 `border-width`、不加位移**:后台正文里有表格,任何引起
+   * 重排的悬停都会让鼠标扫过时整页抖一下。
+   */
+  .admin-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100%;
+    padding: 14px 16px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .admin-card:hover {
+    border-color: var(--border-strong);
+  }
+
+  .admin-card__name {
+    font-weight: 600;
+  }
+
+  .admin-card__blurb {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+</style>

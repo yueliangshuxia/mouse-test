@@ -1,0 +1,186 @@
+---
+/*
+ * 一条折线。**手写 SVG,不上图表库。**
+ *
+ * ## 为什么文字全在 SVG 外面
+ *
+ * 图要随容器伸缩,所以 SVG 用 `preserveAspectRatio="none"` 拉满宽度 —— 而那样
+ * 会把**里面的文字一起横向拉变形**。所以 SVG 里只放几何(折线、基线、栅格),
+ * 所有文字(标题、日期、最大值)都是 SVG 外面的 HTML。顺带一个好处:那些字自动
+ * 用站点的字体与字号,不需要在 SVG 里再声明一遍。
+ *
+ * 折线上的 `vector-effect="non-scaling-stroke"` 是同一个问题的另一半:
+ * 不均匀缩放会把 1px 的线拉成 2px、下半段又变回 1px。这个属性让描边不参与缩放。
+ *
+ * ## 一条线一张图,不把两个量塞进一张
+ *
+ * 曝光动辄几百、点击常常个位数。共用一根 Y 轴的话,**点击那条会贴着底边成一条
+ * 直线**,看着像"没有点击"。所以曝光和点击各画一张、各用自己的量纲,再在旁边
+ * 印一个 CTR 把两者联系起来。这不是排版选择,是不让一个量把另一个量吃掉。
+ *
+ * ## 颜色:一个色相都不加
+ *
+ * 纸面走无彩色是全站那套设计系统的支点(见 CLAUDE.md「样式:两个寄存器」)。
+ * 三条语义色(磷光绿 / 赭黄 / 朱砂)各有各的意思,不能借给"系列一 / 系列二"。
+ * 这里只有一条线,所以连区分都不需要 —— 折线用墨色,栅格用 `--border`。
+ */
+interface Point {
+  /** 横轴标签,直接印出来(`10-15` 这种) */
+  label: string;
+  value: number;
+}
+
+interface Props {
+  title: string;
+  unit?: string;
+  points: readonly Point[];
+}
+
+const { title, unit = '', points } = Astro.props;
+
+const total = points.reduce((sum, point) => sum + point.value, 0);
+const max = Math.max(0, ...points.map((point) => point.value));
+
+/*
+ * 纵轴上界取 `max`,但**最大值那一点要落在图内而不是压在顶边上** —— 留 8% 的
+ * 余量。全零时这个除法会得到 `Infinity`,所以先挡掉(那种情况走下面的空态分支)。
+ */
+const ceiling = max > 0 ? max * 1.08 : 1;
+
+/** viewBox 是 100×100,所以坐标就是百分比 —— 不必再算像素。 */
+const step = points.length > 1 ? 100 / (points.length - 1) : 0;
+const polyline = points
+  .map((point, index) => `${(index * step).toFixed(2)},${(100 - (point.value / ceiling) * 100).toFixed(2)}`)
+  .join(' ');
+
+const peak = points.reduce((best, point) => (point.value > best.value ? point : best), points[0]);
+
+// 图给读屏用户的那句话:一张只画了根线的图对读屏是一片空白
+const summary =
+  total > 0
+    ? `${title}最近 ${points.length} 天:合计 ${total},最高 ${peak?.value ?? 0}(${peak?.label ?? ''})`
+    : `${title}最近 ${points.length} 天还没有数据`;
+---
+
+<figure class="chart" aria-label={summary}>
+  <figcaption class="chart__caption">
+    <span class="chart__title">{title}</span>
+    {
+      total > 0 && (
+        <span class="chart__peak">
+          合计 <strong>{total}</strong>
+          {unit}
+          <span class="chart__peak-at">最高 {peak?.value} · {peak?.label}</span>
+        </span>
+      )
+    }
+  </figcaption>
+
+  {
+    total > 0 ? (
+      <>
+        <div class="chart__plot">
+          {/*
+            三条水平栅格:底边、中线、顶边。**它们是坐标系的记号**,不是装饰 ——
+            没有它们这几根折线读不出高度。
+          */}
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <line class="chart__grid" x1="0" y1="100" x2="100" y2="100" vector-effect="non-scaling-stroke" />
+            <line class="chart__grid" x1="0" y1="50" x2="100" y2="50" vector-effect="non-scaling-stroke" />
+            <line class="chart__grid" x1="0" y1="0" x2="100" y2="0" vector-effect="non-scaling-stroke" />
+            <polyline class="chart__line" points={polyline} vector-effect="non-scaling-stroke" />
+          </svg>
+        </div>
+
+        <div class="chart__x">
+          <span>{points[0]?.label}</span>
+          <span>{points[points.length - 1]?.label}</span>
+        </div>
+      </>
+    ) : (
+      /*
+        空态**不画灰槽**。全站那条规矩是「没数据不画空槽」:一个 110px 的灰框会被
+        读成"这个组件没加载出来",而不是"还没有数据"。所以这里只留一条基线,
+        再把"为什么没有"写出来。
+      */
+      <p class="chart__empty">这 {points.length} 天还没有{title}。</p>
+    )
+  }
+</figure>
+
+<style>
+  .chart {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .chart__caption {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .chart__title {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+
+  .chart__peak {
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+
+  .chart__peak-at {
+    margin-left: 10px;
+    color: var(--text-faint);
+  }
+
+  .chart__plot {
+    /* 高度写死、宽度跟容器 —— 折线图的高度不随宽度变,它才有可比性 */
+    height: 120px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .chart__plot svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* 折线可能压到顶边(留了 8% 余量,但 0 值那条会贴着底边),所以溢出的部分
+       用 `visible` 而不是默认的裁剪 */
+    overflow: visible;
+  }
+
+  .chart__grid {
+    stroke: var(--border);
+    stroke-width: 1;
+    /* 顶边那条其实是"上界"的记号,画淡一档 */
+    opacity: 0.6;
+  }
+
+  .chart__line {
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .chart__x {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-faint);
+    font-size: 0.75rem;
+  }
+
+  .chart__empty {
+    margin: 0;
+    padding: 14px 0 2px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+</style>

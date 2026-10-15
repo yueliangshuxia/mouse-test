@@ -59,7 +59,7 @@ export const toolboxZh = {
   lede:
     '上面那一排是**诊断** —— 测鼠标坏没坏,每一页都说清了自己的数可信到什么程度。' +
     '这里是**玩**的:能测的照旧标出口径,不测的会直说它不测。' +
-    '所有成绩只存在这台机器的浏览器里,不联网、不上传。',
+    '所有成绩只存在这台机器的浏览器里。**页面会往服务器报一个「这一页今天被打开了几次」的计数,但它不认人、不存 IP、也不带任何成绩** —— 详见下面的常见问题。',
 
   listTitle: '玩一玩',
   faqTitle: '常见问题',
@@ -69,8 +69,16 @@ export const toolboxZh = {
       q: '这些工具的成绩会被上传吗?',
       a:
         '不会。这里每一件都在你的浏览器里跑,成绩只写进本机的 localStorage,关掉页面也还在,' +
-        '但**没有任何一步会把数据发出去**。所以它们之间不能互相比较,和别人的成绩更不能比 ——' +
+        '**没有任何一步会把成绩发出去**。所以它们之间不能互相比较,和别人的成绩更不能比 ——' +
         '同一台机器上前后对比才有意义。',
+    },
+    {
+      q: '那你们后台看到的访问量是怎么来的?',
+      a:
+        '页面会往服务器报一个计数:**哪一页、哪一天、被打开了几次**。就这三样。' +
+        '它没有访客标识、没有 cookie、没有 IP、没有设备信息,时间只到天 ——' +
+        '所以它**答不上来"今天来了几个人"**,那不是没做,是它根本没有那个能力。' +
+        '**成绩本身,一个字都不会发出去。**',
     },
     {
       q: '为什么有的标着"不测量"?',
@@ -111,7 +119,9 @@ export const toolboxEn: typeof toolboxZh = {
     'The row above is **diagnostic** — it measures whether your mouse is faulty, and every page there ' +
     'says how far its numbers can be trusted. What you get here is the **fun** side: anything that can ' +
     'be measured still gets labelled, and anything that cannot is stated outright. Every score stays in ' +
-    'this machine’s browser — nothing is uploaded.',
+    'this machine’s browser. **A page does report one thing to the server — a count of how many times ' +
+    'that page was opened today. It carries no identity, no IP and no score at all** — see the common ' +
+    'questions below.',
 
   listTitle: 'Have a play',
   faqTitle: 'Common questions',
@@ -121,9 +131,18 @@ export const toolboxEn: typeof toolboxZh = {
       q: 'Are the scores from these tools uploaded?',
       a:
         'No. Each one runs inside your browser, and a score is only written to the local localStorage — ' +
-        'it is still there after you close the page, but **nothing in the process sends any data out**. ' +
+        'it is still there after you close the page, and **nothing in the process sends a score out**. ' +
         'That also means the tools are not comparable with each other, and even less with someone else’s ' +
         'score — only a before/after comparison on the same machine means anything.',
+    },
+    {
+      q: 'Then where does the visit count in the admin come from?',
+      a:
+        'A page reports a counter to the server: **which page, which day, and how many times it was ' +
+        'opened**. That is all three things. There is no visitor id, no cookie, no IP and no device ' +
+        'information, and the date is only ever a day — so it **cannot answer "how many people came ' +
+        'today"**, and that is not an omission, it simply has no way to know. **The scores themselves ' +
+        'never leave your browser.**',
     },
     {
       q: 'Why are some labelled "not a measurement"?',

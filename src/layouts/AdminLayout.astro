@@ -1,0 +1,82 @@
+---
+/*
+ * 后台的壳:**侧栏 + 两栏排布**。
+ *
+ * ## 权限守卫**不在这里**,在 `src/middleware.ts`
+ *
+ * 第一版把守卫写在这个布局里(`if (!user) return Astro.redirect(...)`),实测
+ * **不生效**:嵌套组件返回的 Response 会被 Astro 当成组件的返回值,而不是页面的
+ * 响应 —— 未登录访问 `/admin` 拿回的是 `200` 加一张 51 字节的空页。详见中间件
+ * 那个文件的文件头。
+ *
+ * 所以这里**只读** `Astro.locals.user`,不再自己判一次。同一个判断有两处实现,
+ * 迟早只有一处会被改。
+ */
+import BaseLayout from './BaseLayout.astro';
+import AdminNav from '../components/AdminNav.astro';
+import { parsePath } from '../lib/i18n';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+
+const user = Astro.locals.user;
+/*
+ * 走到这里 `user` 必然在:中间件拦在路由之前,而所有 `src/pages/admin/**` 都在
+ * 它的作用域里。
+ *
+ * 真没有的话**要一声巨响,不要一张空白页** —— 那正是第一版那个 bug 的样子。
+ * 空白页会被读成"这一页还在做",而它其实是"守卫根本没生效"。
+ */
+if (!user) throw new Error('AdminLayout 被用在了没有经过中间件守卫的路径上');
+
+/*
+ * 当前页的站点相对路径(`admin/users` 这种),交给侧栏判高亮。
+ *
+ * **末尾那个 `.replace(/\/$/, '')` 不能省**,这不是防御性写法:Astro **不规范化
+ * 尾斜杠**(实测 `/mouse-test/api/health/` 原样报回来),所以 `/mouse-test/admin/`
+ * 剥完 base 是 `admin/` —— 而侧栏那一项写的是 `admin`,不剥就永远比不中,
+ * 表现是**侧栏一项都不高亮**,不报错、不警告。`BaseLayout.astro:110` 那句
+ * `currentSlug` 干的是同一件事,两处口径要一致。
+ */
+const current = parsePath(Astro.url.pathname).rest.replace(/\/$/, '');
+---
+
+<BaseLayout title={title} description={description} noindex>
+  <div class="admin">
+    <AdminNav current={current} username={user.username} />
+    <div class="admin-main">
+      <slot />
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  /*
+   * 两栏:侧栏固定、正文吃掉剩下的。**这就是 `.workbench` 那套比例语言**,只是
+   * 左边那一栏更窄 —— 用 flex 的 `flex-basis` 而不是固定 `width`,于是窄屏时
+   * 它会自然换行堆叠,**这里一条媒体查询都不用写**。
+   *
+   * (`.workbench` 的注释里记着同一件事:靠换行就够了,不需要断点。真正需要断点
+   * 的是键盘页那种"两栏各自还要再收一次"的情形,这里没有。)
+   */
+  .admin {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 28px;
+  }
+
+  .admin-main {
+    flex: 1 1 520px;
+    /*
+     * **`min-width: 0` 不能删。** flex item 默认不会收缩到内容宽度以下,而后台
+     * 那几张表一旦有长用户名或长链接,整栏就会被撑破、把侧栏挤出视口 ——
+     * 这条和 `.workbench__stage` 上那一条是同一个理由。
+     */
+    min-width: 0;
+  }
+</style>

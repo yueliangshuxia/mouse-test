@@ -1,0 +1,112 @@
+---
+/*
+ * 登录页。**只有中文**,而且不进 i18n 目录 —— 和 `/mouse-repair/` 是同一个先例。
+ *
+ * 于是它不在 `TRANSLATED_SLUGS` 里,英文页上任何指向它的 `pageHref()` 都会落回
+ * 中文地址。那是判据的正当行为,不是断链:一个英文访客本来也不需要这个后台。
+ *
+ * `noindex` 是必须的:它不在 sitemap 里(有 filter 挡着),但万一有谁链接到它,
+ * 别让搜索引擎把这个地址收进去。
+ */
+export const prerender = false;
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { adminUrl, loginEndpoint, requireAdmin } from '../server/auth';
+
+/*
+ * 已经是管理员的人不该再看到这张表单 —— 直接送去后台。
+ *
+ * **这里必须是 `requireAdmin`,不能是 `requireUser`** —— 而且这一条是踩出来的:
+ *
+ * 用 `requireUser` 的话,一个**登录了的普通用户**访问 `/login` 会被送到 `/admin/`,
+ * 而后台的中间件又把他送回 `/login`…… 于是**无限重定向**,浏览器直接报
+ * `ERR_TOO_MANY_REDIRECTS`。单看 `/login` 那一行读起来完全正确("登录过就别再看
+ * 登录页了"),只有把 `/login → /admin → /login` 这条链走完才看得见。
+ *
+ * 判据要和后台的守卫**用同一个**:谁能进 `/admin`,谁才该从这儿被送走。
+ *
+ * `return Astro.redirect(...)` 在**页面**的 frontmatter 里是有效的写法;它在
+ * 嵌套组件里**不生效**(实测,见 `src/middleware.ts` 的文件头)—— 两处不要写混。
+ */
+if (await requireAdmin(Astro.cookies)) return Astro.redirect(adminUrl());
+
+/*
+ * 错误文案从 query 里读。**这是 PRG 的代价**,换来的是刷新页面不会重发登录请求。
+ *
+ * 用 `{}` 插值而不是 `set:html`,所以它是**转义输出** —— 就算有人在 `err` 里塞
+ * 一段标签,也只会原样显示成文字。这一点在"错误信息来自用户的输入"时是必须的。
+ */
+const error = Astro.url.searchParams.get('err');
+---
+
+<BaseLayout
+  title="登录 · 鼠标测试"
+  description="管理后台登录。"
+  noindex
+>
+  <h1>登录</h1>
+
+  <p class="prose">
+    这里只给管理员用。<strong>普通访客不需要登录</strong> —— 所有测试都在你自己的浏览器里跑完,
+    不读任何账号,也一个字都不上传。
+  </p>
+
+  {error && <div class="notice"><p>{error}</p></div>}
+
+  <form class="login-form" method="post" action={loginEndpoint()}>
+    <label class="login-form__field">
+      <span class="login-form__label">用户名</span>
+      <input type="text" name="username" autocomplete="username" required autofocus />
+    </label>
+
+    <label class="login-form__field">
+      <span class="login-form__label">密码</span>
+      <input type="password" name="password" autocomplete="current-password" required />
+    </label>
+
+    <button type="submit">登录</button>
+  </form>
+</BaseLayout>
+
+<style>
+  /*
+   * 这几条住在页面里是安全的:它们选中的元素全部由**这个模板**渲染,所以
+   * Astro 构建期加上去的 `data-astro-cid-*` 对得上。
+   *
+   * (反例见 CLAUDE.md 那两条:cuid 坑只发生在"脚本 `createElement` 造出来的
+   * 节点"上 —— 那种节点身上没有 cid,页面 `<style>` 的规则一条都不命中。)
+   */
+  .login-form {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    /* 表单不该跟正文一样宽 —— 一行 1060px 的输入框读起来很怪 */
+    max-width: 360px;
+    gap: 16px;
+    margin: 24px 0 0;
+  }
+
+  /* 竖排:标签在输入框上面。横向的 `.field` 是给"标签 + 控件同处一行"用的,
+     登录这几格要的是另一种排法,所以不复用它 */
+  .login-form__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .login-form__label {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+
+  /* 宽度只在页面里定(全局那条只管长相,不管宽度),让它占满表单那一列 */
+  .login-form input {
+    width: 100%;
+  }
+
+  /* 按钮默认是药丸,宽度随内容 —— 这里让它跟输入框一样宽,读起来才是一整块 */
+  .login-form button {
+    align-self: flex-start;
+    margin-top: 4px;
+  }
+</style>

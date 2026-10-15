@@ -1,0 +1,356 @@
+---
+/*
+ * 广告位管理。
+ *
+ * ## 编辑走 `?edit=<id>`,不在表格里内联
+ *
+ * 一条广告有五个字段,五个输入框乘上 N 行会把这张表撑得没法读 —— 而且一行的
+ * 宽度就决定了整页宽度,窄屏必然横向滚动。所以顶部那**一张**表单承担创建与编辑
+ * 两种活:`?edit=<id>` 时它预填那条数据、按钮变成「保存」。
+ *
+ * 代价是"改一条要点两下"(编辑 → 改 → 保存),换来的是表格始终是一张能一眼
+ * 读完的表。
+ *
+ * ## 不做"预览广告长什么样"
+ *
+ * 想过加一块预览。放弃的理由是它**长得不会和真的一样**:广告那套样式住在
+ * `AdSlot.astro` 的 `<style>` 里,而 Astro 的作用域是**按组件**的 —— 后台这一页
+ * 拿不到那些规则,要预览就得把长相抄第二份,于是"预览"和"实际"迟早分家,
+ * 而分家的预览比没有预览更坏(它会让人放心)。
+ *
+ * 替代办法是两条都在:表格里印出真正的标题与说明(校对文字),以及一个
+ * **去首页看真的**的链接。
+ */
+export const prerender = false;
+
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { AD_SLOTS, AD_SLOT_KEYS } from '../../lib/ads';
+import { localAdmin } from '../../server/auth';
+import { listAds } from '../../server/queries';
+import { href } from '../../lib/url';
+
+const me = localAdmin(Astro.locals);
+const ads = await listAds();
+
+const ok = Astro.url.searchParams.get('ok');
+const err = Astro.url.searchParams.get('err');
+
+const editId = Number(Astro.url.searchParams.get('edit') ?? '');
+const editing = Number.isInteger(editId) && editId > 0 ? (ads.find((ad) => ad.id === editId) ?? null) : null;
+
+const endpoint = href('api/admin/ads');
+const adsUrl = href('admin/ads');
+---
+
+<AdminLayout title="广告位 · 后台" description="鼠标测试管理后台:广告位。">
+  <h1>广告位</h1>
+
+  {ok && <div class="notice notice--info"><p>{ok}</p></div>}
+  {err && <div class="notice"><p>{err}</p></div>}
+
+  <p class="admin-lede">
+    广告只挂在<strong>首页</strong>与<strong>工具箱页</strong> —— 那两处都不出故障判定。
+    诊断工具页上不放任何服务信息(包括这一条),理由写在 CLAUDE.md 里。
+    「权重」是同一次选取中它被抽到的相对概率:权重 3 的广告被抽中的机会是权重 1 的三倍。
+  </p>
+
+  <section>
+    <h2>{editing ? `编辑「${editing.title}」` : '新建广告'}</h2>
+
+    <form method="post" action={endpoint} class="ad-form">
+      <input type="hidden" name="csrf" value={me.csrfToken} />
+      <input type="hidden" name="action" value={editing ? 'update' : 'create'} />
+      {editing && <input type="hidden" name="id" value={editing.id} />}
+
+      <label class="field">
+        <span class="field__label">位置</span>
+        <select name="slot">
+          {
+            AD_SLOT_KEYS.map((key) => (
+              <option value={key} selected={editing ? editing.slot === key : key === AD_SLOT_KEYS[0]}>
+                {AD_SLOTS[key]}
+              </option>
+            ))
+          }
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field__label">标题</span>
+        <input type="text" name="title" maxlength="80" required value={editing?.title ?? ''} />
+      </label>
+
+      <label class="field">
+        <span class="field__label">说明</span>
+        <input type="text" name="body" maxlength="200" required value={editing?.body ?? ''} />
+      </label>
+
+      <label class="field">
+        <span class="field__label">链接</span>
+        <input
+          type="text"
+          name="url"
+          maxlength="500"
+          required
+          placeholder="https://"
+          value={editing?.url ?? ''}
+        />
+      </label>
+
+      <label class="field">
+        <span class="field__label">权重</span>
+        <input type="number" name="weight" min="1" max="100" required value={editing?.weight ?? 1} />
+      </label>
+
+      <button type="submit">{editing ? '保存' : '新建'}</button>
+      {
+        editing && (
+          <a class="pill-link" href={adsUrl}>
+            取消
+          </a>
+        )
+      }
+    </form>
+  </section>
+
+  <section>
+    <h2>
+      全部广告({ads.length},其中 {ads.filter((ad) => ad.active).length} 条在投)
+    </h2>
+
+    {
+      ads.length === 0 ? (
+        <p class="admin-lede">
+          还没有广告。新建一条之后,首页与工具箱页对应那一格就会开始出现 ——
+          <strong>没有可投的广告时那一格整块不渲染</strong>,不会留一个空框。
+        </p>
+      ) : (
+        <table class="ref-table ad-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>位置</th>
+              <th>标题 / 说明</th>
+              <th>权重</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ads.map((ad) => (
+              <tr>
+                <td data-label="编号">{ad.id}</td>
+                <td data-label="位置">{AD_SLOTS[ad.slot] ?? ad.slot}</td>
+                <td class="ad-table__text" data-label="内容">
+                  <span class="ad-table__title">{ad.title}</span>
+                  <span class="ad-table__body">{ad.body}</span>
+                  <span class="ad-table__url">{ad.url}</span>
+                </td>
+                <td data-label="权重">{ad.weight}</td>
+                <td data-label="状态">{ad.active ? '在投' : '已停投'}</td>
+                <td class="ad-table__actions" data-label="操作">
+                  <a class="admin-mini-link" href={`${adsUrl}?edit=${ad.id}`}>
+                    编辑
+                  </a>
+
+                  <form method="post" action={endpoint}>
+                    <input type="hidden" name="csrf" value={me.csrfToken} />
+                    <input type="hidden" name="action" value="toggle" />
+                    <input type="hidden" name="id" value={ad.id} />
+                    <button type="submit" class="admin-mini">
+                      {ad.active ? '停投' : '开始投'}
+                    </button>
+                  </form>
+
+                  {/*
+                    删除做成**两步**,而且不用一行 JS。
+                    用 `<details>` 而不是 `confirm()`:内联的 onclick 是一段住在
+                    属性里的脚本,它既过不了 CSP、也没法被读屏好好念出来;而
+                    `<details>` 是原生行为,"点了才展开"这件事由浏览器保证。
+                  */}
+                  <details class="ad-del">
+                    <summary class="admin-mini-link">删除</summary>
+                    <div class="ad-del__panel">
+                      <p>删除会连它的曝光与点击记录一起删掉。想保留统计请改用「停投」。</p>
+                      <form method="post" action={endpoint}>
+                        <input type="hidden" name="csrf" value={me.csrfToken} />
+                        <input type="hidden" name="action" value="delete" />
+                        <input type="hidden" name="id" value={ad.id} />
+                        <button type="submit" class="admin-mini">
+                          确认删除
+                        </button>
+                      </form>
+                    </div>
+                  </details>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    }
+
+    <p class="field-hint">
+      想看看实际长什么样:去<a href={href()}>首页</a>或<a href={href('toolbox')}>工具箱页</a>。
+      曝光与点击按天统计在<a href={href('admin/analysis')}>数据分析</a>那一页。
+    </p>
+  </section>
+</AdminLayout>
+
+<style>
+  .admin-lede,
+  .field-hint {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+
+  .admin-lede {
+    margin: 0 0 26px;
+  }
+
+  .field-hint {
+    margin: 16px 0 0;
+  }
+
+  .ad-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin: 14px 0 0;
+  }
+
+  /* 标题那一列要吃掉剩余宽度 —— 说明文字是给人读的,挤在 9ch 里没法校对 */
+  .ad-form .field:nth-of-type(3) input,
+  .ad-form .field:nth-of-type(4) input {
+    min-width: 22ch;
+  }
+
+  /* 宽屏:一张普通的表。窄屏的排法在文件末尾那个媒体查询里 —— 理由和用户页
+     那张表是同一条(要横着滑才够得着的「操作」列等于不存在) */
+  .ad-table td {
+    vertical-align: top;
+  }
+
+  .ad-table__text {
+    white-space: normal;
+    min-width: 20ch;
+    max-width: 40ch;
+  }
+
+  .ad-table__title,
+  .ad-table__body,
+  .ad-table__url {
+    display: block;
+  }
+
+  .ad-table__title {
+    font-weight: 600;
+  }
+
+  .ad-table__body,
+  .ad-table__url {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+
+  .ad-table__url {
+    /* 长链接要能断行,否则它会把这一列撑到把别的列挤出去 */
+    overflow-wrap: anywhere;
+  }
+
+  .ad-table__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .admin-mini-link {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+
+  .admin-mini-link:hover {
+    color: var(--text);
+  }
+
+  .admin-mini {
+    padding: 5px 12px;
+    font-size: 0.82rem;
+  }
+
+  .ad-del {
+    display: inline-block;
+  }
+
+  .ad-del__panel {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-inset);
+    max-width: 32ch;
+    white-space: normal;
+  }
+
+  .ad-del__panel p {
+    margin: 0 0 8px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+
+  /*
+   * 窄屏拆成一块一块。和用户那一页同一套写法,理由也一样 —— 详见
+   * `admin/users.astro` 里那段注释。
+   */
+  @media (max-width: 760px) {
+    .ad-table thead {
+      display: none;
+    }
+
+    .ad-table,
+    .ad-table tbody,
+    .ad-table tr,
+    .ad-table td {
+      display: block;
+      width: auto;
+    }
+
+    .ad-table tr {
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .ad-table td {
+      padding: 3px 0;
+      border-bottom: none;
+      white-space: normal;
+      max-width: none;
+    }
+
+    .ad-table td::before {
+      content: attr(data-label);
+      display: inline-block;
+      min-width: 5.5em;
+      color: var(--text-faint);
+      font-size: 0.78rem;
+    }
+
+    /* 「内容」那一格是好几行,列名要单独占一行,不然后面几行会跑到列名右边去 */
+    .ad-table__text::before {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .ad-table__actions {
+      margin-top: 8px;
+    }
+
+    .ad-table__actions::before {
+      display: block;
+      margin-bottom: 6px;
+    }
+  }
+</style>
