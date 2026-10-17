@@ -1796,6 +1796,42 @@ export function analyzeDragEpisodesByButton(
   return new Map([...result].sort((a, b) => a[0] - b[0]));
 }
 
+export interface KeyedDragEpisode {
+  code: number;
+  episode: DragEpisode;
+}
+
+/**
+ * 把 `analyzeDragEpisodesByButton` 那张**按按键分好组**的表,摊平成一条
+ * **按时间排**的列表。
+ *
+ * ## 这个函数是为了修一个真 bug 才存在的
+ *
+ * 页面原来直接在 `for (const [code, episodes] of byButton)` 里往外冒条目,
+ * 于是那条列表是**按按键分组**的(左 → 中 → 右),而「每次拖拽的记录」取的是
+ * 它的**末尾 10 条** —— 那就永远是最右边那个键的 10 条。
+ *
+ * 后果非常具体:**左键点了 63 次,记录里一条都看不到**(用户报的就是这个:
+ * "点击只加数量,但没有具体数值出来"),而计数本身是对的,所以从数字上
+ * 完全看不出来有毛病。截图里那 7 条 `#104–#110` 全是「右键」,就是它。
+ *
+ * ## 同一时刻按下的两个键
+ *
+ * 组合键下两个键的 `startMs` 会**完全相同**(边沿是从同一条事件的掩码比对
+ * 里拆出来的)。排序要按第二个键再兜一次(编号升序),否则同一个时间点上的
+ * 两条顺序不稳定,日志的 `#` 号会在两次渲染之间跳。
+ */
+export function flattenDragEpisodes(
+  byButton: ReadonlyMap<number, readonly DragEpisode[]>,
+): KeyedDragEpisode[] {
+  const flat: KeyedDragEpisode[] = [];
+  for (const [code, episodes] of byButton) {
+    for (const episode of episodes) flat.push({ code, episode });
+  }
+  flat.sort((a, b) => a.episode.startMs - b.episode.startMs || a.code - b.code);
+  return flat;
+}
+
 // ---------------------------------------------------------------------------
 // DPI 与指针加速度
 // ---------------------------------------------------------------------------

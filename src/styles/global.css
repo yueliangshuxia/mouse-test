@@ -3460,43 +3460,41 @@ code {
  * 不是"点我"。所以刻意做得克制 —— 只是边框换一档墨色,**没有光标变化、
  * 没有位移、没有颜色**。首页那七张卡(`.mini-card:hover`)是同一条判据。
  */
-.card::before,
-.prose--cards > ul > li::before,
-.prose--cards > ol.steps > li::before {
-  content: '';
-  position: absolute;
-  /*
-   * **`inset: 0` 而不是 `-1px`。** 工具页那些卡片现在带 `overflow-y: auto`
-   * (见下面"限高"),而 `overflow` 不是 `visible` 就会**裁掉溢出的伪元素** ——
-   * `-1px` 那一圈会被削平,环就缺一块。退回边框盒以内,改成压在卡片自己那条
-   * 1px 边上(悬停时那条边本来就转透明)。
-   */
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  /*
-   * **有色相就用色相,没有就退回原来那条墨色的。**
-   * `var(--hue, X)` 的兜底让这同一条规则伺候两种页面:工具页传了色相 →
-   * 一圈实色的环;维修页/工具箱没传 → 还是 `--border-strong → --text-dim`。
-   * 一个 `--hue` 都没加,兜底分支走的就是老样子。
-   */
-  background: linear-gradient(
-    120deg,
-    var(--hue, var(--border-strong)),
-    var(--hue, var(--text-dim))
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  opacity: 0;
-  pointer-events: none;
-}
+/*
+ * **这里原来是一圈 `mask-composite` 画出来的渐变环,2026-10-18 撤掉了。**
+ * 它是 `position: absolute; inset: 0` 的伪元素 —— 而卡片带 `overflow-y: auto`
+ * 之后就成了滚动容器,**绝对定位的子元素属于被滚动的那一层**,于是卡里一滚,
+ * 环就跟着内容往上跑,停在卡片上半截。用户报的就是这个:「框没全包围住」。
+ *
+ * 现在的做法见下面 `.card:hover` 那条 `outline`。
+ */
 
-.card:hover::before,
-.prose--cards > ul > li:hover::before,
-.prose--cards > ol.steps > li:hover::before {
-  opacity: 1;
+/*
+ * **悬停那一圈改用 `outline`,不再用伪元素。** 这是 2026-10-18 改的,原因是
+ * 用户报的一个真 bug:**卡片内容一滚,那圈环就跟着内容往上跑** ——
+ *
+ * 伪元素是 `position: absolute; inset: 0`,而卡片的 `overflow-y: auto` 让它
+ * 成了一个**滚动容器**;绝对定位的子元素属于**被滚动的那一层**,于是滚多少、
+ * 环就往上跑多少。截图里是:环停在卡片上半截,卡片还在下面,看起来就是
+ * 「框没全包围住」。
+ *
+ * `outline` 不参与滚动、**也不被元素自己的 `overflow` 裁剪**(它画在边框盒
+ * 之外的轮廓层),而且**不影响布局** —— 这三样正好是这里需要的那三样。
+ * 代价是**不再有那道 120° 渐变**,变成一条实色;`--hue` 的兜底照旧,
+ * 所以工具页是色相色、维修页/工具箱是 `--text-dim`。
+ *
+ * > 伪元素那套里 `inset: -1px` → `inset: 0` 的来历也一并作废:那条是为了
+ * > 不被 `overflow` 裁掉才退进来的。现在两者都不在了。
+ */
+.card:hover,
+.prose--cards > ul > li:hover,
+.prose--cards > ol.steps > li:hover {
+  /*
+   * 2px:`outline` 画在边框**外面**,`outline-offset: -2px` 把它压回边框盒以内,
+   * 于是它和那条 1px 的 `--border` 重合 —— 不占地方、也不会让卡片"长大"。
+   */
+  outline: 2px solid var(--hue, var(--text-dim));
+  outline-offset: -2px;
 }
 
 /*
@@ -3692,6 +3690,42 @@ code {
   font-size: 0.9rem;
   color: var(--text-dim);
   line-height: 1.75;
+}
+
+/*
+ * **整张卡都能点。**
+ *
+ * 这一批卡片有两种首句:一种是 `<strong>`(纯说明,点了没用),另一种是
+ * `<a>`(指向另一页,比如「想看细的,去这三页」那三张)。后者把链接**撑满整张卡**:
+ * 点卡片任何地方都跳转,而不是只有标题那几个字能点。
+ *
+ * 三条实现上的注意:
+ *
+ * 1. **用的是"撑满"而不是把整个 `<li>` 包进 `<a>`。** 包进去要改十六个页面的
+ *    标记,而且会改变语义(卡片里的列表、加粗全都成了链接的一部分)。这里
+ *    `<a>` 照旧只包住标题,靠一个 `inset: 0` 的透明 `::after` 把命中区撑开 ——
+ *    键盘焦点、中键、右键「在新标签页打开」全都照旧。
+ * 2. **`::after` 的定位基准是 `<li>`**(它是 `position: relative`),所以锚点
+ *    自己**不要**加 `position: relative`,加了可点区域就缩回标题那一行了。
+ * 3. **链接卡不再内部滚动。** `::after` 是绝对定位的子元素,而滚动容器的
+ *    绝对定位子元素**属于被滚动的那一层** —— 卡里一滚,可点区域就跟着跑
+ *    (和上面那圈悬停环是同一个坑)。所以 `.prose--cards > ul > li:has(> a:first-child)`
+ *    把限高撤掉:**一张卡如果本身就是个链接,它就不该再套一个滚动区**,
+ *    在里面滚和在外面滚会打架。
+ *
+ * 代价要说清楚:**鼠标没法再选中卡片里的说明文字了**(整块都被链接盖住)。
+ * 这是用户明确要的取舍 —— 「你把这一个框都弄成可以点击跳转」。键盘和读屏不受影响。
+ */
+.prose--cards > ul > li:has(> a:first-child) {
+  max-height: none;
+  overflow: visible;
+}
+
+.prose--cards > ul > li > a:first-child::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
 }
 
 .prose--cards > ul > li > strong:first-child,

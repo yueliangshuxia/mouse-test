@@ -1,6 +1,8 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { READY_TOOLS, REPAIR, TOOLBOX } from '../lib/tools';
+import { ICONS } from '../lib/icons';
+import { UNDRAW_STATUS_PAGE_SVG } from '../lib/illustrations';
 import { href } from '../lib/url';
 
 /*
@@ -25,9 +27,9 @@ import { href } from '../lib/url';
  */
 
 const MAIN = [
-  { label: '回首页', href: href(), desc: '所有工具的总入口' },
-  { label: TOOLBOX.navLabel, href: href(`${TOOLBOX.slug}/`), desc: '手稳度、涂鸦板、坏点检测这些' },
-  { label: REPAIR.navLabel, href: href(`${REPAIR.slug}/`), desc: '测出问题了,或者想先看看怎么修' },
+  { label: '回首页', href: href(), desc: '所有工具的总入口', icon: ICONS.home },
+  { label: TOOLBOX.navLabel, href: href(`${TOOLBOX.slug}/`), desc: '手稳度、涂鸦板、坏点检测这些', icon: ICONS.compass },
+  { label: REPAIR.navLabel, href: href(`${REPAIR.slug}/`), desc: '测出问题了,或者想先看看怎么修', icon: ICONS.repair },
 ];
 ---
 
@@ -36,12 +38,27 @@ const MAIN = [
   description="这个地址没有对应的页面。下面是站内所有的工具入口。"
   noindex
 >
-  <h1>这个地址没有东西</h1>
+  {/*
+    插画 + 标题并排。**这是全站唯一一张"纯装饰"的图** —— 别的地方一条都别学。
 
-  <p class="prose">
-    可能是地址打错了,也可能是那个工具的网址变过。下面是站内<strong>所有</strong>工具 ——
-    大概率你要找的那个就在里面。
-  </p>
+    它站得住的两个理由:**这一页本来就没有任何读数可以被打扰**(所以"有颜色的
+    地方就是在出数"这条契约在这里不适用),而且 404 是个死胡同,一张让人
+    放松的图比再加一段说明有用。
+
+    图已经改成墨色了(见 `lib/illustrations.ts`),`aria-hidden` 是因为它对
+    读屏用户一个字的信息都没有 —— 标题和下面那三条路已经把话说完。
+  */}
+  <div class="lost-hero">
+    <div class="lost-hero__text">
+      <h1>这个地址没有东西</h1>
+
+      <p class="prose">
+        可能是地址打错了,也可能是那个工具的网址变过。下面是站内<strong>所有</strong>工具 ——
+        大概率你要找的那个就在里面。
+      </p>
+    </div>
+    <div class="lost-hero__art" aria-hidden="true" set:html={UNDRAW_STATUS_PAGE_SVG} />
+  </div>
 
   <h2>先看这三个</h2>
 
@@ -49,7 +66,10 @@ const MAIN = [
     {
       MAIN.map((item) => (
         <li>
-          <a class="pill-link" href={item.href}>{item.label}</a>
+          <a class="pill-link" href={item.href}>
+            <svg class="lost-main__icon" viewBox="0 0 24 24" aria-hidden="true" set:html={item.icon} />
+            {item.label}
+          </a>
           <span class="lost-main__desc">{item.desc}</span>
         </li>
       ))
@@ -83,12 +103,63 @@ const MAIN = [
     max-width: 68ch;
   }
 
+  /*
+   * 标题 + 插画并排。窄了自动堆叠 —— 用的是 `.workbench` 那套 `flex-basis`
+   * 语言,所以这一页同样一条媒体查询都不用写。
+   *
+   * 插画给 `max-width: 380px`:它是配角的配角,再大就会把标题挤成一行两个字。
+   */
+  .lost-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 20px 36px;
+    margin-bottom: 8px;
+  }
+
+  .lost-hero__text {
+    flex: 1 1 320px;
+    /* flex item 默认不会窄于内容宽度 —— 删了它,长英文单词会把插画挤出去 */
+    min-width: 0;
+  }
+
+  .lost-hero__art {
+    flex: 0 1 380px;
+    min-width: 220px;
+    max-width: 380px;
+  }
+
+  /*
+   * `set:html` 注进来的 `<svg>` **身上没有 `data-astro-cid`**,所以页面 `<style>`
+   * 的规则够不着它 —— 必须 `:global()`。这正是 CLAUDE.md 里那个 cid 坑的
+   * 第三种形态(前两种是脚本 `createElement` 造的节点,和 `ui.ts` 拼的 `.notice`)。
+   */
+  .lost-hero__art :global(svg) {
+    display: block;
+    width: 100%;
+    height: auto;
+    /* 深色下那张线稿的浅底会变成一块近黑,压下去一档让它退到纸面里 */
+    opacity: 0.92;
+  }
+
   .lost-main li {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
     gap: 12px;
     margin-bottom: 12px;
+  }
+
+  /*
+   * 药丸里那枚图标。`.pill-link` 本身是 `inline-flex` + `gap: 10px`,所以图标
+   * 自动成为第一个 flex item、和文字之间自带那个间距 —— **不要加外边距去调**,
+   * 那会和 gap 叠成两套间距,而另一处用 `.pill-link` 的地方没有图标,就对不齐了。
+   */
+  .lost-main__icon {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    color: inherit;
   }
 
   .lost-main__desc {

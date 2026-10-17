@@ -68,6 +68,31 @@ const placeholders = {
 };
 
 /*
+ * 刺激颜色。**这几个是这个文件里唯一的写死色值,而且它们不是界面色 ——
+ * 它们是内容,和坏点页那五片纯色是同一种例外**:被眼睛看见的那个东西就是它本身,
+ * 走令牌反而说不清(井里的 `--accent` 是"在出数"的意思,拿它当刺激等于换了语义)。
+ *
+ * 三个约束:
+ *
+ * 1. **默认必须是白 `#dce5ec`**,和改之前那版(`var(--well-text)`)逐字节相同 ——
+ *    不改设置的人拿到的数不变,历史成绩也还能比。
+ * 2. **一律是亮色**:刺激压在近黑的井底上,亮度就是信噪比;暗色不是"另一种风格",
+ *    是更难看见。
+ * 3. **不用仪器窗那三支语义色**(磷光绿 = 在出数,赭黄 = 警告,朱砂 = 故障)。
+ *    它们在这套系统里有意思,借来当刺激会让"这一页在报警吗"变成一个真问题。
+ *
+ * 为什么可以换色、以及换了之后数字为什么不能比,写在 `t.stimColor.note` 里 ——
+ * **这一条比按钮本身重要**:同一个人的反应时间会随刺激亮度与色觉通道变,
+ * 那不是误差,是换了条件。
+ */
+const STIM_COLORS = [
+  { id: 'white', value: '#dce5ec' },
+  { id: 'amber', value: '#fbbf24' },
+  { id: 'cyan', value: '#22d3ee' },
+  { id: 'rose', value: '#f472b6' },
+] as const;
+
+/*
  * 「延迟有多长」那张表的四行住在目录里(`t.offsetRows`)。
  *
  * **那些 `total` 是推算出来的界,不是量出来的修正量。** 每一行 = 一整帧(锚点在帧首,
@@ -130,7 +155,26 @@ const jsonLd = {
 
   <div class="controls">
     <button type="button" id="toggle">{t.runtime.start}</button>
+
+    {/*
+      刺激颜色。**按钮上的色点就是那个颜色本身** —— 标签写「琥珀」而方块是别的东西
+      的话,这一组就成了猜谜。`data-color` 带着真正的色值,脚本原样读到 `--stim` 上,
+      于是"渲染出来的那个色"和"脚本设进去的那个色"只有一份来源。
+    */}
+    <div class="stim-colors" role="group" aria-label={t.stimColor.label}>
+      <span class="stim-colors__label" aria-hidden="true">{t.stimColor.label}</span>
+      {
+        STIM_COLORS.map((color, index) => (
+          <button type="button" data-color={color.value} aria-pressed={index === 0 ? 'true' : 'false'}>
+            <span class="stim-colors__dot" style={`--dot: ${color.value}`} aria-hidden="true" />
+            {t.stimColor[color.id]}
+          </button>
+        ))
+      }
+    </div>
   </div>
+
+  <p class="test-hint">{t.stimColor.note}</p>
 
   <div class="workbench">
     <div class="workbench__stage">
@@ -284,7 +328,49 @@ const jsonLd = {
      * 这里没有过渡可夹,正好不受影响。**这是测量,不是动画。**
      */
     .reaction-pad[data-stim='go'] {
-      background-color: var(--well-text);
+      /*
+       * `--stim` 由脚本写到这块面上(用户选的颜色);**没选过就退回 `--well-text`**
+       * —— 也就是改这一版之前的那个白,所以默认行为逐个字节不变。
+       *
+       * 兜底写在 `var()` 的第二个参数里而不是另写一条规则:两条规则的话,
+       * "脚本还没跑起来"的那一瞬会闪一次别的颜色,而这一页最不能有的就是
+       * 让眼睛看见一个它没在等的亮度。
+       */
+      background-color: var(--stim, var(--well-text));
+    }
+
+    /* 选色那个小圆点。颜色由内联的 `--dot` 给 —— 它和上面 `--stim` 是同一个值 */
+    .stim-colors {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .stim-colors__label {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      margin-right: 2px;
+    }
+
+    .stim-colors button {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      /* 比 `.controls` 里那枚主按钮小一号:它是参数,不是动作 */
+      padding: 6px 12px;
+      font-size: 0.85rem;
+    }
+
+    .stim-colors__dot {
+      width: 12px;
+      height: 12px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--dot);
+      /* 浅色的点压在纸面上几乎看不见,给一圈深色内描边把它托住 —— 和 `.qr__box`
+         那圈边框是同一个理由(浅底在浅纸上本来就没有边界) */
+      box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.28);
     }
 
     /*
@@ -684,25 +770,36 @@ const jsonLd = {
       push({ outcome: 'timed', ms }, FEEDBACK_MS);
     });
 
-    toggle?.addEventListener('click', () => {
+    /*
+     * 「清空这一轮,回到最初」。**抽出来是因为现在有两个地方要它**:
+     * 按「重置」,以及**换刺激颜色**。
+     *
+     * 换颜色为什么要清空:一轮的中位数是**同一个测量条件**下几次的中间值。
+     * 中途换色等于把两种条件混进一个数里,而那个数看起来完全正常 ——
+     * 这正是这一站最不能有的东西。
+     */
+    function resetRound(): void {
       stopAll();
+      trials = [];
+      frameGaps.length = 0;
+      lastFrame = 0;
+      started = false;
+      phase = 'idle';
+      setStim('idle');
+      setText(toggle, t.runtime.start);
+      say(t.runtime.callIdle, fill(t.runtime.metaIdle, { trials: TRIALS_PER_ROUND }));
+      setHint('hz', t.stats.hz.hint);
+      renderLog();
+      renderStats();
+    }
 
+    toggle?.addEventListener('click', () => {
       if (started) {
-        // 「重置」:清空,回到最初
-        trials = [];
-        frameGaps.length = 0;
-        lastFrame = 0;
-        started = false;
-        phase = 'idle';
-        setStim('idle');
-        setText(toggle, t.runtime.start);
-        say(t.runtime.callIdle, fill(t.runtime.metaIdle, { trials: TRIALS_PER_ROUND }));
-        setHint('hz', t.stats.hz.hint);
-        renderLog();
-        renderStats();
+        resetRound();
         return;
       }
 
+      stopAll();
       trials = [];
       frameGaps.length = 0;
       lastFrame = 0;
@@ -712,6 +809,31 @@ const jsonLd = {
       renderStats();
       arm();
     });
+
+    /*
+     * 刺激颜色。
+     *
+     * **色值从按钮的 `data-color` 读回来,不在这里再写一份** —— 两份的话,
+     * 改了 `STIM_COLORS` 而忘了改这里,页面上那个小圆点会变成一种颜色、
+     * 而真正亮起来的是另一种,且**没有任何东西会报错**。这和 `cps-test` 的
+     * `renderDurations()` 读按钮 `textContent` 是同一个办法。
+     */
+    const colorButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-color]'));
+
+    for (const button of colorButtons) {
+      button.addEventListener('click', () => {
+        const value = button.dataset.color;
+        if (!value) return;
+
+        pad?.style.setProperty('--stim', value);
+        for (const other of colorButtons) {
+          other.setAttribute('aria-pressed', String(other === button));
+        }
+
+        // 换条件就重开:一轮里混两种颜色,那个中位数说的就不是一件事了
+        resetRound();
+      });
+    }
 
     /*
      * 页面被切走就作废这一轮。

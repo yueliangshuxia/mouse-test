@@ -440,7 +440,12 @@ const jsonLd = {
   </style>
 
   <script>
-    import { analyzeDragEpisodesByButton, type DragEpisode, type DragEvent } from '../../lib/analysis';
+    import {
+      analyzeDragEpisodesByButton,
+      flattenDragEpisodes,
+      type DragEvent,
+      type KeyedDragEpisode,
+    } from '../../lib/analysis';
     import { BUTTON_CODES, maskFromButtons } from '../../lib/mouse-buttons';
     import { suppressSideButtonNavigation } from '../../lib/side-buttons';
     import {
@@ -616,11 +621,11 @@ const jsonLd = {
 
     // ---- 渲染 ----
 
-    /** 一个按键的一次按住,带上它是哪个键 */
-    interface KeyedEpisode {
-      code: number;
-      episode: DragEpisode;
-    }
+    /*
+     * 一个按键的一次按住,带上它是哪个键。**类型住在 `analysis.ts` 里** ——
+     * 因为"按时间摊平"那个函数也在那儿(`flattenDragEpisodes`),两边共用一个定义。
+     */
+    type KeyedEpisode = KeyedDragEpisode;
 
     function setRowCurrent(code: number, on: boolean): void {
       const row = el(`btn-row-${code}`);
@@ -631,7 +636,17 @@ const jsonLd = {
 
     function render(): void {
       const byButton = analyzeDragEpisodesByButton(events);
-      const all: KeyedEpisode[] = [];
+
+      /*
+       * **`all` 必须是按时间排的那一份,不能就地按按键分组往外冒。**
+       *
+       * 原来就是就地 push 的,而 `renderLog` 取的是它的末尾 10 条 —— 于是日志
+       * 永远只显示**编号最大那个键**的最后 10 次:左键点了 63 次,记录里一条
+       * 都不出现,而计数是对的,所以从数字上完全看不出毛病。用
+       * `flattenDragEpisodes` 摊平并按 `startMs` 排序之后,`#N` 才真的是
+       * "第 N 次按住",而不是"某个键的第 N 次"。
+       */
+      const all: KeyedEpisode[] = flattenDragEpisodes(byButton);
 
       let totalDrops = 0;
       let longest = 0;
@@ -646,8 +661,6 @@ const jsonLd = {
         let longestHere = 0;
 
         for (const episode of episodes) {
-          all.push({ code, episode });
-
           /*
            * 未结束的那一段**也计入**次数与最长一次——它是一次真实的按住,
            * 只是页面没收到松开事件。原先只数已结束的,结果是:如果你唯一那次

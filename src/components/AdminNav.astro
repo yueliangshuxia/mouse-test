@@ -8,6 +8,7 @@
  * 而忘了加一项,是**静默**的(那一页只能靠敲地址进)。
  */
 import { ADMIN_NAV } from '../lib/admin-nav';
+import { ICONS } from '../lib/icons';
 import { href } from '../lib/url';
 
 interface Props {
@@ -30,6 +31,12 @@ const { current, username } = Astro.props;
       ADMIN_NAV.map((item) => (
         <li>
           <a href={href(item.path)} aria-current={item.path === current ? 'page' : undefined}>
+            {/*
+              图标是**装饰** —— 每一项旁边已经有文字了,读屏再念一遍"仪表盘"
+              只会把"概览"这个词 dilute 掉。所以 `aria-hidden`。
+              viewBox 写在这里而不是 icons.ts 里,是为了让"多大"由消费者决定。
+            */}
+            <svg class="admin-nav__icon" viewBox="0 0 24 24" aria-hidden="true" set:html={ICONS[item.icon]} />
             {item.label}
           </a>
         </li>
@@ -42,7 +49,10 @@ const { current, username } = Astro.props;
     地方都能把你踢下线。这一条的理由写在 `api/auth/logout.ts` 的文件头。
   -->
   <form method="post" action={href('api/auth/logout')}>
-    <button type="submit" class="admin-nav__logout">注销</button>
+    <button type="submit" class="admin-nav__logout">
+      <svg class="admin-nav__icon" viewBox="0 0 24 24" aria-hidden="true" set:html={ICONS.logout} />
+      注销
+    </button>
   </form>
 </nav>
 
@@ -103,8 +113,29 @@ const { current, username } = Astro.props;
    * 在侧栏里最合适的表达是**位置**——你在这一条上。实心底块在这里会重得像按钮,
    * 而它不点任何东西,它只是一句话。
    */
+  /*
+   * 图标和文字同一行。`align-items: center` + `gap` —— 不用 `vertical-align`,
+   * 那东西在 SVG 和中文混排时的基线是按 SVG 底部算的,看着永远是偏的。
+   *
+   * 16px 是量出来的上限附近:侧栏项的内边距是 9px 上下,一行高约 38px;
+   * 图标再大就会把行高顶上去,而侧栏那五项的间距是整块读的,一高一矮很扎眼。
+   */
+  .admin-nav a,
+  .admin-nav__logout {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .admin-nav__icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    /* 图标跟着文字色走 —— 它没有自己的颜色,选中态变墨色时一起变 */
+    color: inherit;
+  }
+
   .admin-nav a {
-    display: block;
     padding: 9px 12px;
     color: var(--text-dim);
     text-decoration: none;

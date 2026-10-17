@@ -255,6 +255,26 @@ export const reactionZh = {
     },
   ] as ReactionFaqItem[],
 
+  /**
+   * 刺激颜色那一组。
+   *
+   * **它不是外观设置,是测量参数。** 换一个颜色 = 换一次测量条件:亮度、对比度、
+   * 色觉通道全变了,同一个人的反应时间会跟着动。所以下面那句 `note` 要把这件事
+   * 明说出来 —— 两个颜色下的数**不能直接比**,而这个站的信誉正建立在这类
+   * 提醒上。
+   *
+   * 默认是白(`#dce5ec`,和原来的刺激色一模一样),所以**不改设置的人拿到的数
+   * 和以前逐字节一致**,历史成绩也还能比。
+   */
+  stimColor: {
+    label: '刺激颜色',
+    note: '换颜色就是换了一次测量条件 —— 不同颜色下的数不能直接比。',
+    white: '白',
+    amber: '琥珀',
+    cyan: '青',
+    rose: '玫红',
+  },
+
   // -------------------------------------------------------------------------
   // 以下都是 `<script>` 里拼出来的句子(以及首屏那句提示)。整句一个键,
   // 占位符由 `fill()` 填。
@@ -483,6 +503,15 @@ export const reactionEn: typeof reactionZh = {
         'average, which is worse than giving nothing.',
     },
   ],
+
+  stimColor: {
+    label: 'Stimulus colour',
+    note: 'Changing the colour changes the measurement condition — numbers from different colours cannot be compared directly.',
+    white: 'White',
+    amber: 'Amber',
+    cyan: 'Cyan',
+    rose: 'Rose',
+  },
 
   runtime: {
     dash: '—',

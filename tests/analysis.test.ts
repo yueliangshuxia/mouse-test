@@ -22,6 +22,7 @@ import {
   detectTrailJumps,
   dpiDeviation,
   estimateDpi,
+  flattenDragEpisodes,
   isNearAxis,
   isSnapped,
   longestSegment,
@@ -1868,5 +1869,81 @@ describe('aimBestKey', () => {
 
   it('键形带得动 mode / difficulty / duration', () => {
     expect(aimBestKey('single', 'easy', 10_000)).toBe('mouse-test:aim-best:single:easy:10000');
+  });
+});
+
+/*
+ * 「每次拖拽的记录」那条列表的顺序。
+ *
+ * 这一段是一次**用户报的真 bug**的回归测试:原来页面直接按 `byButton` 的
+ * 分组顺序往外冒条目(左 → 中 → 右),而日志取末尾 10 条 —— 于是它永远只显示
+ * **编号最大那个键**的最后 10 次。左键点了 63 次,记录里一条都看不到,
+ * 而计数全是对的,从数字上完全看不出毛病。
+ */
+describe('拖拽记录的摊平顺序', () => {
+  /** 只造出排序需要的那几档字段,其余按"一次普通的、已结束的按住"填 */
+  const ep = (startMs: number, durationMs = 100) => ({
+    startMs,
+    endMs: startMs + durationMs,
+    durationMs,
+    drops: 0,
+    distancePx: 0,
+    samples: 2,
+    open: false,
+  });
+
+  it('按时间排,不按按键分组', () => {
+    const byButton = new Map([
+      [0, [ep(10), ep(50)]],
+      [2, [ep(20), ep(30)]],
+    ]);
+
+    const flat = flattenDragEpisodes(byButton);
+    expect(flat.map((entry) => entry.episode.startMs)).toEqual([10, 20, 30, 50]);
+  });
+
+  it('每一段都带着自己是哪个键', () => {
+    const byButton = new Map([
+      [0, [ep(10)]],
+      [2, [ep(20)]],
+    ]);
+
+    const flat = flattenDragEpisodes(byButton);
+    expect(flat.map((entry) => entry.code)).toEqual([0, 2]);
+  });
+
+  it('同一时刻按下的两个键按编号兜底,顺序稳定(组合键就是这种情况)', () => {
+    const at = 500;
+    const byButton = new Map([
+      [2, [ep(at)]],
+      [0, [ep(at)]],
+    ]);
+
+    // 两次调用给同一个顺序 —— 否则日志的 # 号会在两次渲染之间跳
+    const once = flattenDragEpisodes(byButton).map((entry) => entry.code);
+    const twice = flattenDragEpisodes(byButton).map((entry) => entry.code);
+    expect(once).toEqual([0, 2]);
+    expect(twice).toEqual(once);
+  });
+
+  it('取末尾 N 条时拿到的是**时间上最近**的,而不是编号最大那个键的', () => {
+    // 复现那个 bug 的形状:左键 3 次(最早)、右键 10 次(最近)
+    const byButton = new Map([
+      [0, [ep(10), ep(20), ep(30)]],
+      [2, [ep(100), ep(110), ep(120), ep(130), ep(140), ep(150), ep(160), ep(170), ep(180), ep(190)]],
+    ]);
+
+    const flat = flattenDragEpisodes(byButton);
+    const lastThree = flat.slice(-3);
+
+    expect(lastThree.map((entry) => entry.episode.startMs)).toEqual([170, 180, 190]);
+    // 键名也必须是"时间上最近的那几个",不是"最右边那个键"
+    expect(new Set(lastThree.map((entry) => entry.code))).toEqual(new Set([2]));
+    // 而如果把窗口拉大,左键那三次必须露出来 —— 这正是原来看不到的东西
+    expect(flat.slice(0, 3).map((entry) => entry.code)).toEqual([0, 0, 0]);
+  });
+
+  it('空表给空数组', () => {
+    expect(flattenDragEpisodes(new Map())).toEqual([]);
   });
 });
