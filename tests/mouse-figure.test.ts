@@ -37,6 +37,32 @@ describe('mouse-figure', () => {
     expect([...dirs].sort()).toEqual(['down', 'up']);
   });
 
+  /*
+   * **两个侧键的上下位置。** 图上 `y` 越大越靠后(主键和滚轮都在上半部,
+   * 那是"前"那一端),而标准布局是 **X1 = 后退 在靠后那颗侧键上、
+   * X2 = 前进 在靠前那颗**。
+   *
+   * 这两个 `y` 曾经正好写反 —— 后果不是报错,是**按下后面那颗侧键、图上前面
+   * 那颗亮起来**(用户报的「我鼠标点击后侧,网站显示的前侧」)。位置是纯几何,
+   * 所以这里直接比大小就够,不需要渲染。
+   */
+  it('后退(编号 3)画在后面,前进(编号 4)画在前面', () => {
+    /** 取某一瓣的 `y`。找不到就是 -1,让断言红得明显 */
+    function yOf(code: number): number {
+      const match = MOUSE_FIGURE_SVG.match(new RegExp(`data-mb="${code}"[^>]*\\by="(\\d+)"`));
+      return match ? Number(match[1]) : -1;
+    }
+
+    const back = yOf(3);
+    const forward = yOf(4);
+
+    expect(back, '编号 3(后退)没有 y').toBeGreaterThan(0);
+    expect(forward, '编号 4(前进)没有 y').toBeGreaterThan(0);
+
+    // 上 = 前,所以后退那颗的 y 必须**更大**
+    expect(back, '后退画到前面去了').toBeGreaterThan(forward);
+  });
+
   it('图上的类名一律走 `mouse-figure` 前缀', () => {
     /*
      * 它原先叫 `.mini-mouse*` —— 那是首页卡片的 `mini-` 前缀,而这张图现在

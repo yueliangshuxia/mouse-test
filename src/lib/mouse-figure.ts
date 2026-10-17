@@ -8,6 +8,23 @@
  *
  * 五个可亮的部分各带一个 `data-mb`,值是**本站编号**
  * (见 `mouse-buttons.ts`:0 左 / 1 中 / 2 右 / 3 侧键4 / 4 侧键5)。
+ *
+ * ## 方向:**上 = 前,下 = 后**,两个侧键的上下位置 2026-10-18 换过
+ *
+ * 主键在 `y 4–44`、滚轮在 `y 20–36` —— 都是**前**那一端,所以 `y` 越大越靠后。
+ *
+ * 两个侧键原来是 `data-mb="3"`(后退)在 `y=38`、`data-mb="4"`(前进)在 `y=56`,
+ * 也就是**后退画在前面、前进画在后面**——**反了**。用户报的正是这个:
+ * 「我鼠标点击后侧,网站显示的前侧」。
+ *
+ * 判据不靠猜:**X1 = 后退、X2 = 前进是浏览器与驱动层的共识**,而绝大多数鼠标
+ * 把 X1 做在**靠后**那颗侧键上(食指按前进、拇指后段按后退)。所以这里画的是
+ * "后退在后、前进在前"。`tests/mouse-figure.test.ts` 钉着「`data-mb=3` 的 y
+ * 必须大于 `data-mb=4` 的 y」—— 这两个数一换回去,那条用例立刻红。
+ *
+ * 一个诚实的边角:侧键在**硬件那一侧**是可以被厂商驱动改的,所以一只把两颗
+ * 侧键对调过的鼠标上,这张图仍然会看起来反。那条不是这张图能解决的,
+ * 页面上也没有替用户猜的必要 —— 它画的是**标准布局**。
  * 编号既是 `event.button`、又是本站位掩码里的位序,所以消费方那边
  * `mask & (1 << code)` 和 `[data-mb="${code}"]` 说的是同一个键,不需要换算。
  * `tests/mouse-figure.test.ts` 钉着这个对应关系 —— 加第六个键却忘了画那一瓣,
@@ -44,8 +61,8 @@ export const MOUSE_FIGURE_SVG = `
   <path class="mouse-figure__part" data-mb="0" d="M32 4 L26 4 A14 14 0 0 0 12 18 L12 44 L32 44 Z" />
   <path class="mouse-figure__part" data-mb="2" d="M32 4 L38 4 A14 14 0 0 1 52 18 L52 44 L32 44 Z" />
   <rect class="mouse-figure__part mouse-figure__wheel" data-mb="1" x="28.5" y="20" width="7" height="16" rx="3.5" />
-  <rect class="mouse-figure__part" data-mb="3" x="4" y="38" width="10" height="13" rx="3" />
-  <rect class="mouse-figure__part" data-mb="4" x="4" y="56" width="10" height="13" rx="3" />
+  <rect class="mouse-figure__part" data-mb="4" x="4" y="38" width="10" height="13" rx="3" />
+  <rect class="mouse-figure__part" data-mb="3" x="4" y="56" width="10" height="13" rx="3" />
   <path class="mouse-figure__wheel-arrow" data-wheel-dir="up" d="M32 8 L28 16 L36 16 Z" />
   <path class="mouse-figure__wheel-arrow" data-wheel-dir="down" d="M32 46 L28 38 L36 38 Z" />
 </svg>`;
